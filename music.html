@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Tab</title>
+</head>
+<body>
+<div class="tab-container">
+    <div class="tabs">
+        <button class="tab-button active" data-tab="youtube"><i class="fab fa-youtube"></i> YouTube</button>
+        <button class="tab-button" data-tab="qobuz"><i class="fas fa-record-vinyl"></i> Qobuz</button>
+        <button class="tab-button" data-tab="tidal"><i class="si si-tidal"></i> Tidal</button>
+        <button class="tab-button" data-tab="deezer"><i class="fab fa-deezer"></i> Deezer</button>
+        <button class="tab-button" data-tab="streamrip"><i class="fas fa-stream"></i> Streamrip</button>
+    </div>
+
+    <div id="youtube" class="tab-content active">
+        <h2>YouTube</h2>
+        <input type="text" id="youtube-url" placeholder="Enter YouTube URL">
+
+        <div class="dropdown" id="youtube-quality">
+            <button class="dropdown-btn">Best</button>
+            <div class="dropdown-content">
+                <a href="#" data-value="bestaudio[ext=m4a]">Best</a>
+                <a href="#" data-value="bestaudio[ext=mp3]">Best MP3</a>
+                <a href="#" data-value="bestaudio[ext=mp3][abr<=96k]">Worst</a>
+            </div>
+        </div>
+        <button id="youtube-download-button">Download</button>
+    </div>
+
+    <div id="qobuz" class="tab-content">
+        <h2>Qobuz</h2>
+        <input type="text" id="qobuz-url" placeholder="Enter Qobuz URL">
+        <div class="dropdown" id="qobuz-quality">
+            <button class="dropdown-btn">320 kbps MP3</button>
+            <div class="dropdown-content">
+                <a href="#" data-value="1">320 kbps MP3</a>
+                <a href="#" data-value="2">16 bit, 44.1 kHz (CD)</a>
+                <a href="#" data-value="3">24 bit, ≤ 96 kHz</a>
+                <a href="#" data-value="4">24 bit, ≤ 192 kHz</a>
+            </div>
+        </div>
+        <button id="qobuz-download-button">Download</button>
+    </div>
+
+    <div id="tidal" class="tab-content">
+        <h2>Tidal</h2>
+        <input type="text" id="tidal-url" placeholder="Enter Tidal URL">
+        <div class="dropdown" id="tidal-quality">
+            <button class="dropdown-btn">128 kbps AAC</button>
+            <div class="dropdown-content">
+                <a href="#" data-value="0">128 kbps AAC</a>
+                <a href="#" data-value="1">320 kbps AAC</a>
+                <a href="#" data-value="2">16 bit, 44.1 kHz (CD)</a>
+                <a href="#" data-value="3">24 bit, ≤ 96 kHz (MQA)</a>
+            </div>
+        </div>
+        <button id="tidal-download-button">Download</button>
+    </div>
+
+    <div id="deezer" class="tab-content">
+        <h2>Deezer</h2>
+        <input type="text" id="deezer-url" placeholder="Enter Deezer URL">
+        <div class="dropdown" id="deezer-quality">
+            <button class="dropdown-btn">128 kbps MP3</button>
+            <div class="dropdown-content">
+                <a href="#" data-value="0">128 kbps MP3</a>
+                <a href="#" data-value="1">320 kbps MP3</a>
+                <a href="#" data-value="2">16 bit, 44.1 kHz (CD)</a>
+            </div>
+        </div>
+        <button id="deezer-download-button">Download</button>
+    </div>
+
+    <div id="streamrip" class="tab-content">
+        <h2>Streamrip</h2>
+        <input type="text" id="streamrip-input" placeholder="Enter streamrip command">
+        <button id="streamrip-btn">Run</button>
+    </div>
+
+    <div id="download-container"></div>
+</div>
+</body>
+</html>

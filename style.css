@@ -1,0 +1,541 @@
+/* Basic reset */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex;
+    min-height: 100vh;
+    background-color: #f0f0f0;
+}
+
+/* Window controls */
+.window-controls {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 10;
+    display: flex;
+    gap: 10px;
+}
+
+.control-btn {
+    background: #3b3f45;
+    border: none;
+    border-radius: 5px;
+    color: white;
+    font-size: 18px;
+    padding: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    width: 35px;
+    height: 35px;
+    box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.control-btn:hover {
+    background-color: #4CAF50;
+    box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.7);
+}
+
+.control-btn:focus {
+    outline: none;
+}
+
+.control-btn i {
+    font-size: 20px;
+    margin: 0;
+}
+
+/* Left panel navbar (metro style) */
+.navbar {
+    width: 250px;
+    background-color: #282c34;
+    color: white;
+    padding: 20px;
+    position: fixed;
+    height: 100vh;
+    top: 0;
+    left: -250px;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease-in-out;
+    box-shadow: 4px 0 12px rgba(0, 0, 0, 0.2);
+}
+
+.navbar.show {
+    left: 0;
+}
+
+.navbar h1 {
+    color: #fff;
+    margin-bottom: 30px;
+    font-size: 22px;
+    font-weight: 600;
+}
+
+.main-nav {
+    flex-grow: 1;
+}
+
+.navbar a {
+    display: flex;
+    align-items: center;
+    color: #dcdcdc;
+    text-decoration: none;
+    padding: 15px 25px;
+    margin: 10px 0;
+    border-radius: 5px;
+    transition: background-color 0.3s ease, padding-left 0.3s ease, transform 0.3s ease;
+    font-size: 16px;
+}
+
+.navbar a i {
+    margin-right: 10px;
+    font-size: 18px;
+}
+
+.navbar a:hover {
+    background-color: #3b3f45;
+    padding-left: 40px;
+    transform: scale(1.05) translateX(10px);
+}
+
+.navbar a.active {
+    background-color: #4CAF50;
+    color: white;
+    padding-left: 40px;
+    transform: scale(1.1);
+}
+
+.secondary-nav {
+    margin-top: auto;
+}
+
+.secondary-nav a {
+    margin-top: 10px;
+}
+
+/* Main content area */
+.main-content {
+    margin-left: 250px;
+    padding: 20px;
+    width: 100%;
+    min-height: 100vh;
+    transition: margin-left 0.3s ease;
+    background-color: white;
+    border-left: 1px solid #ddd;
+}
+
+/* Form elements */
+input[type="text"] {
+    width: 80%;
+    padding: 10px;
+    margin-right: 10px;
+    border-radius: 5px;
+    border: 1px solid #ddd;
+}
+.help-container {
+    max-width: 800px;
+    margin: 0 auto;
+    background: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+
+button {
+    padding: 10px 20px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+button:hover {
+    background-color: #45a049;
+}
+
+/* Download container */
+#download-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px;
+}
+
+.download-entry {
+    display: flex;
+    align-items: flex-start;
+    background-color: #fff;
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    animation: fadeIn 1s ease-in-out;
+}
+
+.download-entry .thumbnail {
+    width: 120px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 4px;
+    margin-right: 15px;
+}
+
+.download-entry .download-info {
+    flex-grow: 1;
+}
+
+.download-entry h3 {
+    margin: 0 0 10px 0;
+    font-size: 18px;
+}
+
+.download-entry .uploader {
+    margin: 0 0 5px 0;
+    color: #666;
+    font-size: 12px;
+    font-style: italic;
+}
+
+.download-entry .progress-bar {
+    height: 10px;
+    background-color: #ddd;
+    border-radius: 5px;
+    overflow: hidden;
+    margin: 10px 0;
+}
+
+.download-entry .progress {
+    height: 100%;
+    background-color: #4CAF50;
+    transition: width 0.5s ease-in-out;
+}
+
+.progress-text {
+    margin-top: 5px;
+    font-size: 12px;
+    color: #666;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Animated Dropdown Menu */
+.dropdown {
+    position: relative;
+    width: auto;
+}
+
+.dropdown-btn {
+    color: #34343e;
+    width: auto;
+    min-width: 150px;
+    padding: 10px 15px;
+    background-color: #ffffff;
+    border: 1px solid #ddd;
+    border-radius: 25px;
+    cursor: pointer;
+    text-align: left;
+    font-size: 16px;
+    transition: border-color 0.3s ease;
+    white-space: nowrap;
+}
+
+.dropdown-btn:hover {
+    border-color: #4CAF50;
+}
+
+.dropdown-content {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: auto;
+    background-color: #ffffff;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    display: none;
+    max-height: 200px;
+    overflow-y: auto;
+    min-width: 150px;
+}
+
+.dropdown.active .dropdown-content {
+    display: block;
+    animation: slideDown 0.3s ease-out;
+}
+
+.dropdown-content a {
+    padding: 10px 15px;
+    text-decoration: none;
+    display: block;
+    color: #333;
+    transition: background-color 0.3s ease;
+}
+
+.dropdown-content a:hover {
+    background-color: #f1f1f1;
+}
+
+.dropdown.active .dropdown-content {
+    display: block;
+    animation: slideDown 0.3s ease-out;
+}
+/* Custom scrollbar for dropdown */
+.dropdown-content::-webkit-scrollbar {
+    width: 12px;
+}
+
+.dropdown-content::-webkit-scrollbar-track {
+    background: #2f2f2f;
+}
+
+.dropdown-content::-webkit-scrollbar-thumb {
+    background-color: #4CAF50;
+    border-radius: 10px;
+    border: 3px solid #2f2f2f;
+}
+
+@keyframes slideDown {
+    0% { opacity: 0; transform: translateY(-10px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Tab container */
+.tabs {
+    display: flex;
+    justify-content: center;
+    background-color: transparent;
+    border-radius: 20px;
+    padding: 5px;
+    margin-bottom: 20px;
+}
+
+/* Tab buttons */
+.tab-button {
+    background-color: transparent;
+    color: #e0e0e0;
+    border: none;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: color 0.3s ease;
+    border-radius: 20px;
+    font-weight: normal;
+    margin: 0 10px;
+}
+
+.tab-button:hover,
+.tab-button.active {
+    color: #4CAF50;
+}
+
+
+/* Tab content */
+.tab-content {
+    display: none;
+    padding: 15px;
+    border-radius: 10px;
+    background-color: white;
+    box-shadow: none;
+}
+
+.tab-content.active {
+    display: flex;
+    padding: 10px 20px;
+    gap: 10px;
+}
+
+@media screen and (max-width: 768px) {
+    .navbar {
+        width: 100px;
+    }
+
+    .main-content {
+        margin-left: 100px;
+    }
+}
+
+.download-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+button {
+    padding: 12px 25px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: normal;
+    transition: background-color 0.3s ease;
+}
+
+button:hover {
+    background-color: #45a049;
+}
+
+/* Input fields */
+input[type="text"] {
+    flex-grow: 1;
+    padding: 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 25px;
+    font-size: 16px;
+    transition: border-color 0.3s ease;
+}
+
+input[type="text"]:focus {
+    border-color: #4CAF50;
+}
+
+
+/* Dark Theme Styles */
+body.dark {
+    background-color: #121212;
+    color: #e0e0e0;
+}
+
+.dark .navbar {
+    background-color: #1e1e1e;
+}
+
+.dark .main-content {
+    background-color: #1e1e1e;
+    border-left: 1px solid #333;
+}
+
+.dark .control-btn {
+    background: #3b3f45;
+    color: #e0e0e0;
+    transition: all 0.3s ease;
+}
+
+.dark .control-btn:hover {
+    background-color: #4CAF50;
+    box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.7);
+}
+
+.dark .navbar a {
+    color: #e0e0e0;
+    transition: background-color 0.3s ease, padding-left 0.3s ease, transform 0.3s ease;
+}
+
+.dark .navbar a:hover {
+    background-color: #3b3f45;
+    padding-left: 40px;
+    transform: scale(1.05) translateX(10px);
+}
+.dark .navbar a.active {
+    background-color: #3b3f45;
+}
+
+.dark button {
+    background-color: #3b3f45;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    transition: background-color 0.3s ease;
+}
+
+.dark button:hover {
+    background-color: #45a049;
+}
+
+.dark .download-entry {
+    background-color: #222;
+    border: 1px solid #333;
+}
+
+.dark input[type="text"] {
+    border: 1px solid #555;
+    background-color: #222;
+    color: #e0e0e0;
+    transition: border-color 0.3s ease;
+}
+
+.dark input[type="text"]:focus {
+    border-color: #4CAF50;
+}
+
+.dark .dropdown-content {
+    background-color: #222;
+}
+
+.dark .dropdown-content a {
+    color: #e0e0e0;
+    transition: background-color 0.3s ease;
+}
+
+.dark .dropdown-content a:hover {
+    background-color: #909090;
+}
+
+.dark .tab-button:hover,
+.dark .tab-button.active {
+    background-color: #282c34;
+}
+
+.dark .tab-button {
+    color: #e0e0e0;
+    transition: color 0.3s ease;
+}
+
+.dark .tab-button:hover,
+.dark .tab-button.active {
+    color: #ffffff;
+}
+.dark .tab-content {
+    background-color: #333;
+}
+
+.dark .progress-bar {
+    background-color: #444;
+}
+
+.dark .progress {
+    background-color: #4CAF50;
+}
+
+.dark .dropdown-content a {
+    opacity: 0;
+    transform: translateY(-10px);
+    animation-fill-mode: forwards;
+}
+
+.dark .dropdown.active .dropdown-content a {
+    animation: slideDown 0.5s ease-out forwards;
+    animation-delay: calc(var(--order) * 0.2s); /* Slowing down animation */
+}
+
+.dark .dropdown-content.show a {
+    display: block;
+}
+
+body.dark .dropdown-content::-webkit-scrollbar-track {
+    background: #1e1e1e; /* Darker background for dark theme */
+}
+
+body.dark .dropdown-content::-webkit-scrollbar-thumb {
+    background-color: #3b3f45;
+    border: 3px solid #1e1e1e;
+}
+
+.dark .help-container {
+    max-width: 800px;
+    margin: 0 auto;
+    background: #333333;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
