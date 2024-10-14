@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
     send: (channel, data) => {
-        const validChannels = ['start-yt-music-download', 'minimize-window', 'maximize-window', 'close-window', 'start-streamrip', 'start-download', "start-qobuz-download", 'start-deezer-download'];
+        const validChannels = ['start-yt-music-download', 'minimize-window', 'maximize-window', 'close-window', 'start-streamrip', 'start-download', "start-qobuz-download", 'start-deezer-download', 'start-tidal-download'];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);
         }

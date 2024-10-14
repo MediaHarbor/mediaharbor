@@ -318,7 +318,113 @@ function createWindow() {
             }
         });
     });
+    ipcMain.on('start-tidal-download', (event, data) => {
+        const { url, quality } = data;
+        const ripCommand = 'custom_rip';
+        const ripArgs = ['-q', quality, 'url', url];
+
+        downloadCount++;
+        event.reply('download-info', {
+            title: 'Tidal Download',
+            order: downloadCount
+        });
+
+        const tidalIdMatch = url.match(/\/track\/(\d+)/);
+        if (tidalIdMatch) {
+            const trackId = tidalIdMatch[1];
+            getTidalDetails(trackId, event, downloadCount);
+        }
+
+        const ripProcess = spawn(ripCommand, ripArgs);
+        let currentTrackId = null;
+
+        ripProcess.stdout.on('data', (data) => {
+            const output = data.toString();
+            console.log(output);
+
+            const trackIdMatch = output.match(/track-id=(\d+)/);
+            if (trackIdMatch && trackIdMatch[1] !== currentTrackId) {
+                currentTrackId = trackIdMatch[1];
+                getTidalDetails(currentTrackId, event, downloadCount);
+            }
+
+            const progressMatch = output.match(/(\d+\.\d+)%/);
+            if (progressMatch) {
+                const progress = parseFloat(progressMatch[1]);
+                event.reply('download-update', {
+                    progress,
+                    order: downloadCount
+                });
+            }
+
+            if (output.includes('Skipping track') && output.includes('Marked as downloaded')) {
+                const skippedTrackIdMatch = output.match(/Skipping track (\d+)/);
+                if (skippedTrackIdMatch) {
+                    const skippedTrackId = skippedTrackIdMatch[1];
+                    getTidalDetails(skippedTrackId, event, downloadCount);
+                    event.reply('download-update', {
+                        progress: 100,
+                        order: downloadCount
+                    });
+                }
+            }
+        });
+
+        ripProcess.stderr.on('data', (errorData) => {
+            const errorOutput = errorData.toString();
+            console.error(`Error: ${errorOutput}`);
+            event.reply('download-error', `Error: ${errorOutput}`);
+        });
+
+        ripProcess.on('exit', (code) => {
+            if (code !== 0) {
+                event.reply('download-error', `Process exited with code ${code}`);
+            } else {
+                event.reply('download-complete', {
+                    order: downloadCount
+                });
+            }
+        });
+    });
+
+
 }
+
+function getTidalDetails(trackId, event, downloadCount) {
+    const pythonProcess = spawn('py', ['tidalapi.py', '--get-track', trackId, '--country-code', 'US']);
+    let output = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+        output += data.toString();
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+        console.error(`Error: ${data}`);
+    });
+
+    pythonProcess.on('close', (code) => {
+        if (code === 0) {
+            try {
+                const details = JSON.parse(output);
+                const trackDetails = {
+                    title: details.data.attributes.title,
+                    artist: details.included[0].attributes.name,
+                    quality: details.data.attributes.mediaTags[0],
+                    thumbnail: details.included[1].attributes.imageLinks[0].href
+                };
+                event.reply('tidal-details', {
+                    order: downloadCount,
+                    ...trackDetails
+                });
+            } catch (error) {
+                console.error('Error parsing Tidal details:', error);
+            }
+        } else {
+            console.error(`Python script exited with code ${code}`);
+        }
+    });
+}
+
 
 function getDeezerDetails(trackId, event, downloadCount) {
     const pythonProcess = spawn('py', ['deezerapi.py', '--get-details', trackId]);

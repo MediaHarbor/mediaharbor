@@ -186,11 +186,17 @@ function handleQobuzDownload() {
 }
 
 
+
+
 function handleTidalDownload() {
     const url = document.getElementById('tidal-url').value;
     const qualityDropdown = document.getElementById('tidal-quality');
-    const quality = qualityDropdown.querySelector('.dropdown-btn').textContent;
-    window.electronAPI.send('start-download', { service: 'tidal', url, quality });
+    let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value; // Fetch quality value
+
+    if (quality === undefined) {
+        quality = "1";
+    }
+    window.electronAPI.send('start-tidal-download', { url, quality });
 }
 
 function handleDeezerDownload() {
@@ -305,6 +311,16 @@ window.electronAPI.receive('deezer-details', (data) => {
         title: data.title_short,
         artist: data.artist.name,
         album: data.album.title
+    });
+});
+
+window.electronAPI.receive('tidal-details', (data) => {
+    updateDownload({
+        order: data.order,
+        thumbnail: data.thumbnail,
+        title: data.title,
+        artist: data.artist,
+        quality: data.quality
     });
 });
 

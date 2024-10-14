@@ -5,3 +5,4 @@ node_modules
 /workspace.xml
 # Editor-based HTTP Client requests
 /httpRequests/
+apis.json
