@@ -100,8 +100,118 @@ function initializeVideoTab() {
             document.getElementById(button.dataset.tab).classList.add('active');
         });
     });
+
+    // Initialize dropdowns
+    initializeDropdowns();
+
+    // Add event listeners for download buttons
+    document.getElementById('youtube-download-button').addEventListener('click', handleYoutubeVideoDownload);
+    document.getElementById('generic-download-button').addEventListener('click', handleGenericDownload);
+
+    // Initialize the site search dropdown
+    initializeSiteSearch();
+
+    // Initialize download container
+    renderDownloads();
 }
 
+function handleYoutubeVideoDownload() {
+    const url = document.getElementById('youtube-url').value;
+    const qualityDropdown = document.getElementById('youtube-quality');
+    const quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || 'bestvideo+bestaudio/best';
+    window.electronAPI.send('start-yt-video-download', { url, quality });
+}
+
+function handleGenericDownload() {
+    const url = document.getElementById('generic-url').value;
+    const qualityDropdown = document.getElementById('generic-quality');
+    const quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || 'bestvideo+bestaudio/best';
+    window.electronAPI.send('start-generic-video-download', { url, quality });
+}
+
+function initializeSiteSearch() {
+    const siteDropdown = document.getElementById('generic-site');
+    const dropdownContent = siteDropdown.querySelector('.dropdown-content');
+    const siteList = document.getElementById('site-list');
+    const searchInput = document.getElementById('site-search');
+    const dropdownBtn = siteDropdown.querySelector('.dropdown-btn');
+
+    let allSites = [];
+
+    fetch('https://raw.githubusercontent.com/yt-dlp/yt-dlp/master/supportedsites.md')
+        .then(response => response.text())
+        .then(data => {
+            allSites = data.split('\n')
+                .filter(line => line.startsWith(' - **'))
+                .map(line => {
+                    const match = line.match(/\*\*(.*?)\*\*/);
+                    return match ? match[1] : null;
+                })
+                .filter(site => site !== null);
+
+            populateSiteList(allSites);
+        });
+
+    dropdownBtn.addEventListener('click', () => {
+        dropdownContent.classList.toggle('show');
+        if (dropdownContent.classList.contains('show')) {
+            searchInput.focus();
+        }
+    });
+
+    searchInput.addEventListener('input', () => {
+        const searchTerm = searchInput.value.toLowerCase();
+        const filteredSites = allSites.filter(site => site.toLowerCase().includes(searchTerm));
+        populateSiteList(filteredSites);
+    });
+
+    function populateSiteList(sites) {
+        siteList.innerHTML = '';
+        sites.forEach(site => {
+            const a = document.createElement('a');
+            a.href = '#';
+            a.textContent = site;
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                dropdownBtn.textContent = site;
+                dropdownContent.classList.remove('show');
+            });
+            siteList.appendChild(a);
+        });
+    }
+
+    // Close the dropdown when clicking outside
+    window.addEventListener('click', (e) => {
+        if (!siteDropdown.contains(e.target)) {
+            dropdownContent.classList.remove('show');
+        }
+    });
+}
+
+
+window.electronAPI.receive('youtube-video-info', (data) => {
+    updateDownload({
+        title: data.title,
+        uploader: data.uploader,
+        thumbnail: data.thumbnail,
+        order: data.order,
+        progress: 0
+    });
+});
+
+window.electronAPI.receive('generic-video-info', (data) => {
+    updateDownload({
+        title: 'Generic Download',
+        uploader: data.url,
+        thumbnail: '/placeholder.png',
+        order: data.order,
+        progress: 0
+    });
+});
+
+
+// Initialize the video tab when the DOM is loaded
+document.addEventListener('DOMContentLoaded', initializeVideoTab);
 function initializeMusicTab() {
     document.querySelectorAll('.dropdown-btn').forEach(button => {
         button.addEventListener('click', () => {
@@ -202,7 +312,11 @@ function handleTidalDownload() {
 function handleDeezerDownload() {
     const url = document.getElementById('deezer-url').value;
     const qualityDropdown = document.getElementById('deezer-quality');
-    const quality = qualityDropdown.querySelector('.dropdown-btn').textContent;
+    let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value; // Fetch quality value
+
+    if (quality === undefined) {
+        quality = "1";
+    }
     window.electronAPI.send('start-deezer-download', { url, quality });
 }
 

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "main.js",
   "scripts": {
+    "build-css": "unocss index.html -o dist/output.css",
     "start": "electron .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -11,9 +12,10 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@unocss/preset-icons": "^0.63.4",
     "electron": "^32.1.2"
   },
   "dependencies": {
-    "python-shell": "^5.0.0"
+    "electron-store": "^10.0.0"
   }
 }

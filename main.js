@@ -231,6 +231,139 @@ function createWindow() {
             }
         });
     });
+    ipcMain.on('start-yt-video-download', (event, data) => {
+        const { url, quality } = data;
+        const ytDlpCommand = 'yt-dlp';
+        const videoInfoArgs = [
+            '--print', '%(title)s',
+            '--print', '%(uploader)s',
+            '--print', '%(thumbnail)s',
+            url
+        ];
+
+        const videoInfoProcess = spawn(ytDlpCommand, videoInfoArgs);
+        let videoInfo = { title: '', uploader: '', thumbnail: '' };
+        let outputLines = [];
+
+        videoInfoProcess.stdout.on('data', (data) => {
+            const output = data.toString().split('\n').filter(line => line.trim());
+            outputLines = outputLines.concat(output);
+
+            if (outputLines.length >= 3) {
+                videoInfo.title = outputLines[0].trim();
+                videoInfo.uploader = outputLines[1].trim();
+                videoInfo.thumbnail = outputLines[2].trim();
+
+                if (!videoInfo.thumbnail.startsWith('http')) {
+                    videoInfo.thumbnail = 'https:' + videoInfo.thumbnail;
+                }
+
+                downloadCount++;
+                event.reply('youtube-video-info', {
+                    title: videoInfo.title,
+                    uploader: videoInfo.uploader,
+                    thumbnail: videoInfo.thumbnail,
+                    order: downloadCount
+                });
+
+                outputLines = [];
+            }
+        });
+
+        videoInfoProcess.on('exit', () => {
+            const ytDlpArgs = [
+                '-f', quality,
+                '--output', path.join(downloadPath, '%(title)s.%(ext)s'),
+                '--no-playlist',
+                url
+            ];
+
+            const ytDlp = spawn(ytDlpCommand, ytDlpArgs);
+            ytDlp.stdout.on('data', (data) => {
+                const output = data.toString();
+                console.log(output);
+                const progressMatch = output.match(/(\d+\.\d+)%/);
+                if (progressMatch) {
+                    const progress = parseFloat(progressMatch[1]);
+
+                    event.reply('download-update', {
+                        progress,
+                        title: videoInfo.title,
+                        uploader: videoInfo.uploader,
+                        thumbnail: videoInfo.thumbnail,
+                        order: downloadCount
+                    });
+                }
+            });
+
+            ytDlp.stderr.on('data', (errorData) => {
+                const errorOutput = errorData.toString();
+                console.error(`Error: ${errorOutput}`);
+                event.reply('download-debug', `Error: ${errorOutput}`);
+            });
+
+            ytDlp.on('exit', (code) => {
+                if (code !== 0) {
+                    event.reply('download-debug', `yt-dlp process exited with code ${code}`);
+                } else {
+                    event.reply('download-complete', {
+                        order: downloadCount
+                    });
+                }
+            });
+        });
+    });
+
+    ipcMain.on('start-generic-video-download', (event, data) => {
+        const { url, quality } = data;
+        const ytDlpCommand = 'yt-dlp';
+        const ytDlpArgs = [
+            '-f', quality,
+            '--output', path.join(downloadPath, '%(title)s.%(ext)s'),
+            '--no-playlist',
+            url
+        ];
+
+        downloadCount++;
+        event.reply('generic-video-info', {
+            url: url,
+            order: downloadCount
+        });
+
+        const ytDlp = spawn(ytDlpCommand, ytDlpArgs);
+        ytDlp.stdout.on('data', (data) => {
+            const output = data.toString();
+            console.log(output);
+            const progressMatch = output.match(/(\d+\.\d+)%/);
+            if (progressMatch) {
+                const progress = parseFloat(progressMatch[1]);
+
+                event.reply('download-update', {
+                    progress,
+                    title: 'Generic Download',
+                    uploader: url,
+                    thumbnail: '/placeholder.png',
+                    order: downloadCount
+                });
+            }
+        });
+
+        ytDlp.stderr.on('data', (errorData) => {
+            const errorOutput = errorData.toString();
+            console.error(`Error: ${errorOutput}`);
+            event.reply('download-error', `Error: ${errorOutput}`);
+        });
+
+        ytDlp.on('exit', (code) => {
+            if (code !== 0) {
+                event.reply('download-debug', `yt-dlp process exited with code ${code}`);
+            } else {
+                event.reply('download-complete', {
+                    order: downloadCount
+                });
+            }
+        });
+    });
 
     ipcMain.on('start-qobuz-download', (event, data) => {
         const { url, quality } = data;
@@ -493,6 +626,8 @@ function getQobuzDetails(eid, event, downloadCount) {
         }
     });
 }
+
+
 
 app.whenReady().then(createWindow);
 
