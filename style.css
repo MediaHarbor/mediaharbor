@@ -4,31 +4,7 @@
     padding: 0;
     box-sizing: border-box;
 }
-.soq {
-    display: inline-block;
-    width: 30px; /* Set the desired width */
-    height: 30px; /* Set the desired height */
-    overflow: hidden; /* Hide overflow */
-    padding: 5px; /* Padding around the image */
-    text-align: center; /* Center the image */
-}
-.soq img {
-    width: 100%; /* Make image fill the container */
-    height: auto; /* Maintain aspect ratio */
-}
-.simple-icons--tubi {
-    display: inline-block;
-    width: 1em;
-    height: 1em;
-    --svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M16.696 15.272v-.752c.4.548 1.107.917 1.934.917c1.475 0 2.28-.956 2.28-2.865c0-1.714-.893-2.858-2.235-2.858c-.851 0-1.55.347-1.979.908v-2.06h-2.674v6.71zm1.57-2.614c0 .827-.337 1.275-.827 1.275c-.486 0-.837-.452-.837-1.275s.342-1.28.837-1.28s.828.452.828 1.28zM6.94 9.988v3.6c0 1.236.754 1.841 1.955 1.841c.959 0 1.625-.396 2.028-1.064v.91h2.597V9.989h-2.675v3.14c0 .493-.346.693-.666.693s-.568-.192-.568-.655V9.989Zm14.39 0H24v5.276h-2.67ZM6.553 11.136c0 .781-.635 1.415-1.42 1.415a1.42 1.42 0 0 1-1.419-1.415c0-.782.636-1.415 1.42-1.415s1.42.633 1.42 1.415zM3.49 9.702v2.668c.005.653.327.924.976.924c.225 0 .526-.053.672-.166v1.931c-.49.243-.869.378-1.535.378c0 0-.069 0-.18-.006l-.003.006c-1.614 0-2.51-1.035-2.482-2.686v-.47H0V9.99h.92V8.563h2.569Z'/%3E%3C/svg%3E");
-    background-color: currentColor;
-    -webkit-mask-image: var(--svg);
-    mask-image: var(--svg);
-    -webkit-mask-repeat: no-repeat;
-    mask-repeat: no-repeat;
-    -webkit-mask-size: 100% 100%;
-    mask-size: 100% 100%;
-}
+
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     display: flex;
@@ -372,6 +348,7 @@ button:hover {
 }
 
 .tab-content.active {
+
     align-items: center;
     display: flex;
     padding: 10px 20px;
@@ -571,4 +548,249 @@ body.dark .dropdown-content::-webkit-scrollbar-thumb {
     padding: 20px;
     border-radius: 10px;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+.dark .settings-section {
+    margin-bottom: 1rem;
+    border: 1px solid #444;
+    border-radius: 4px;
+}
+
+.dark .settings-header {
+    padding: 1rem;
+    background-color: #333;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    user-select: none;
+}
+
+.dark .settings-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.dark .settings-content {
+    padding: 1rem;
+    background: #222;
+    color: #fff;
+    display: none;
+}
+
+.dark .settings-content.expanded {
+    display: block;
+    animation: slideDown 0.3s ease-out;
+}
+
+.dark .settings-header.expanded {
+    border-bottom: 1px solid #444;
+}
+
+.dark .settings-content .dropdown-content {
+    position: absolute;
+    background-color: #333;
+    min-width: 160px;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+    z-index: 1000;
+    display: none;
+}
+
+.dark .settings-content .dropdown-content.show {
+    display: block;
+}
+
+
+/* Add this to your CSS */
+.settings-section {
+    margin-bottom: 1rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.settings-header {
+    padding: 1rem;
+    background-color: #f5f5f5;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    user-select: none;
+}
+
+.settings-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.settings-content {
+    padding: 1rem;
+    background: white;
+    display: none;
+}
+
+.settings-content.expanded {
+    display: block;
+    animation: slideDown 0.3s ease-out;
+}
+
+.settings-header.expanded {
+    border-bottom: 1px solid #ddd;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.settings-container{
+    display: flow;
+    width: -webkit-fill-available;
+}
+
+.settings-content .dropdown-content {
+    position: absolute;
+    background-color: white;
+    min-width: 160px;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+    z-index: 1000;
+    display: none;
+}
+
+.settings-content .dropdown-content.show {
+    display: block;
+}
+
+Updated Settings Styles
+
+    /* Settings Grid Layout */
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    padding: 1rem;
+}
+
+.service-group {
+    background: rgba(0, 0, 0, 0.02);
+    padding: 1.5rem;
+    border-radius: 8px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.service-group h3 {
+    font-size: 1.1rem;
+    margin-bottom: 1rem;
+    color: #4CAF50;
+    border-bottom: 2px solid #4CAF50;
+    padding-bottom: 0.5rem;
+}
+
+/* Input Styles */
+input[type="text"],
+input[type="password"],
+input[type="number"],
+select.dropdown-btn {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background: white;
+    transition: all 0.3s ease;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+select.dropdown-btn:focus {
+    border-color: #4CAF50;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+    outline: none;
+}
+
+/* Checkbox Styles */
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    appearance: none;
+    width: 1.2rem;
+    height: 1.2rem;
+    border: 2px solid #e0e0e0;
+    border-radius: 4px;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.checkbox-label input[type="checkbox"]:checked {
+    background-color: #4CAF50;
+    border-color: #4CAF50;
+}
+
+.checkbox-label input[type="checkbox"]:checked::after {
+    content: "✓";
+    position: absolute;
+    color: white;
+    font-size: 0.8rem;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* Dark Theme */
+.dark .service-group {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark input[type="text"],
+.dark input[type="password"],
+.dark input[type="number"],
+.dark select.dropdown-btn {
+    background: #2a2a2a;
+    border-color: #404040;
+    color: #e0e0e0;
+}
+
+.dark input[type="text"]:focus,
+.dark input[type="password"]:focus,
+.dark input[type="number"]:focus,
+.dark select.dropdown-btn:focus {
+    border-color: #4CAF50;
+}
+
+.dark .checkbox-label input[type="checkbox"] {
+    border-color: #404040;
+}
+
+.dark .service-group h3 {
+    color: #4CAF50;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.settings-content {
+    animation: fadeIn 0.3s ease-out;
+}
+.dependent-field {
+    display: none;
+}
+
+.dependent-field.active {
+    display: block;
 }

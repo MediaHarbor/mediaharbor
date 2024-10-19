@@ -4,29 +4,530 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings Tab</title>
+
 </head>
 <body>
 <div class="tab-container">
     <div class="tabs">
         <button class="tab-button active" data-tab="app-settings"><i class="si si-angular"></i> App Settings</button>
-        <button class="tab-button active" data-tab="yt-dlp-settings"><i class="si si-youtube"></i> YT-DLP Settings</button>
+        <button class="tab-button" data-tab="yt-dlp-settings"><i class="si si-youtube"></i> YT-DLP Settings</button>
         <button class="tab-button" data-tab="streamrip-settings"><i class="si si-files"></i> Streamrip Settings</button>
         <button class="tab-button" data-tab="search-settings"><i class="si si-aib"></i> Search Settings</button>
     </div>
 
     <div id="app-settings" class="tab-content active">
-        <h2>App Settings</h2>
-    </div>
-    <div id="yt-dlp-settings" class="tab-content">
-        <h2>YT-DLP Settings</h2>
-    </div>
-    <div id="streamrip-settings" class="tab-content">
-        <h2>Streamrip Settings</h2>
-    </div>
-    <div id="search-settings" class="tab-content">
-        <h2>Search Settings</h2>
+        <div class="settings-container">
+        <div class="settings-section">
+            <div class="settings-header" onclick="toggleSection('app-general')">
+                <i class="fas fa-cog"></i>
+                <h2>General Settings</h2>
+            </div>
+            <div id="app-general" class="settings-content">
+                <div class="settings-grid">
+                    <div>
+                        <label for="theme">App Theme:</label>
+                        <select id="theme" class="dropdown-btn">
+                            <option value="auto">Auto</option>
+                            <option value="dark">Dark</option>
+                            <option value="light">Light</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="downloadsDatabasePath">Downloads Database Path:</label>
+                        <input type="text" id="downloadsDatabasePath">
+                    </div>
+                    <div>
+                        <label for="downloadLocation">Download Location:</label>
+                        <input type="text" id="downloadLocation">
+                    </div>
+                    <div>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="createPlatformSubfolders">
+                            Create Platform Subfolders
+                        </label>
+                    </div>
+                    <div>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="orpheusDL" disabled>
+                            OrpheusDL
+                        </label>
+                    </div>
+                    <div>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="streamrip">
+                            Streamrip
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
+    <div id="yt-dlp-settings" class="tab-content">
+        <div class="settings-container">
+            <div class="settings-section">
+                <div class="settings-header" onclick="toggleSection('download-options')">
+                    <i class="fas fa-download"></i>
+                    <h2>Download Options</h2>
+                </div>
+                <div id="download-options" class="settings-content">
+                    <div class="settings-grid">
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="use_cookies">
+                                Use Cookies
+                            </label>
+                        </div>
+                        <div class="dependent-field" id="cookies_form">
+                            <label for="cookies">Cookies:</label>
+                            <input type="text" id="cookies" placeholder="PATH selection">
+                        </div>
+                        <div class="dependent-field" id="browser_cookies_form">
+                            <label for="cookies_from_browser">Cookies from Browser:</label>
+                            <input type="text" id="cookies_from_browser" placeholder="BROWSER[+KEYRING][:PROFILE][::CONTAINER]">
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="override_download_extension">
+                                Override Download Extension
+                            </label>
+                        </div>
+                        <div id="override_download_extension_form" class="dependent-field">
+                            <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="yt_override_download_extension">
+                                YouTube
+                            </label>
+                            </div>
+                            <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="ytm_override_download_extension">
+                                YouTubeMusic
+                            </label>
+                            </div>
+                        <div>
+                            <div class="dependent-field" id="youtubeExtensions">
+                                <div>
+                                    <label for="youtubeVideoExtensions">Video Extension</label>
+                                    <select id="youtubeVideoExtensions" class="dropdown-btn">
+                                        <option value="mp4">MP4</option>
+                                        <option value="mkv">MKV</option>
+                                        <option value="avi">AVI</option>
+                                        <option value="mov">mov</option>
+                                        <option value="webm">WEBM</option>
+                                        <option value="flv">FLV</option>
+                                    </select>
+                                    <div>
+                                        <h3 style="color: #d9534f; font-weight: bold;">
+                                            Warning (Windows): For formats other than MP4 and MKV, please use the following FFmpeg builds:
+                                            <a href="https://github.com/yt-dlp/FFmpeg-Builds#ffmpeg-static-auto-builds" target="_blank" style="color: #337ab7;">
+                                                FFmpeg Static Auto Builds
+                                            </a>
+                                        </h3>
+                                    </div>
+                                </div>
+
+                            </div>
+                            <div class="dependent-field" id="youtubeMusicExtensions">
+                                <div>
+                                    <label for="youtubeMusicAudioExtensions">YouTube Music Audio Extension</label>
+                                    <select id="youtubeMusicAudioExtensions" class="dropdown-btn">
+                                        <option value="best">BEST</option>
+                                        <option value="aac">AAC</option>
+                                        <option value="alac">ALAC</option>
+                                        <option value="flac">FLAC</option>
+                                        <option value="m4a">M4A</option>
+                                        <option value="mp3">MP3</option>
+                                        <option value="opus">OPUS</option>
+                                        <option value="vorbis">VORBIS</option>
+                                        <option value="wav">WAV</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="use_aria2">
+                                Use Aria2
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="auto_update">
+                                Auto Update
+                            </label>
+                        </div>
+                        <div>
+                            <label for="max_downloads">Max Downloads:</label>
+                            <input type="number" id="max_downloads" value="0">
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="download_speed_limit">
+                                Download Speed Limit
+                            </label>
+                        </div>
+                        <div class="dependent-field">
+                            <label for="speed_limit_value">Speed Limit Value:</label>
+                            <input type="number" id="speed_limit_value">
+                                <div>
+                                    <select id="speed_limit_type" class="dropdown-btn">
+                                        <option value="K">KB/s</option>
+                                        <option value="M">MB/s</option>
+                                    </select>
+                                </div>
+                        </div>
+                        <div>
+                            <label for="max_retries">Max Retries:</label>
+                            <input type="number" id="max_retries" value="5">
+                        </div>
+                        <div>
+                            <label for="download_output_template">Download Output Template:</label>
+                            <div style="display: flex">
+                            <input type="text" id="download_output_template" value="title+ext">
+                            <button id="output_template_help" title="Select file location" onclick="openPopup()">
+                                <span class="fa fa-question-circle"></span>
+                            </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="continue" checked>
+                                Continue Download
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-header" onclick="toggleSection('metadata-options')">
+                    <i class="fas fa-tags"></i>
+                    <h2>Metadata Options</h2>
+                </div>
+                <div id="metadata-options" class="settings-content">
+                    <div class="settings-grid">
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="add_metadata">
+                                Add Metadata
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="embed_chapters">
+                                Embed Chapters
+                            </label>
+                        </div>
+
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="add_subtitle_to_file">
+                                Add Subtitle to File
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-header" onclick="toggleSection('network-options')">
+                    <i class="fas fa-network-wired"></i>
+                    <h2>Network Options</h2>
+                </div>
+                <div id="network-options" class="settings-content">
+                    <div class="settings-grid">
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="use_proxy">
+                                Use Proxy
+                            </label>
+                        </div>
+                        <div id='proxy_url_form' class="dependent-field">
+                            <label for="proxy_url">Proxy URL:</label>
+                            <input type="text" id="proxy_url"  data-setting="ytdlp.proxy_url">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-header" onclick="toggleSection('authentication-options')">
+                    <i class="fas fa-lock"></i>
+                    <h2>Authentication Options</h2>
+                </div>
+                <div id="authentication-options" class="settings-content">
+                    <div class="settings-grid">
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="use_authentication">
+                                Use Authentication
+                            </label>
+                        </div>
+                        <div id="auth-fields" class="dependent-field">
+                            <div>
+                                <label for="username">Username:</label>
+                                <input type="text" id="username">
+                            </div>
+                            <div>
+                                <label for="password">Password:</label>
+                                <input type="password" id="password">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-header" onclick="toggleSection('sponsorblock-options')">
+                    <i class="fas fa-ban"></i>
+                    <h2>SponsorBlock Options</h2>
+                </div>
+                <div id="sponsorblock-options" class="settings-content">
+                    <div class="settings-grid">
+                        <div>
+                            <label for="sponsorblock_mark">SponsorBlock Mark:</label>
+                            <input type="text" id="sponsorblock_mark" value="all">
+                        </div>
+                        <div>
+                            <label for="sponsorblock_remove">SponsorBlock Remove:</label>
+                            <input type="text" id="sponsorblock_remove">
+                        </div>
+                        <div>
+                            <label for="sponsorblock_chapter_title">SponsorBlock Chapter Title:</label>
+                            <input type="text" id="sponsorblock_chapter_title" value="[SponsorBlock]: %(category_names)l">
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="no_sponsorblock">
+                                Disable SponsorBlock
+                            </label>
+                        </div>
+                        <div>
+                            <label for="sponsorblock_api_url">SponsorBlock API URL:</label>
+                            <input type="text" id="sponsorblock_api_url" value="https://sponsor.ajay.app">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="streamrip-settings" class="tab-content">
+        <div class="settings-container">
+        <div class="settings-section">
+            <div class="settings-header" onclick="toggleSection('streamrip-general')">
+                <i class="fas fa-sliders-h"></i>
+                <h2>General Options</h2>
+            </div>
+            <div id="streamrip-general" class="settings-content">
+                <div class="settings-grid">
+                    <div>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="disc_subdirectories">
+                            Disc Subdirectories
+                        </label>
+                    </div>
+                    <div>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="concurrency">
+                            Concurrency
+                        </label>
+                    </div>
+                    <div>
+                        <label for="max_connections">Max Connections:</label>
+                        <input type="number" id="max_connections" value="">
+                    </div>
+                    <div>
+                        <label for="requests_per_minute">Requests Per Minute:</label>
+                        <input type="number" id="requests_per_minute" value="">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-header" onclick="toggleSection('streamrip-services')">
+                <i class="fas fa-music"></i>
+                <h2>Services Configuration</h2>
+            </div>
+            <div id="streamrip-services" class="settings-content">
+                <div class="settings-grid">
+                    <!-- Qobuz Settings -->
+                    <div class="service-group">
+                        <h3>Qobuz</h3>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="qobuz_download_booklets">
+                                Download Booklets
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="qobuz_token_or_email">
+                                User ID and Token Login
+                            </label>
+                        </div>
+                        <div>
+                            <label for="qobuz_email_or_userid">Email/User ID:</label>
+                            <input type="text" id="qobuz_email_or_userid">
+                        </div>
+                        <div>
+                            <label for="qobuz_password_or_token">Password/Token:</label>
+                            <input type="password" id="qobuz_password_or_token">
+                        </div>
+                    </div>
+
+                    <!-- Tidal Settings -->
+                    <div class="service-group">
+                        <h3>Tidal</h3>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="tidal_download_videos">
+                                Download Videos
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Deezer Settings -->
+                    <div class="service-group">
+                        <h3>Deezer</h3>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="deezer_use_deezloader">
+                                Use Deezloader
+                            </label>
+                        </div>
+                        <div id="deezer_arl_input" class="dependent-field">
+                            <label for="deezer_arl">Enter ARL:</label>
+                            <input type="password" id="deezer_arl">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+            <div class="settings-section">
+                <div class="settings-header" onclick="">
+                    <i class="fas fa-database"></i>
+                    <h2>Database Settings</h2>
+                </div>
+                <div id="streamrip_database" class="settings-content">
+                    <div class="settings-grid">
+                        <div id="str_downloads_database">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="downloads_database_check">
+                                Downloads Database
+                            </label>
+                        </div>
+                        <div class="dependent-field" id="str_download_database_form">
+                            <div style="display: flex;">
+                            <label style="width: 100%">
+                                <input type="text" id="downloads_database">
+                            </label>
+                            <button id="str_download_database_select" title="Select file location"><span class="fas fa-file"></span></button>
+                            </div>
+                        </div>
+                        <div id="str_failed_downloads_database">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="failed_downloads_database_check">
+                                Failed Downloads Database
+                            </label>
+                        </div>
+                        <div class="dependent-field" id="str_failed_downloads_database_form">
+                            <div  style="display: flex">
+                                <label style="width: 100%">
+                                    <input type="text" id="failed_downloads_database">
+                                </label>
+                                <button id="str_failed_download_database_select" title="Select file location"><span class="fas fa-file"></span></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        <div class="settings-section">
+            <div class="settings-header" onclick="toggleSection('streamrip-conversion')">
+                <i class="fas fa-exchange-alt"></i>
+                <h2>Conversion Settings</h2>
+            </div>
+            <div id="streamrip-conversion" class="settings-content">
+                <div class="settings-grid">
+                    <div>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="conversion_check">
+                            Enable Conversion
+                        </label>
+                    </div>
+                    <div id="conversion_container" class="dependent-field">
+                        <div>
+                            <label for="conversion_codec">Codec:</label>
+                            <select id="conversion_codec" class="dropdown-btn">
+                                <option value="ALAC">ALAC</option>
+                                <option value="FLAC">FLAC</option>
+                                <option value="MP3">MP3</option>
+                                <option value="AAC">AAC</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="conversion_sampling_rate">Sampling Rate:</label>
+                            <select id="conversion_sampling_rate" class="dropdown-btn">
+                                <option value="44100">44.1 kHz</option>
+                                <option value="48000">48 kHz</option>
+                                <option value="88200">88.2 kHz</option>
+                                <option value="96000">96 kHz</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="conversion_bit_depth">Bit Depth:</label>
+                            <select id="conversion_bit_depth" class="dropdown-btn">
+                                <option value="16">16-bit</option>
+                                <option value="24">24-bit</option>
+                            </select>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+            <div class="settings-section">
+                <div class="settings-header" onclick="toggleSection('streamrip-metadata')">
+                    <i class="fas fa-exchange-alt"></i>
+                    <h2>Metadata Settings</h2>
+                </div>
+                <div id="streamrip-metadata" class="settings-content">
+                    <div class="settings-grid">
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="meta_album_name_playlist_check">
+                                Change Album Names To Playlist Names
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="meta_album_order_playlist_check">
+                                Change Album Track Order to Playlist's Order
+                            </label>
+                        </div>
+                        <div id="meta_exclude_tags_form">
+                            <label>
+                                <input type="text" id="excluded_tags">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+    </div>
+    </div>
+</div>
+    <div id="search-settings" class="tab-content">
+        <div class="settings-container">
+        <h2>Search Settings</h2>
+            <h4>Coming Soon</h4>
+    </div>
+    </div>
 </body>
 </html>

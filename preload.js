@@ -13,7 +13,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
             'start-download',
             'start-qobuz-download',
             'start-deezer-download',
-            'start-tidal-download'
+            'start-tidal-download',
+            'save-settings',
+            'load-settings',
+            'get-default-settings',
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);
@@ -31,4 +34,13 @@ contextBridge.exposeInMainWorld('theme', {
 });
 contextBridge.exposeInMainWorld('electronAPI', {
     processUrl: (url) => ipcRenderer.invoke('process-url', url)
+});
+
+contextBridge.exposeInMainWorld('electronAPI', {
+    send: (channel, data) => {
+        ipcRenderer.send(channel, data);
+    },
+    receive: (channel, func) => {
+        ipcRenderer.on(channel, (event, ...args) => func(...args));
+    }
 });

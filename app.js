@@ -3,23 +3,38 @@ const state = {
     downloads: [],
     currentPage: 'music'
 };
-
+window.addEventListener('DOMContentLoaded', initializeTheme);
 // theme checker
-window.addEventListener('DOMContentLoaded', () => {
-    if (window.theme.isDarkMode()) {
+function applyTheme(theme) {
+    // Remove existing theme classes
+    document.body.classList.remove('dark', 'light');
+
+    if (theme === 'auto') {
+        // Check system theme and apply accordingly
+        const isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.body.classList.add(isDarkMode ? 'dark' : 'light');
+    } else if (theme === 'dark') {
         document.body.classList.add('dark');
+    } else {
+        document.body.classList.add('light');
+    }
+}
+
+// Initialize the theme based on user preference or system default
+function initializeTheme() {
+    const savedTheme = localStorage.getItem('theme') || 'auto'; // Default to 'auto'
+    applyTheme(savedTheme);
+
+    // Listen for system theme changes in auto mode
+    if (savedTheme === 'auto') {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            applyTheme('auto');
+        });
     }
 
-    // Listen for theme changes
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
-        if (event.matches) {
-            document.body.classList.add('dark');
-        } else {
-            document.body.classList.remove('dark');
-        }
-    });
-});
-
+    // Set the select option to reflect the current theme
+    document.getElementById('theme').value = savedTheme;
+}
 document.addEventListener('DOMContentLoaded', () => {
     loadPage('music');
     document.querySelector('.navbar').classList.add('show');
@@ -72,7 +87,120 @@ function initializeHelpTab(){
 
 }
 
-function initializeSettingsTab(){
+function inToggleActiveOnChange(checkboxId, fieldSelector) {
+    const checkbox = document.getElementById(checkboxId);
+    const field = document.querySelector(fieldSelector);
+
+    checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+            field.style.display = 'none'; // Hide the field when checked
+        } else {
+            field.style.display = 'block'; // Show the field when unchecked
+        }
+    });
+}
+
+// Handle dependent fields
+function handleDependentFields() {
+    // Function to toggle field visibility based on checkbox state
+    function toggleFieldVisibility(checkbox, fieldSelector) {
+        const field = document.querySelector(fieldSelector);
+        if (checkbox && field) {
+            field.classList.toggle('active', checkbox.checked);
+        }
+    }
+
+    // Function to set up checkbox listener and initial state
+    function setupDependentField(checkboxId, fieldSelector) {
+        const checkbox = document.getElementById(checkboxId);
+        if (checkbox) {
+            // Set up change listener
+            checkbox.addEventListener('change', function() {
+                toggleFieldVisibility(this, fieldSelector);
+            });
+            // Set initial state
+            toggleFieldVisibility(checkbox, fieldSelector);
+        }
+    }
+
+    // Special handling for speed limit fields
+    const speedLimitCheck = document.getElementById('download_speed_limit');
+    const speedLimitFields = document.querySelectorAll('#speed_limit_value, .dropdown');
+    if (speedLimitCheck) {
+        // Set up listener
+        speedLimitCheck.addEventListener('change', function() {
+            speedLimitFields.forEach(el => el.closest('.dependent-field')?.classList.toggle('active', this.checked));
+        });
+        // Set initial state
+        speedLimitFields.forEach(el => el.closest('.dependent-field')?.classList.toggle('active', speedLimitCheck.checked));
+    }
+
+    // List of all checkbox-field mappings
+    const fieldMappings = [
+        { checkboxId: 'use_proxy', fieldSelector: '#proxy_url' },
+        { checkboxId: 'use_authentication', fieldSelector: '#auth-fields' },
+        { checkboxId: 'downloads_database_check', fieldSelector: '#str_download_database_form' },
+        { checkboxId: 'failed_downloads_database_check', fieldSelector: '#str_failed_downloads_database_form' },
+        { checkboxId: 'conversion_check', fieldSelector: '#conversion_container' },
+        { checkboxId: 'use_cookies', fieldSelector: '#cookies_form' },
+        { checkboxId: 'use_cookies', fieldSelector: '#browser_cookies_form' },
+        { checkboxId: 'override_download_extension', fieldSelector: '#override_download_extension_form' },
+        { checkboxId: 'yt_override_download_extension', fieldSelector: '#youtubeExtensions' },
+        { checkboxId: 'ytm_override_download_extension', fieldSelector: '#youtubeMusicExtensions' }
+    ];
+
+    // Set up all mappings
+    fieldMappings.forEach(({ checkboxId, fieldSelector }) => {
+        setupDependentField(checkboxId, fieldSelector);
+    });
+
+    // Handle inverse toggles (hide when checked)
+    const inverseFieldMappings = [
+        { checkboxId: 'deezer_use_deezloader', fieldSelector: '#deezer_arl_input' }
+    ];
+
+    inverseFieldMappings.forEach(({ checkboxId, fieldSelector }) => {
+        const checkbox = document.getElementById(checkboxId);
+        const field = document.querySelector(fieldSelector);
+        if (checkbox && field) {
+            // Set up change listener
+            checkbox.addEventListener('change', () => {
+                field.style.display = checkbox.checked ? 'none' : 'block';
+            });
+            // Set initial state
+            field.style.display = checkbox.checked ? 'none' : 'block';
+        }
+    });
+}
+function openPopup() {
+    window.open('https://github.com/yt-dlp/yt-dlp/tree/master?tab=readme-ov-file#output-template', '_blank', 'width=600,height=8000');
+}
+
+// Initialize settings
+let settings = {};
+
+function initializeSettingsTab() {
+    initializeDropdowns();
+    handleTabSwitch();
+    handleDependentFields();
+    handleDropdownSelection();
+    handleSectionExpansion();
+    populateSettings();
+    window.electronAPI.send('load-settings');
+    document.getElementById('theme').addEventListener('change', function() {
+        const selectedTheme = this.value;
+        localStorage.setItem('theme', selectedTheme);
+        applyTheme(selectedTheme);
+    });
+
+    window.electronAPI.receive('settings-data', (loadedSettings) => {
+        settings = loadedSettings;
+        populateSettings();
+        addSettingsListeners();
+    });
+}
+
+function handleTabSwitch() {
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
 
@@ -84,6 +212,155 @@ function initializeSettingsTab(){
             button.classList.add('active');
             document.getElementById(button.dataset.tab).classList.add('active');
         });
+    });
+}
+
+function handleDropdownSelection() {
+    document.querySelectorAll('.dropdown-content a').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            const dropdown = item.closest('.dropdown');
+            dropdown.querySelector('.dropdown-btn').textContent = item.textContent;
+            toggleDropdown(dropdown.querySelector('.dropdown-content').id);
+        });
+    });
+}
+
+function handleSectionExpansion() {
+    document.querySelectorAll('.settings-section').forEach(section => {
+        const header = section.querySelector('.settings-header');
+        const content = section.querySelector('.settings-content');
+        if (header && content) {
+            header.removeAttribute('onclick');
+            header.addEventListener('click', () => {
+                const isVisible = content.style.display === 'block';
+                content.style.display = isVisible ? 'none' : 'block';
+                header.classList.toggle('expanded', !isVisible);
+                content.classList.toggle('expanded', !isVisible);
+            });
+        }
+    });
+
+    document.querySelectorAll('.settings-content').forEach(content => {
+        content.style.display = 'none';
+    });
+}
+
+function populateSettings() {
+    const settingFields = {
+        'theme': 'value', 'downloadsDatabasePath': 'value', 'downloadLocation': 'value',
+        'createPlatformSubfolders': 'checked', 'orpheusDL': 'checked', 'streamrip': 'checked',
+        'use_cookies': 'checked', 'cookies': 'value', 'cookies_from_browser': 'value',
+        'override_download_extension': 'checked', 'yt_override_download_extension': 'checked',
+        'ytm_override_download_extension': 'checked', 'youtubeVideoExtensions': 'value',
+        'youtubeAudioExtensions': 'value', 'use_aria2': 'checked', 'auto_update': 'checked',
+        'max_downloads': 'value', 'download_speed_limit': 'checked', 'speed_limit_value': 'value',
+        'max_retries': 'value', 'download_output_template': 'value', 'continue': 'checked',
+        'add_metadata': 'checked', 'embed_chapters': 'checked', 'add_subtitle_to_file': 'checked',
+        'use_proxy': 'checked', 'proxy_url': 'value', 'use_authentication': 'checked',
+        'username': 'value', 'password': 'value', 'sponsorblock_mark': 'value',
+        'sponsorblock_remove': 'value', 'sponsorblock_chapter_title': 'value',
+        'no_sponsorblock': 'checked', 'sponsorblock_api_url': 'value', 'disc_subdirectories': 'checked',
+        'concurrency': 'checked', 'max_connections': 'value', 'requests_per_minute': 'value',
+        'qobuz_download_booklets': 'checked', 'qobuz_token_or_email': 'checked',
+        'qobuz_email_or_userid': 'value', 'qobuz_password_or_token': 'value',
+        'tidal_download_videos': 'checked', 'deezer_use_deezloader': 'checked',
+        'deezer_arl': 'value', 'downloads_database_check': 'checked', 'downloads_database': 'value',
+        'failed_downloads_database_check': 'checked', 'failed_downloads_database': 'value',
+        'conversion_check': 'checked', 'conversion_codec': 'value', 'conversion_sampling_rate': 'value',
+        'conversion_bit_depth': 'value', 'meta_album_name_playlist_check': 'checked',
+        'meta_album_order_playlist_check': 'checked','excluded_tags': 'value', 'speed_limit_type': 'value',
+    };
+
+    Object.keys(settingFields).forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element[settingFields[id]] = settings[id];
+        }
+    });
+    handleDependentFields();
+}
+
+
+function addSettingsListeners() {
+    const settingsMapping = [
+        { id: 'theme', key: 'theme', type: 'value' },
+        { id: 'downloadsDatabasePath', key: 'downloadsDatabasePath', type: 'value' },
+        { id: 'downloadLocation', key: 'downloadLocation', type: 'value' },
+        { id: 'createPlatformSubfolders', key: 'createPlatformSubfolders', type: 'checked' },
+        { id: 'orpheusDL', key: 'orpheusDL', type: 'checked' },
+        { id: 'streamrip', key: 'streamrip', type: 'checked' },
+        { id: 'use_cookies', key: 'use_cookies', type: 'checked' },
+        { id: 'cookies', key: 'cookies', type: 'value' },
+        { id: 'cookies_from_browser', key: 'cookies_from_browser', type: 'value' },
+        { id: 'override_download_extension', key: 'override_download_extension', type: 'checked' },
+        { id: 'yt_override_download_extension', key: 'yt_override_download_extension', type: 'checked' },
+        { id: 'ytm_override_download_extension', key: 'ytm_override_download_extension', type: 'checked' },
+        { id: 'youtubeVideoExtensions', key: 'youtubeVideoExtensions', type: 'value' },
+        { id: 'youtubeAudioExtensions', key: 'youtubeAudioExtensions', type: 'value' },
+        { id: 'use_aria2', key: 'use_aria2', type: 'checked' },
+        { id: 'auto_update', key: 'auto_update', type: 'checked' },
+        { id: 'max_downloads', key: 'max_downloads', type: 'value' },
+        { id: 'download_speed_limit', key: 'download_speed_limit', type: 'checked' },
+        { id: 'speed_limit_value', key: 'speed_limit_value', type: 'value' },
+        { id: 'max_retries', key: 'max_retries', type: 'value' },
+        { id: 'download_output_template', key: 'download_output_template', type: 'value' },
+        { id: 'continue', key: 'continue', type: 'checked' },
+        { id: 'add_metadata', key: 'add_metadata', type: 'checked' },
+        { id: 'embed_chapters', key: 'embed_chapters', type: 'checked' },
+        { id: 'add_subtitle_to_file', key: 'add_subtitle_to_file', type: 'checked' },
+        { id: 'use_proxy', key: 'use_proxy', type: 'checked' },
+        { id: 'proxy_url', key: 'proxy_url', type: 'value' },
+        { id: 'use_authentication', key: 'use_authentication', type: 'checked' },
+        { id: 'username', key: 'username', type: 'value' },
+        { id: 'password', key: 'password', type: 'value' },
+        { id: 'sponsorblock_mark', key: 'sponsorblock_mark', type: 'value' },
+        { id: 'sponsorblock_remove', key: 'sponsorblock_remove', type: 'value' },
+        { id: 'sponsorblock_chapter_title', key: 'sponsorblock_chapter_title', type: 'value' },
+        { id: 'no_sponsorblock', key: 'no_sponsorblock', type: 'checked' },
+        { id: 'sponsorblock_api_url', key: 'sponsorblock_api_url', type: 'value' },
+        { id: 'disc_subdirectories', key: 'disc_subdirectories', type: 'checked' },
+        { id: 'concurrency', key: 'concurrency', type: 'checked' },
+        { id: 'max_connections', key: 'max_connections', type: 'value' },
+        { id: 'requests_per_minute', key: 'requests_per_minute', type: 'value' },
+        { id: 'qobuz_download_booklets', key: 'qobuz_download_booklets', type: 'checked' },
+        { id: 'qobuz_token_or_email', key: 'qobuz_token_or_email', type: 'checked' },
+        { id: 'qobuz_email_or_userid', key: 'qobuz_email_or_userid', type: 'value' },
+        { id: 'qobuz_password_or_token', key: 'qobuz_password_or_token', type: 'value' },
+        { id: 'tidal_download_videos', key: 'tidal_download_videos', type: 'checked' },
+        { id: 'deezer_use_deezloader', key: 'deezer_use_deezloader', type: 'checked' },
+        { id: 'deezer_arl', key: 'deezer_arl', type: 'value' },
+        { id: 'downloads_database_check', key: 'downloads_database_check', type: 'checked' },
+        { id: 'downloads_database', key: 'downloads_database', type: 'value' },
+        { id: 'failed_downloads_database_check', key: 'failed_downloads_database_check', type: 'checked' },
+        { id: 'failed_downloads_database', key: 'failed_downloads_database', type: 'value' },
+        { id: 'conversion_check', key: 'conversion_check', type: 'checked' },
+        { id: 'conversion_codec', key: 'conversion_codec', type: 'value' },
+        { id: 'conversion_sampling_rate', key: 'conversion_sampling_rate', type: 'value' },
+        { id: 'conversion_bit_depth', key: 'conversion_bit_depth', type: 'value' },
+        { id: 'meta_album_name_playlist_check', key: 'meta_album_name_playlist_check', type: 'checked' },
+        { id: 'meta_album_order_playlist_check', key: 'meta_album_order_playlist_check', type: 'checked' },
+        { id: 'excluded_tags', key: 'excluded_tags', type: 'value' },
+        {id: 'speed_limit_type', key:'speed_limit_type', type: 'value'}
+    ];
+
+    settingsMapping.forEach(({ id, key, type }) => {
+        const element = document.getElementById(id);
+        if (element) {
+            // Add change listener for all elements
+            element.addEventListener('change', (e) => {
+                settings[key] = type === 'checked' ? e.target.checked : e.target.value;
+                window.electronAPI.send('save-settings', settings);
+            });
+
+            // Add input listener for text fields to save as you type
+            if (type === 'value' && element.tagName === 'INPUT') {
+                element.addEventListener('input', (e) => {
+                    settings[key] = e.target.value;
+                    window.electronAPI.send('save-settings', settings);
+                });
+            }
+        }
     });
 }
 
@@ -213,6 +490,19 @@ window.electronAPI.receive('generic-video-info', (data) => {
 // Initialize the video tab when the DOM is loaded
 document.addEventListener('DOMContentLoaded', initializeVideoTab);
 function initializeMusicTab() {
+    // Tab switch functionality
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabContents = document.querySelectorAll('.tab-content');
+
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            document.querySelector('.tab-button.active').classList.remove('active');
+            document.querySelector('.tab-content.active').classList.remove('active');
+
+            button.classList.add('active');
+            document.getElementById(button.dataset.tab).classList.add('active');
+        });
+    });
     document.querySelectorAll('.dropdown-btn').forEach(button => {
         button.addEventListener('click', () => {
             const dropdownContent = button.nextElementSibling;
@@ -224,35 +514,6 @@ function initializeMusicTab() {
         });
     });
 
-
-    const tabButtons = document.querySelectorAll('.tab-button');
-    const tabContents = document.querySelectorAll('.tab-content');
-
-    // Hide all tab contents except the first one
-    tabContents.forEach((content, index) => {
-        if (index === 0) {
-            content.classList.add('active');
-        } else {
-            content.classList.remove('active');
-        }
-    });
-
-    // Set the first tab button as active
-    tabButtons[0].classList.add('active');
-
-    tabButtons.forEach(button => {
-        button.addEventListener('click', () => {
-            tabButtons.forEach(btn => btn.classList.remove('active'));
-            tabContents.forEach(content => content.classList.remove('active'));
-
-            button.classList.add('active');
-            const tabId = button.dataset.tab;
-            const activeContent = document.getElementById(tabId);
-            if (activeContent) {
-                activeContent.classList.add('active');
-            }
-        });
-    });
 
     // Initialize dropdowns
     initializeDropdowns();
@@ -278,7 +539,7 @@ function handleYoutubeDownload() {
     updateDownload({
         title: 'Fetching Title...',
         uploader: 'Fetching Uploader...',
-        thumbnail: 'path/to/placeholder/image.png',
+        thumbnail: 'placeholder.png',
         order: downloadCount,
         progress: 0
     });
@@ -373,7 +634,7 @@ function renderDownloads() {
         }
 
         downloadDiv.innerHTML = `
-            <img src="${download.thumbnail || '/placeholder.png'}" class="thumbnail" alt="${download.title || 'Unknown Title'}" />
+            <img src="${download.thumbnail || 'placeholder.png'}" class="thumbnail" alt="${download.title || 'Unknown Title'}" />
             <div class="download-info">
                 <h3>${download.title || 'Unknown Title'}</h3>
                 <p class="uploader">${download.uploader || download.artist || 'Unknown Artist'}</p>
