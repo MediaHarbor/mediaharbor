@@ -529,11 +529,14 @@ function initializeMusicTab() {
 }
 
 function handleYoutubeDownload() {
+
     const url = document.getElementById('youtube-url').value;
     const qualityDropdown = document.getElementById('youtube-quality');
-    const quality = qualityDropdown.querySelector('.dropdown-btn').textContent;
-    window.electronAPI.send('start-yt-music-download', { url, quality });
+    const qualityDropdownBtn = qualityDropdown.querySelector('.dropdown-btn');
+    const qualityLink = qualityDropdown.querySelector('.dropdown-content a[data-value]');
+    const quality = qualityLink ? qualityLink.getAttribute('data-value') : null;
 
+    window.electronAPI.send('start-yt-music-download', { url, quality });
     // Initial placeholder for YouTube download
     const downloadCount = state.downloads.length + 1;
     updateDownload({

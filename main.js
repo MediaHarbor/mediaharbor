@@ -8,6 +8,152 @@ let downloadCount = 0; // Move downloadCount to module scope
 const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
 
 
+function buildYtDlpMusicArgs(url, quality, settings) {
+    const downloadPath = settings.downloadLocation || path.join(os.homedir(), 'Downloads');
+    const args = [
+        '-x',  // Extract audio
+        '--audio-format', settings.youtubeAudioExtensions || 'mp3',
+        '--audio-quality', quality,
+        '--output', path.join(downloadPath, settings.download_output_template || '%(title)s.%(ext)s'),
+    ];
+
+    // Add settings-based arguments
+    if (settings.no_playlist) {
+        args.push('--no-playlist');
+    }
+
+    if (settings.max_retries) {
+        args.push('--retries', settings.max_retries.toString());
+    }
+
+    if (settings.continue) {
+        args.push('--continue');
+    }
+
+    if (!settings.continue) {
+        args.push('--no-continue');
+    }
+
+    if (settings.download_speed_limit && settings.speed_limit_value > 0) {
+        args.push('-r', `${settings.speed_limit_value}${settings.speed_limit_type}`);
+    }
+
+    if (settings.use_aria2) {
+        args.push('--downloader', 'aria2c');
+    }
+
+    if (settings.use_proxy && settings.proxy_url) {
+        args.push('--proxy', settings.proxy_url);
+    }
+
+    if (settings.use_authentication && settings.username && settings.password) {
+        args.push('--username', settings.username);
+        args.push('--password', settings.password);
+    }
+
+    if (settings.use_cookies) {
+        if (settings.cookies) {
+            args.push('--cookies', settings.cookies);
+        } else if (settings.cookies_from_browser) {
+            args.push('--cookies-from-browser', settings.cookies_from_browser);
+        }
+    }
+
+    if (settings.add_metadata) {
+        args.push('--embed-thumbnail');
+        args.push('--add-metadata');
+    }
+
+    args.push(url);
+    return args;
+}
+
+function handleYtDlpMusicDownload(event, data, settings) {
+    const { url, quality } = data;
+    const ytDlpCommand = 'yt-dlp';
+
+    // Get video info first
+    const videoInfoArgs = [
+        '--print', '%(title)s',
+        '--print', '%(uploader)s',
+        '--print', '%(thumbnail)s',
+        url
+    ];
+
+    const videoInfoProcess = spawn(ytDlpCommand, videoInfoArgs);
+    let videoInfo = { title: '', uploader: '', thumbnail: '' };
+    let outputLines = [];
+
+    videoInfoProcess.stdout.on('data', (data) => {
+        const output = data.toString().split('\n').filter(line => line.trim());
+        outputLines = outputLines.concat(output);
+
+        if (outputLines.length >= 3) {
+            videoInfo.title = outputLines[0].trim();
+            videoInfo.uploader = outputLines[1].trim();
+            videoInfo.thumbnail = outputLines[2].trim();
+
+            if (!videoInfo.thumbnail.startsWith('http')) {
+                videoInfo.thumbnail = 'https:' + videoInfo.thumbnail;
+            }
+
+            downloadCount++;
+            event.reply('youtube-music-info', {
+                title: videoInfo.title,
+                uploader: videoInfo.uploader,
+                thumbnail: videoInfo.thumbnail,
+                order: downloadCount
+            });
+
+            outputLines = [];
+        }
+    });
+
+    videoInfoProcess.on('exit', () => {
+        startMusicDownload(event, url, quality, settings, videoInfo);
+    });
+}
+
+function startMusicDownload(event, url, quality, settings, videoInfo) {
+    console.log(quality)
+    const ytDlpCommand = 'yt-dlp';
+    const args = buildYtDlpMusicArgs(url, quality, settings);
+
+    const ytDlp = spawn(ytDlpCommand, args);
+
+    ytDlp.stdout.on('data', (data) => {
+        const output = data.toString();
+        console.log(output);
+        const progressMatch = output.match(/(\d+\.\d+)%/);
+        if (progressMatch) {
+            const progress = parseFloat(progressMatch[1]);
+            event.reply('download-update', {
+                progress,
+                title: videoInfo.title,
+                uploader: videoInfo.uploader,
+                thumbnail: videoInfo.thumbnail,
+                order: downloadCount
+            });
+        }
+    });
+
+    ytDlp.stderr.on('data', (errorData) => {
+        const errorOutput = errorData.toString();
+        console.error(`Error: ${errorOutput}`);
+        event.reply('download-error', `Error: ${errorOutput}`);
+    });
+
+    ytDlp.on('exit', (code) => {
+        if (code !== 0) {
+            event.reply('download-error', `Process exited with code ${code}`);
+        } else {
+            event.reply('download-complete', {
+                order: downloadCount
+            });
+        }
+    });
+}
+
 function buildYtDlpArgs(url, quality, settings, isGeneric = false) {
     const downloadPath = settings.downloadLocation || path.join(os.homedir(), 'Downloads');
     const args = [
@@ -461,84 +607,11 @@ function createWindow() {
         });
     });
     ipcMain.on('start-yt-music-download', (event, data) => {
-        const { url, quality } = data;
-        const ytDlpCommand = 'yt-dlp';
-        const videoInfoArgs = [
-            '--print', '%(title)s',
-            '--print', '%(uploader)s',
-            '--print', '%(thumbnail)s',
-            url
-        ];
-
-        const videoInfoProcess = spawn(ytDlpCommand, videoInfoArgs);
-        let videoInfo = { title: '', uploader: '', thumbnail: '' };
-        let outputLines = [];
-
-        videoInfoProcess.stdout.on('data', (data) => {
-            const output = data.toString().split('\n').filter(line => line.trim());
-            outputLines = outputLines.concat(output);
-
-            if (outputLines.length >= 3) {
-                videoInfo.title = outputLines[0].trim();
-                videoInfo.uploader = outputLines[1].trim();
-                videoInfo.thumbnail = outputLines[2].trim();
-
-                if (!videoInfo.thumbnail.startsWith('http')) {
-                    videoInfo.thumbnail = 'https:' + videoInfo.thumbnail;
-                }
-
-                event.reply('download-info', {
-                    title: videoInfo.title,
-                    uploader: videoInfo.uploader,
-                    thumbnail: videoInfo.thumbnail,
-                    order: downloadCount
-                });
-
-                outputLines = [];
-            }
-        });
-
-        videoInfoProcess.on('exit', () => {
-            const ytDlpArgs = [
-                '-f', quality,
-                '--output', path.join(downloadPath, '%(title)s.%(ext)s'),
-                '--no-playlist',
-                '--progress',
-                url
-            ];
-
-            const ytDlp = spawn(ytDlpCommand, ytDlpArgs);
-            ytDlp.stdout.on('data', (data) => {
-                const output = data.toString();
-                console.log(output);
-                const progressMatch = output.match(/(\d+)\.?\d*%/);
-                if (progressMatch) {
-                    const progress = parseFloat(progressMatch[1]);
-
-                    event.reply('download-update', {
-                        progress,
-                        title: videoInfo.title,
-                        uploader: videoInfo.uploader,
-                        thumbnail: videoInfo.thumbnail,
-                        order: downloadCount
-                    });
-                }
-            });
-
-            ytDlp.stderr.on('data', (errorData) => {
-                const errorOutput = errorData.toString();
-                console.error(`Error: ${errorOutput}`);
-                event.reply('download-debug', `Error: ${errorOutput}`);
-            });
-
-            ytDlp.on('exit', (code) => {
-                if (code !== 0) {
-                    event.reply('download-debug', `yt-dlp process exited with code ${code}`);
-                }
-            });
+        fs.readFile(settingsFilePath, 'utf8', (err, settingsData) => {
+            const settings = err ? getDefaultSettings() : JSON.parse(settingsData);
+            handleYtDlpMusicDownload(event, data, settings);
         });
     });
-
     ipcMain.on('start-download', (event, data) => {
         const { service, url, quality } = data;
         let command, args;
