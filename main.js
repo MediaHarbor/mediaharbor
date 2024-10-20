@@ -4,6 +4,8 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const os = require('os');
 const TOML = require('@iarna/toml');
+const axios = require('axios');
+const cheerio = require('cheerio');
 let downloadCount = 0;
 const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
 const sqlite3 = require('sqlite3').verbose();
@@ -69,6 +71,30 @@ function getDownloads() {
             resolve(rows);
         });
     });
+}
+async function fetchWebsiteTitle(url) {
+    try {
+        const response = await axios.get(url, {
+            headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        });
+        const html = response.data;
+        const $ = cheerio.load(html);
+
+        // Fetch the title from the <title> tag only
+        let title = $('title').text().trim();
+
+        // Trim the title if it's too long
+        title = title.length > 50 ? title.slice(0, 50)+'…' : title;
+
+        return title;
+    } catch (error) {
+        console.error('Error fetching title:', error);
+        return 'Unknown Title';  // Fallback if there's an error
+    }
 }
 
 function buildYtDlpMusicArgs(url, quality, settings) {
@@ -362,14 +388,70 @@ function handleYtDlpDownload(event, data, settings, isGeneric = false) {
     }
 }
 
-function startDownload(event, url, quality, settings, videoInfo = null, isGeneric = false) {
+function extractDomain(url) {
+    try {
+        const domain = new URL(url).hostname;
+        return domain.startsWith('www.') ? domain.slice(4) : domain;  // Remove 'www.' if present
+    } catch (error) {
+        console.error('Invalid URL:', error);
+        return url;  // Fallback to the full URL if invalid
+    }
+}
+async function fetchHighResImageOrFavicon(url) {
+    try {
+        const response = await axios.get(url);
+        const html = response.data;
+        const $ = cheerio.load(html);
+
+        // Look for Open Graph image first
+        let ogImage = $('meta[property="og:image"]').attr('content');
+
+        // If no OG image, fallback to high-res favicons or Apple touch icons
+        let favicon = $('link[rel="apple-touch-icon"]').attr('href') ||
+            $('link[rel="icon"][sizes]').attr('href') ||  // Look for any icon with sizes attribute
+            $('link[rel="icon"]').attr('href') ||  // Fallback to normal favicon
+            '/favicon.ico';  // Fallback to default favicon
+
+        // If we found an OG image, return that
+        let image = ogImage || favicon;
+
+        // If the image URL is relative, make it absolute by combining with base URL
+        if (!image.startsWith('http')) {
+            const baseUrl = new URL(url).origin;
+            image = `${baseUrl}${image}`;
+        }
+
+        return image;
+    } catch (error) {
+        console.error('Error fetching image:', error);
+        return '/favicon.ico';  // Fallback to generic favicon
+    }
+}
+
+
+async function startDownload(event, url, quality, settings, videoInfo = null, isGeneric = false) {
     const ytDlpCommand = 'yt-dlp';
     const args = buildYtDlpArgs(url, quality, settings, isGeneric);
+    downloadCount++;
+
+    // Fetch metadata once at the start
+    const metadata = {
+        title: videoInfo ? videoInfo.title : await fetchWebsiteTitle(url),
+        uploader: videoInfo ? videoInfo.uploader : extractDomain(url),
+        thumbnail: videoInfo ? videoInfo.thumbnail : await fetchHighResImageOrFavicon(url),
+        domain: extractDomain(url)
+    };
+
+    // Use fallback values if any fetches failed
+    metadata.title = metadata.title || 'Unknown';
+    metadata.uploader = metadata.uploader || 'Unknown';
+    metadata.thumbnail = metadata.thumbnail || 'Unknown';
 
     if (isGeneric) {
         event.reply('generic-video-info', {
-            url: url,
-            order: downloadCount
+            url,
+            order: downloadCount,
+            ...metadata
         });
     }
 
@@ -383,10 +465,8 @@ function startDownload(event, url, quality, settings, videoInfo = null, isGeneri
             const progress = parseFloat(progressMatch[1]);
             event.reply('download-update', {
                 progress,
-                title: videoInfo ? videoInfo.title : 'Generic Download',
-                uploader: videoInfo ? videoInfo.uploader : url,
-                thumbnail: videoInfo ? videoInfo.thumbnail : '/placeholder.png',
-                order: downloadCount
+                order: downloadCount,
+                ...metadata
             });
         }
     });
@@ -402,11 +482,13 @@ function startDownload(event, url, quality, settings, videoInfo = null, isGeneri
             event.reply('download-error', `Process exited with code ${code}`);
         } else {
             const downloadInfo = {
-                downloadName: videoInfo.title,
-                downloadArtistOrUploader: videoInfo.uploader,
+                downloadName: metadata.title,
+                downloadArtistOrUploader: metadata.uploader,
                 downloadLocation: settings.downloadLocation || app.getPath('downloads'),
-                downloadThumbnail: videoInfo.thumbnail
+                downloadThumbnail: metadata.thumbnail,
+                downloadDomain: metadata.domain
             };
+
             saveDownloadToDatabase(downloadInfo);
             event.reply('download-complete', {
                 order: downloadCount
@@ -414,7 +496,6 @@ function startDownload(event, url, quality, settings, videoInfo = null, isGeneri
         }
     });
 }
-
 ipcMain.handle('load-downloads', (event) => {
     return new Promise((resolve, reject) => {
         loadDownloadsFromDatabase((rows) => {
@@ -543,7 +624,7 @@ function createWindow() {
                                 settings.tidal_download_videos = streamripConfig.tidal?.download_videos || true;
 
                                 // Deezer settings
-                                settings.deezer_use_deezloader = streamripConfig.deezer?.use_deezloader || true;
+                                settings.deezer_use_deezloader = streamripConfig.deezer?.use_deezloader;
                                 settings.deezer_arl = streamripConfig.deezer?.arl || '';
 
                                 // Database settings

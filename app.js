@@ -520,9 +520,9 @@ window.electronAPI.receive('youtube-video-info', (data) => {
 
 window.electronAPI.receive('generic-video-info', (data) => {
     updateDownload({
-        title: 'Generic Download',
-        uploader: data.url,
-        thumbnail: '/placeholder.png',
+        title: data.title,
+        uploader: data.uploader,
+        thumbnail: data.thumbnail,
         order: data.order,
         progress: 0
     });
