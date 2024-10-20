@@ -34,11 +34,17 @@
                     </div>
                     <div>
                         <label for="downloadsDatabasePath">Downloads Database Path:</label>
-                        <input type="text" id="downloadsDatabasePath">
+                        <div style="display: flex">
+                            <input type="text" id="downloadsDatabasePath">
+                            <button id="downloads_database_select" onclick="selectFileLocation('downloadsDatabasePath')" title="Select file location"><span class="fas fa-file"></span></button>
+                        </div>
                     </div>
                     <div>
                         <label for="downloadLocation">Download Location:</label>
-                        <input type="text" id="downloadLocation">
+                        <div style="display: flex">
+                            <input type="text" id="downloadLocation">
+                            <button id="str_failed_download_location_select" onclick="selectFolderLocation('downloadLocation')" title="Select file location"><span class="fas fa-file"></span></button>
+                        </div>
                     </div>
                     <div>
                         <label class="checkbox-label">
@@ -81,7 +87,10 @@
                         </div>
                         <div class="dependent-field" id="cookies_form">
                             <label for="cookies">Cookies:</label>
-                            <input type="text" id="cookies" placeholder="PATH selection">
+                            <div style="display: flex">
+                                <input type="text" id="cookies" placeholder="PATH selection">
+                                <button id="cookies_select" onclick="openFileLocation('cookies')" title="Select file location"><span class="fas fa-file"></span></button>
+                            </div>
                         </div>
                         <div class="dependent-field" id="browser_cookies_form">
                             <label for="cookies_from_browser">Cookies from Browser:</label>
@@ -187,7 +196,7 @@
                             <label for="download_output_template">Download Output Template:</label>
                             <div style="display: flex">
                             <input type="text" id="download_output_template" value="title+ext">
-                            <button id="output_template_help" title="Select file location" onclick="openPopup()">
+                            <button id="output_template_help" title="Select file location" onclick="openPopup('https://github.com/yt-dlp/yt-dlp/tree/master?tab=readme-ov-file#output-template')">
                                 <span class="fa fa-question-circle"></span>
                             </button>
                             </div>
@@ -378,6 +387,14 @@
                             <label for="qobuz_password_or_token">Password/Token:</label>
                             <input type="password" id="qobuz_password_or_token">
                         </div>
+                        <div>
+                            <label for="qobuz_app_id">App ID</label>
+                            <input type="text" id="qobuz_app_id">
+                        </div>
+                        <div>
+                            <label for="qobuz_secrets">Secrets</label>
+                            <input type="text" id="qobuz_secrets">
+                        </div>
                     </div>
 
                     <!-- Tidal Settings -->
@@ -425,9 +442,12 @@
                         <div class="dependent-field" id="str_download_database_form">
                             <div style="display: flex;">
                             <label style="width: 100%">
+                                <div style="display: flex">
                                 <input type="text" id="downloads_database">
+                                <button id="str_download_database_select" onclick="selectFileLocation('downloads_database')" title="Select file location"><span class="fas fa-file"></span></button>
+                                </div>
                             </label>
-                            <button id="str_download_database_select" title="Select file location"><span class="fas fa-file"></span></button>
+
                             </div>
                         </div>
                         <div id="str_failed_downloads_database">
@@ -439,9 +459,12 @@
                         <div class="dependent-field" id="str_failed_downloads_database_form">
                             <div  style="display: flex">
                                 <label style="width: 100%">
+                                    <div style="display: flex">
                                     <input type="text" id="failed_downloads_database">
+                                    <button id="str_failed_download_database_select" onclick="selectFileLocation('failed_downloads_database')" title="Select file location"><span class="fas fa-file"></span></button>
+                                    </div>
                                 </label>
-                                <button id="str_failed_download_database_select" title="Select file location"><span class="fas fa-file"></span></button>
+
                             </div>
                         </div>
                     </div>
@@ -512,8 +535,15 @@
                             </label>
                         </div>
                         <div id="meta_exclude_tags_form">
+
                             <label>
-                                <input type="text" id="excluded_tags">
+                                Excluded Tags
+                                <div style="display: flex">
+                                    <input type="text" id="excluded_tags">
+                                    <button id="meta_exclude_help" title="Select file location" onclick="openPopup('https://github.com/nathom/streamrip/wiki/Metadata-Tag-Names')">
+                                        <span class="fa fa-question-circle"></span>
+                                    </button>
+                                </div>
                             </label>
                         </div>
                     </div>

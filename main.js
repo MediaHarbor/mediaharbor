@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain,dialog } = require('electron');
 const { shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -595,6 +595,54 @@ ipcMain.handle('clearDownloadsDatabase', async () => {
     }
 
 });
+ipcMain.handle('dialog:openFile', async (event) => {
+    const currentWindow = BrowserWindow.fromWebContents(event.sender);
+
+    const { canceled, filePaths } = await dialog.showOpenDialog(currentWindow, {
+        properties: ['openFile'],
+        filters: [{ name: 'Raw Cookies File', extensions: ['txt'] }],
+        title: 'Select Cookies.txt location'
+    });
+    if (canceled) {
+        return null;
+    } else {
+        return filePaths[0]; // Return the first selected file path
+    }
+});
+
+ipcMain.handle('dialog:saveFile', async (event) => {
+    // Get the window that sent the event
+    const currentWindow = BrowserWindow.fromWebContents(event.sender);
+
+    const { canceled, filePath } = await dialog.showSaveDialog(currentWindow, {
+        properties: ['createDirectory'],
+        filters: [{ name: 'Database File', extensions: ['db'] }],
+        title: 'Select Save Location'
+    });
+
+    if (canceled) {
+        return null;
+    } else {
+        return filePath; // Return the save file path
+    }
+});
+
+ipcMain.handle('dialog:openFolder', async (event) => {
+    // Get the window that sent the event
+    const currentWindow = BrowserWindow.fromWebContents(event.sender);
+
+    const { canceled, filePaths } = await dialog.showOpenDialog(currentWindow, {
+        properties: ['openDirectory', 'createDirectory'],
+        title: 'Select Folder Location'
+    });
+
+    if (canceled) {
+        return null;
+    } else {
+        return filePaths[0]; // Return the selected folder path
+    }
+});
+
 
 function createWindow() {
     const win = new BrowserWindow({

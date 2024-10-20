@@ -48,56 +48,6 @@ const pages = {
     help: 'help.html'
 };
 
-async function initializeDownloadStatusPage() {
-    console.log('Download status page initializing...');
-    const downloadContainer = document.getElementById('download-history-container');
-
-    try {
-        const downloads = await window.electronAPI.getDownloads();
-        console.log('Received downloads:', downloads);
-
-        if (!downloads || downloads.length === 0) {
-            downloadContainer.innerHTML = '<p class="no-downloads">No downloads found.</p>';
-            return;
-        }
-
-        const downloadsList = downloads.map(download => {
-            // Replace backslashes with forward slashes and escape special characters
-            const escapedLocation = download.downloadLocation
-                .replace(/\\/g, '\\\\')  // Escape backslashes first
-                .replace(/'/g, "\\'");    // Escape single quotes
-
-            return `
-                <div class="download-item" data-id="${download.id}">
-                    <div class="download-thumbnail">
-                        ${download.downloadThumbnail ?
-                `<img src="${download.downloadThumbnail}" alt="${download.downloadName}">` :
-                '<div class="no-thumbnail">No thumbnail</div>'
-            }
-                    </div>
-                    <div class="download-info">
-                        <h3 class="download-name">${download.downloadName}</h3>
-                        <p class="download-artist">${download.downloadArtistOrUploader}</p>
-                        <p class="download-location">${download.downloadLocation}</p>
-                        <div class="download-actions">
-                            <button class="fab-button delete" onclick="deleteDownload(${download.id})" title="Delete">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                            <button class="fab-button locate" onclick="locateDownload('${escapedLocation}')" title="Locate">
-                                <i class="fas fa-folder-open"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        downloadContainer.innerHTML = downloadsList;
-    } catch (error) {
-        console.error('Error loading downloads:', error);
-        downloadContainer.innerHTML = '<p class="error">Error loading downloads: ' + error.message + '</p>';
-    }
-}
 
 async function locateDownload(location) {
     try {
@@ -207,6 +157,56 @@ function inToggleActiveOnChange(checkboxId, fieldSelector) {
         }
     });
 }
+async function initializeDownloadStatusPage() {
+    console.log('Download status page initializing...');
+    const downloadContainer = document.getElementById('download-history-container');
+
+    try {
+        const downloads = await window.electronAPI.getDownloads();
+        console.log('Received downloads:', downloads);
+
+        if (!downloads || downloads.length === 0) {
+            downloadContainer.innerHTML = '<p class="no-downloads">No downloads found.</p>';
+            return;
+        }
+
+        const downloadsList = downloads.map(download => {
+            // Replace backslashes with forward slashes and escape special characters
+            const escapedLocation = download.downloadLocation
+                .replace(/\\/g, '\\\\')  // Escape backslashes first
+                .replace(/'/g, "\\'");    // Escape single quotes
+
+            return `
+                <div class="download-item" data-id="${download.id}">
+                    <div class="download-thumbnail">
+                        ${download.downloadThumbnail ?
+                `<img src="${download.downloadThumbnail}" alt="${download.downloadName}">` :
+                '<div class="no-thumbnail">No thumbnail</div>'
+            }
+                    </div>
+                    <div class="download-info">
+                        <h3 class="download-name">${download.downloadName}</h3>
+                        <p class="download-artist">${download.downloadArtistOrUploader}</p>
+                        <p class="download-location">${download.downloadLocation}</p>
+                        <div class="download-actions">
+                            <button class="fab-button delete" onclick="deleteDownload(${download.id})" title="Delete">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                            <button class="fab-button locate" onclick="locateDownload('${escapedLocation}')" title="Locate">
+                                <i class="fas fa-folder-open"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        downloadContainer.innerHTML = downloadsList;
+    } catch (error) {
+        console.error('Error loading downloads:', error);
+        downloadContainer.innerHTML = '<p class="error">Error loading downloads: ' + error.message + '</p>';
+    }
+}
 
 // Handle dependent fields
 function handleDependentFields() {
@@ -280,8 +280,8 @@ function handleDependentFields() {
         }
     });
 }
-function openPopup() {
-    window.open('https://github.com/yt-dlp/yt-dlp/tree/master?tab=readme-ov-file#output-template', '_blank', 'width=600,height=8000');
+function openPopup(url) {
+    window.open(url, '_blank', 'width=600,height=8000');
 }
 
 // Initialize settings
@@ -301,13 +301,65 @@ function initializeSettingsTab() {
         applyTheme(selectedTheme);
     });
 
+
     window.electronAPI.receive('settings-data', (loadedSettings) => {
         settings = loadedSettings;
         populateSettings();
         addSettingsListeners();
     });
+
+
+}
+async function selectFileLocation(inputId) {
+    try {
+        // Get the save file path using system dialog
+        const result = await window.electronAPI.fileLocation();
+
+        if (result) {
+            // Update the corresponding input field with the selected path
+            const inputElement = document.getElementById(inputId);
+            if (inputElement) {
+                inputElement.value = result;
+            }
+        }
+    } catch (error) {
+        console.error('Error selecting file location:', error);
+    }
 }
 
+// Function to handle folder selection
+async function selectFolderLocation(inputId) {
+    try {
+        // Get the folder path using system dialog
+        const result = await window.electronAPI.folderLocation();
+
+        if (result) {
+            // Update the corresponding input field with the selected path
+            const inputElement = document.getElementById(inputId);
+            if (inputElement) {
+                inputElement.value = result;
+            }
+        }
+    } catch (error) {
+        console.error('Error selecting folder location:', error);
+    }
+}
+async function openFileLocation(inputId){
+    try {
+        // Get the folder path using system dialog
+        const result = await window.electronAPI.fileSelectLocation();
+
+        if (result) {
+            // Update the corresponding input field with the selected path
+            const inputElement = document.getElementById(inputId);
+            if (inputElement) {
+                inputElement.value = result;
+            }
+        }
+    } catch (error) {
+        console.error('Error selecting folder location:', error);
+    }
+}
 function handleTabSwitch() {
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
