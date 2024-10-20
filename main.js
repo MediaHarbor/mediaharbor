@@ -65,13 +65,6 @@ function loadDownloadsFromDatabase(callback) {
         callback(rows);
     });
 }
-function getDownloads() {
-    return new Promise((resolve, reject) => {
-        loadDownloadsFromDatabase((rows) => {
-            resolve(rows);
-        });
-    });
-}
 async function fetchWebsiteTitle(url) {
     try {
         const response = await axios.get(url, {
@@ -755,26 +748,28 @@ function createWindow() {
                                 settings.qobuz_token_or_email = streamripConfig.qobuz?.use_auth_token || true;
                                 settings.qobuz_email_or_userid = streamripConfig.qobuz?.email_or_userid || "";
                                 settings.qobuz_password_or_token = streamripConfig.qobuz?.password_or_token || "";
+                                settings.qobuz_app_id = streamripConfig.qobuz?.app_id || "";
+                                settings.qobuz_secrets = streamripConfig.qobuz?.secrets
 
                                 // Tidal settings
-                                settings.tidal_download_videos = streamripConfig.tidal?.download_videos || true;
+                                settings.tidal_download_videos = streamripConfig.tidal?.download_videos;
 
                                 // Deezer settings
                                 settings.deezer_use_deezloader = streamripConfig.deezer?.use_deezloader;
                                 settings.deezer_arl = streamripConfig.deezer?.arl || '';
 
                                 // Database settings
-                                settings.downloads_database_check = streamripConfig.database?.downloads_enabled || true;
-                                settings.failed_downloads_database_check = streamripConfig.database?.failed_downloads_enabled || true;
+                                settings.downloads_database_check = streamripConfig.database?.downloads_enabled;
+                                settings.failed_downloads_database_check = streamripConfig.database?.failed_downloads_enabled;
                                 settings.downloads_database = streamripConfig.database?.downloads_path;
                                 settings.failed_downloads_database = streamripConfig.database?.failed_downloads_path;
                                 // Conversion settings
-                                settings.conversion_check = streamripConfig.conversion?.enabled || false;
+                                settings.conversion_check = streamripConfig.conversion?.enabled;
                                 settings.conversion_codec = streamripConfig.conversion?.codec || "ALAC";
                                 settings.conversion_sampling_rate = streamripConfig.conversion?.sampling_rate || 48000;
                                 // MetaData settings
-                                settings.meta_album_name_playlist_check = streamripConfig.metadata?.set_playlist_to_album || true;
-                                settings.meta_album_order_playlist_check = streamripConfig.metadata?.renumber_playlist_tracks || true;
+                                settings.meta_album_name_playlist_check = streamripConfig.metadata?.set_playlist_to_album;
+                                settings.meta_album_order_playlist_check = streamripConfig.metadata?.renumber_playlist_tracks;
                                 settings.excluded_tags = streamripConfig.metadata?.exclude || [];
 
                                 // Save the updated settings
@@ -798,9 +793,7 @@ function createWindow() {
     });
 
 // Update the save-settings handler
-// Update the save-settings handler
     ipcMain.on('save-settings', async (event, settings) => {
-        // First save to electron settings file
         try {
             await fs.promises.writeFile(settingsFilePath, JSON.stringify(settings));
         } catch (err) {
@@ -818,7 +811,6 @@ function createWindow() {
             }
 
             try {
-                // Read existing streamrip config
                 const data = await fs.promises.readFile(paths.configPath, 'utf8');
                 let config;
 
@@ -852,7 +844,16 @@ function createWindow() {
                     download_booklets: settings.qobuz_download_booklets,
                     use_auth_token: settings.qobuz_token_or_email,
                     email_or_userid: settings.qobuz_email_or_userid,
-                    password_or_token: settings.qobuz_password_or_token
+                    password_or_token: settings.qobuz_password_or_token,
+                    app_id: settings.qobuz_app_id,
+                    secrets: Array.isArray(settings.qobuz_secrets)
+                        ? settings.qobuz_secrets
+                        : settings.qobuz_secrets.trim() === ""
+                            ? [] // Ensures an empty array when input is empty
+                            : settings.qobuz_secrets
+                                .split(/[\s,]+/) // Split by commas and/or whitespace
+                                .map(secret => secret.trim()), // Trim each secret to remove extra spaces
+
                 };
                 // Update tidal section
                 config.tidal = {
@@ -1397,6 +1398,8 @@ function getDefaultSettings() {
         qobuz_token_or_email: false,
         qobuz_email_or_userid: "",
         qobuz_password_or_token: "",
+        qobuz_app_id: "",
+        qobuz_secrets: "",
         tidal_download_videos: false,
         deezer_use_deezloader: true,
         deezer_arl: "",
@@ -1429,39 +1432,3 @@ app.on('activate', () => {
         createWindow();
     }
 });
-function parseToml(data) {
-    return TOML.parse(data);
-}
-
-function stringifyToml(data) {
-    return TOML.stringify(data);
-}
-function getCustomStreamripConfigPath(callback) {
-    const streamripProcess = spawn('custom_rip', ['config', 'path']);
-    let stdout = '';
-    let stderr = '';
-
-    streamripProcess.stdout.on('data', (data) => {
-        stdout += data.toString();
-    });
-
-    streamripProcess.stderr.on('data', (data) => {
-        stderr += data.toString();
-    });
-
-    streamripProcess.on('close', (code) => {
-        if (code !== 0) {
-            console.error(`Error getting custom_rip config path: ${stderr}`);
-            callback(null);  // Call the callback with null in case of error
-            return;
-        }
-
-        const configPathMatch = stdout.match(/Config path: '(.+)'/);
-        if (configPathMatch && configPathMatch[1]) {
-            callback(configPathMatch[1]);  // Return the config path if matched
-        } else {
-            console.error('Could not find config path in output:', stdout);
-            callback(null);  // Return null if no match is found
-        }
-    });
-}

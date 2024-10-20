@@ -430,6 +430,7 @@ function populateSettings() {
         'conversion_check': 'checked', 'conversion_codec': 'value', 'conversion_sampling_rate': 'value',
         'conversion_bit_depth': 'value', 'meta_album_name_playlist_check': 'checked',
         'meta_album_order_playlist_check': 'checked','excluded_tags': 'value', 'speed_limit_type': 'value',
+        'qobuz_app_id': 'value', 'qobuz_secrets': 'value',
     };
 
     Object.keys(settingFields).forEach(id => {
@@ -501,7 +502,9 @@ function addSettingsListeners() {
         { id: 'meta_album_name_playlist_check', key: 'meta_album_name_playlist_check', type: 'checked' },
         { id: 'meta_album_order_playlist_check', key: 'meta_album_order_playlist_check', type: 'checked' },
         { id: 'excluded_tags', key: 'excluded_tags', type: 'value' },
-        {id: 'speed_limit_type', key:'speed_limit_type', type: 'value'}
+        {id: 'speed_limit_type', key:'speed_limit_type', type: 'value'},
+        {id: 'qobuz_app_id', key: 'qobuz_app_id', type: 'value' },
+        {id: 'qobuz_secrets', key: 'qobuz_secrets', type: 'value' },
     ];
 
     settingsMapping.forEach(({ id, key, type }) => {

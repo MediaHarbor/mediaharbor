@@ -36,18 +36,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     // URL processing
-    processUrl: (url) => ipcRenderer.invoke('process-url', url),
     deleteDownload: (id) => ipcRenderer.invoke('deleteDownload', id),
     showItemInFolder: (location) => ipcRenderer.invoke('showItemInFolder', location),
     clearDownloadsDatabase: () => ipcRenderer.invoke('clearDownloadsDatabase'),
     fileLocation: () => ipcRenderer.invoke('dialog:saveFile'),
     folderLocation: () => ipcRenderer.invoke('dialog:openFolder'),
     fileSelectLocation: () => ipcRenderer.invoke('dialog:openFile'),
-});
-
-// Theme detection
-contextBridge.exposeInMainWorld('theme', {
-    isDarkMode: () => {
-        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
 });
