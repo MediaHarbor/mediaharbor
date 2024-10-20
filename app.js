@@ -619,7 +619,6 @@ function handleDeezerDownload() {
     const url = document.getElementById('deezer-url').value;
     const qualityDropdown = document.getElementById('deezer-quality');
     let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value; // Fetch quality value
-
     if (quality === undefined) {
         quality = "1";
     }

@@ -401,6 +401,13 @@ function startDownload(event, url, quality, settings, videoInfo = null, isGeneri
         if (code !== 0) {
             event.reply('download-error', `Process exited with code ${code}`);
         } else {
+            const downloadInfo = {
+                downloadName: videoInfo.title,
+                downloadArtistOrUploader: videoInfo.uploader,
+                downloadLocation: settings.downloadLocation || app.getPath('downloads'),
+                downloadThumbnail: videoInfo.thumbnail
+            };
+            saveDownloadToDatabase(downloadInfo);
             event.reply('download-complete', {
                 order: downloadCount
             });
@@ -761,54 +768,6 @@ function createWindow() {
         });
     });
 
-    ipcMain.on('start-deezer-download', (event, data) => {
-        const { url, quality } = data;
-        const ripCommand = 'custom_rip';
-        const ripArgs = ['-q', quality, 'url', url];
-
-        downloadCount++;
-        event.reply('download-info', {
-            title: 'Deezer Download',
-            order: downloadCount
-        });
-
-        const deezerIdMatch = url.match(/\/track\/(\d+)/);
-        if (deezerIdMatch) {
-            const trackId = deezerIdMatch[1];
-            getDeezerDetails(trackId, event, downloadCount);
-        }
-
-        const ripProcess = spawn(ripCommand, ripArgs);
-
-        ripProcess.stdout.on('data', (data) => {
-            const output = data.toString();
-            console.log(output);
-            const progressMatch = output.match(/(\d+\.\d+)%/);
-            if (progressMatch) {
-                const progress = parseFloat(progressMatch[1]);
-                event.reply('download-update', {
-                    progress,
-                    order: downloadCount
-                });
-            }
-        });
-
-        ripProcess.stderr.on('data', (errorData) => {
-            const errorOutput = errorData.toString();
-            console.error(`Error: ${errorOutput}`);
-            event.reply('download-error', `Error: ${errorOutput}`);
-        });
-
-        ripProcess.on('exit', (code) => {
-            if (code !== 0) {
-                event.reply('download-error', `Process exited with code ${code}`);
-            } else {
-                event.reply('download-complete', {
-                    order: downloadCount
-                });
-            }
-        });
-    });
     ipcMain.on('start-yt-video-download', (event, data) => {
         fs.readFile(settingsFilePath, 'utf8', (err, settingsData) => {
             const settings = err ? getDefaultSettings() : JSON.parse(settingsData);
@@ -822,6 +781,32 @@ function createWindow() {
             handleYtDlpDownload(event, data, settings, true);
         });
     });
+
+    ipcMain.on('start-streamrip', (event, command) => {
+        const process = spawn('custom_rip', command.split(' '));
+
+        process.stdout.on('data', (data) => {
+            const output = data.toString();
+            console.log(output);
+            event.reply('streamrip-output', output);
+        });
+
+        process.stderr.on('data', (errorData) => {
+            const errorOutput = errorData.toString();
+            console.error(`Error: ${errorOutput}`);
+            event.reply('streamrip-error', `Error: ${errorOutput}`);
+        });
+
+        process.on('exit', (code) => {
+            if (code !== 0) {
+                event.reply('streamrip-error', `Process exited with code ${code}`);
+            } else {
+                event.reply('streamrip-complete');
+            }
+        });
+    });
+
+    // Qobuz, Deezer, Tidal Downloads
 
     ipcMain.on('start-qobuz-download', (event, data) => {
         const { url, quality } = data;
@@ -855,17 +840,77 @@ function createWindow() {
                     order: downloadCount
                 });
             }
+        });
 
-            if (output.includes('Skipping track') && output.includes('Marked as downloaded')) {
-                const skippedEidMatch = output.match(/Skipping track (\d+)/);
-                if (skippedEidMatch) {
-                    const skippedEid = skippedEidMatch[1];
-                    getQobuzDetails(skippedEid, event, downloadCount);
-                    event.reply('download-update', {
-                        progress: 100,
-                        order: downloadCount
-                    });
-                }
+        ripProcess.stderr.on('data', (errorData) => {
+            const errorOutput = errorData.toString();
+            console.error(`Error: ${errorOutput}`);
+            event.reply('download-error', `Error: ${errorOutput}`);
+        });
+
+        ripProcess.on('exit', (code) => {
+            if (code === 0) {
+                // Get the settings for download location
+                fs.readFile(settingsFilePath, 'utf8', (err, settingsData) => {
+                    const settings = err ? getDefaultSettings() : JSON.parse(settingsData);
+                    const downloadLocation = settings.downloadLocation || app.getPath('downloads');
+
+                    // Save to database only if we have track details
+                    if (currentEid) {
+                        getQobuzDetails(currentEid, {
+                            reply: (channel, details) => {
+                                if (channel === 'qobuz-details') {
+                                    const downloadInfo = {
+                                        downloadName: details.title,
+                                        downloadArtistOrUploader: details.album.artist.name,
+                                        downloadLocation: downloadLocation,
+                                        downloadThumbnail: details.album.image.small,
+                                        service: 'qobuz'
+                                    };
+                                    saveDownloadToDatabase(downloadInfo);
+                                }
+                            }
+                        }, downloadCount);
+                    }
+                });
+                event.reply('download-complete', { order: downloadCount });
+            } else {
+                event.reply('download-error', `Process exited with code ${code}`);
+            }
+        });
+    });
+
+// Modified Deezer download handler
+    ipcMain.on('start-deezer-download', (event, data) => {
+        const { url, quality } = data;
+        const ripCommand = 'custom_rip';
+        const ripArgs = ['-q', quality, 'url', url];
+
+        downloadCount++;
+        event.reply('download-info', {
+            title: 'Deezer Download',
+            order: downloadCount
+        });
+
+        let trackId = null;
+        const deezerIdMatch = url.match(/\/track\/(\d+)/);
+        if (deezerIdMatch) {
+            trackId = deezerIdMatch[1];
+            getDeezerDetails(trackId, event, downloadCount);
+        }
+
+        const ripProcess = spawn(ripCommand, ripArgs);
+
+        ripProcess.stdout.on('data', (data) => {
+            const output = data.toString();
+            console.log(output);
+            const progressMatch = output.match(/(\d+\.\d+)%/);
+            if (progressMatch) {
+                const progress = parseFloat(progressMatch[1]);
+                event.reply('download-update', {
+                    progress,
+                    order: downloadCount
+                });
             }
         });
 
@@ -876,39 +921,36 @@ function createWindow() {
         });
 
         ripProcess.on('exit', (code) => {
-            if (code !== 0) {
-                event.reply('download-error', `Process exited with code ${code}`);
-            } else {
-                event.reply('download-complete', {
-                    order: downloadCount
+            if (code === 0) {
+                fs.readFile(settingsFilePath, 'utf8', (err, settingsData) => {
+                    const settings = err ? getDefaultSettings() : JSON.parse(settingsData);
+                    const downloadLocation = settings.downloadLocation || app.getPath('downloads');
+
+                    if (trackId) {
+                        getDeezerDetails(trackId, {
+                            reply: (channel, details) => {
+                                if (channel === 'deezer-details') {
+                                    const downloadInfo = {
+                                        downloadName: details.title,
+                                        downloadArtistOrUploader: details.artist.name,
+                                        downloadLocation: downloadLocation,
+                                        downloadThumbnail: details.album.cover_medium,
+                                        service: 'deezer'
+                                    };
+                                    saveDownloadToDatabase(downloadInfo);
+                                }
+                            }
+                        }, downloadCount);
+                    }
                 });
-            }
-        });
-    });
-
-    ipcMain.on('start-streamrip', (event, command) => {
-        const process = spawn('custom_rip', command.split(' '));
-
-        process.stdout.on('data', (data) => {
-            const output = data.toString();
-            console.log(output);
-            event.reply('streamrip-output', output);
-        });
-
-        process.stderr.on('data', (errorData) => {
-            const errorOutput = errorData.toString();
-            console.error(`Error: ${errorOutput}`);
-            event.reply('streamrip-error', `Error: ${errorOutput}`);
-        });
-
-        process.on('exit', (code) => {
-            if (code !== 0) {
-                event.reply('streamrip-error', `Process exited with code ${code}`);
+                event.reply('download-complete', { order: downloadCount });
             } else {
-                event.reply('streamrip-complete');
+                event.reply('download-error', `Process exited with code ${code}`);
             }
         });
     });
+
+// Modified Tidal download handler
     ipcMain.on('start-tidal-download', (event, data) => {
         const { url, quality } = data;
         const ripCommand = 'custom_rip';
@@ -920,14 +962,14 @@ function createWindow() {
             order: downloadCount
         });
 
+        let currentTrackId = null;
         const tidalIdMatch = url.match(/\/track\/(\d+)/);
         if (tidalIdMatch) {
-            const trackId = tidalIdMatch[1];
-            getTidalDetails(trackId, event, downloadCount);
+            currentTrackId = tidalIdMatch[1];
+            getTidalDetails(currentTrackId, event, downloadCount);
         }
 
         const ripProcess = spawn(ripCommand, ripArgs);
-        let currentTrackId = null;
 
         ripProcess.stdout.on('data', (data) => {
             const output = data.toString();
@@ -947,18 +989,6 @@ function createWindow() {
                     order: downloadCount
                 });
             }
-
-            if (output.includes('Skipping track') && output.includes('Marked as downloaded')) {
-                const skippedTrackIdMatch = output.match(/Skipping track (\d+)/);
-                if (skippedTrackIdMatch) {
-                    const skippedTrackId = skippedTrackIdMatch[1];
-                    getTidalDetails(skippedTrackId, event, downloadCount);
-                    event.reply('download-update', {
-                        progress: 100,
-                        order: downloadCount
-                    });
-                }
-            }
         });
 
         ripProcess.stderr.on('data', (errorData) => {
@@ -968,16 +998,34 @@ function createWindow() {
         });
 
         ripProcess.on('exit', (code) => {
-            if (code !== 0) {
-                event.reply('download-error', `Process exited with code ${code}`);
-            } else {
-                event.reply('download-complete', {
-                    order: downloadCount
+            if (code === 0) {
+                fs.readFile(settingsFilePath, 'utf8', (err, settingsData) => {
+                    const settings = err ? getDefaultSettings() : JSON.parse(settingsData);
+                    const downloadLocation = settings.downloadLocation || app.getPath('downloads');
+
+                    if (currentTrackId) {
+                        getTidalDetails(currentTrackId, {
+                            reply: (channel, details) => {
+                                if (channel === 'tidal-details') {
+                                    const downloadInfo = {
+                                        downloadName: details.title,
+                                        downloadArtistOrUploader: details.artist,
+                                        downloadLocation: downloadLocation,
+                                        downloadThumbnail: details.thumbnail,
+                                        service: 'tidal'
+                                    };
+                                    saveDownloadToDatabase(downloadInfo);
+                                }
+                            }
+                        }, downloadCount);
+                    }
                 });
+                event.reply('download-complete', { order: downloadCount });
+            } else {
+                event.reply('download-error', `Process exited with code ${code}`);
             }
         });
     });
-
 
 }
 
