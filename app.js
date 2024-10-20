@@ -48,6 +48,45 @@ const pages = {
     help: 'help.html'
 };
 
+async function initializeDownloadStatusPage() {
+    console.log('Download status page initializing...');
+    console.log('electronAPI available:', !!window.electronAPI);
+    console.log('getDownloads available:', !!window.electronAPI.getDownloads);
+    const downloadContainer = document.getElementById('download-history-container');
+
+    try {
+        console.log('Fetching downloads...');
+        const downloads = await window.electronAPI.getDownloads();
+        console.log('Received downloads:', downloads);
+
+        if (!downloads || downloads.length === 0) {
+            downloadContainer.innerHTML = '<p class="no-downloads">No downloads found.</p>';
+            return;
+        }
+
+        const downloadsList = downloads.map(download => `
+            <div class="download-item">
+                <div class="download-thumbnail">
+                    ${download.downloadThumbnail ?
+            `<img src="${download.downloadThumbnail}" alt="${download.downloadName}">` :
+            '<div class="no-thumbnail">No thumbnail</div>'
+        }
+                </div>
+                <div class="download-info">
+                    <h3 class="download-name">${download.downloadName}</h3>
+                    <p class="download-artist">${download.downloadArtistOrUploader}</p>
+                    <p class="download-location">${download.downloadLocation}</p>
+                </div>
+            </div>
+        `).join('');
+
+        downloadContainer.innerHTML = downloadsList;
+    } catch (error) {
+        console.error('Error loading downloads:', error);
+        downloadContainer.innerHTML = '<p class="error">Error loading downloads: ' + error.message + '</p>';
+    }
+}
+
 async function loadPage(pageName) {
     const contentDiv = document.getElementById('content');
     try {
@@ -67,6 +106,9 @@ async function loadPage(pageName) {
         }
         else if (pageName === 'help') {
             initializeHelpTab();
+        }
+        else if (pageName === 'downloads') {
+            await initializeDownloadStatusPage();
         }
     } catch (error) {
         contentDiv.innerHTML = '<p>Error loading the page: ' + error.message + '</p>';

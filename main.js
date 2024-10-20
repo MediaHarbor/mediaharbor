@@ -4,9 +4,72 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const os = require('os');
 const TOML = require('@iarna/toml');
-let downloadCount = 0; // Move downloadCount to module scope
+let downloadCount = 0;
 const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
+const sqlite3 = require('sqlite3').verbose();
 
+function loadSettings() {
+    try {
+        const settingsData = fs.readFileSync(settingsFilePath, 'utf8');
+        return JSON.parse(settingsData);
+    } catch (err) {
+        console.log('No user settings found, using default settings.');
+        return getDefaultSettings(); // Fall back to default settings
+    }
+}
+
+const userSettings = loadSettings();
+const dbPath = userSettings.downloadsDatabasePath || path.join(app.getPath('userData'), 'downloads_database.db');
+
+
+// Open or create the SQLite database
+let db = new sqlite3.Database(dbPath, (err) => {
+    if (err) {
+        console.error('Error opening the database:', err.message);
+    } else {
+        console.log('Connected to the SQLite database.');
+        // Create the table if it doesn't exist
+        db.run(`CREATE TABLE IF NOT EXISTS downloads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            downloadName TEXT,
+            downloadArtistOrUploader TEXT,
+            downloadLocation TEXT,
+            downloadThumbnail TEXT
+        )`);
+    }
+});
+
+function saveDownloadToDatabase(downloadInfo) {
+    const sql = `INSERT INTO downloads (downloadName, downloadArtistOrUploader, downloadLocation, downloadThumbnail) 
+                 VALUES (?, ?, ?, ?)`;
+
+    db.run(sql, [downloadInfo.downloadName, downloadInfo.downloadArtistOrUploader, downloadInfo.downloadLocation, downloadInfo.downloadThumbnail], function (err) {
+        if (err) {
+            return console.error('Error saving download to database:', err.message);
+        }
+        console.log(`A row has been inserted with rowid ${this.lastID}`);
+    });
+}
+
+function loadDownloadsFromDatabase(callback) {
+    const sql = `SELECT * FROM downloads`;
+
+    db.all(sql, [], (err, rows) => {
+        if (err) {
+            console.error('Error loading downloads from database:', err.message);
+            callback([]);  // Return empty array on error
+            return;
+        }
+        callback(rows);
+    });
+}
+function getDownloads() {
+    return new Promise((resolve, reject) => {
+        loadDownloadsFromDatabase((rows) => {
+            resolve(rows);
+        });
+    });
+}
 
 function buildYtDlpMusicArgs(url, quality, settings) {
     const downloadPath = settings.downloadLocation || path.join(os.homedir(), 'Downloads');
@@ -144,12 +207,17 @@ function startMusicDownload(event, url, quality, settings, videoInfo) {
     });
 
     ytDlp.on('exit', (code) => {
-        if (code !== 0) {
-            event.reply('download-error', `Process exited with code ${code}`);
+        if (code === 0) {
+            const downloadInfo = {
+                downloadName: videoInfo.title,
+                downloadArtistOrUploader: videoInfo.uploader,
+                downloadLocation: settings.downloadLocation || app.getPath('downloads'),
+                downloadThumbnail: videoInfo.thumbnail
+            };
+            saveDownloadToDatabase(downloadInfo);
+            event.reply('download-complete', { order: downloadCount });
         } else {
-            event.reply('download-complete', {
-                order: downloadCount
-            });
+            event.reply('download-error', `Process exited with code ${code}`);
         }
     });
 }
@@ -339,6 +407,18 @@ function startDownload(event, url, quality, settings, videoInfo = null, isGeneri
         }
     });
 }
+
+ipcMain.handle('load-downloads', (event) => {
+    return new Promise((resolve, reject) => {
+        loadDownloadsFromDatabase((rows) => {
+            if (rows) {
+                resolve(rows);
+            } else {
+                reject('No downloads found');
+            }
+        });
+    });
+});
 
 function createWindow() {
     const win = new BrowserWindow({

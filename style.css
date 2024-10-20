@@ -169,6 +169,12 @@ button:hover {
     gap: 20px;
     padding: 20px;
 }
+#download-history-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px;
+}
 
 .download-entry {
     display: flex;
@@ -793,4 +799,69 @@ select.dropdown-btn:focus {
 
 .dependent-field.active {
     display: block;
+}
+
+.download-item {
+    display: flex;
+    padding: 15px;
+    margin-bottom: 15px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background-color: #fff;
+}
+
+.download-thumbnail {
+    width: 120px;
+    height: 120px;
+    margin-right: 20px;
+    overflow: hidden;
+}
+
+.download-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.no-thumbnail {
+    width: 100%;
+    height: 100%;
+    background-color: #f0f0f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+}
+
+.download-info {
+    flex: 1;
+}
+
+.download-name {
+    margin: 0 0 10px 0;
+    font-size: 18px;
+    color: #333;
+}
+
+.download-artist {
+    margin: 0 0 5px 0;
+    color: #666;
+}
+
+.download-location {
+    margin: 0;
+    color: #888;
+    font-size: 14px;
+}
+
+.no-downloads {
+    text-align: center;
+    color: #666;
+    padding: 40px;
+}
+
+.error {
+    color: #ff4444;
+    text-align: center;
+    padding: 20px;
 }

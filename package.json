@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "electron-store": "^10.0.0"
+    "electron-store": "^10.0.0",
+    "sqlite3": "^5.1.7"
   }
 }

@@ -1,6 +1,12 @@
+// preload.js
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Combine all electronAPI methods into a single object
 contextBridge.exposeInMainWorld('electronAPI', {
+    // Download-related methods
+    getDownloads: () => ipcRenderer.invoke('load-downloads'),
+
+    // Existing channel handlers
     send: (channel, data) => {
         const validChannels = [
             'start-yt-music-download',
@@ -17,30 +23,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
             'save-settings',
             'load-settings',
             'get-default-settings',
+            'download-complete',
+            'download-error'
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);
         }
     },
+
     receive: (channel, func) => {
         ipcRenderer.on(channel, (event, ...args) => func(...args));
-    }
-});
+    },
 
-contextBridge.exposeInMainWorld('theme', {
-    isDarkMode: () => {
-        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-});
-contextBridge.exposeInMainWorld('electronAPI', {
+    // URL processing
     processUrl: (url) => ipcRenderer.invoke('process-url', url)
 });
 
-contextBridge.exposeInMainWorld('electronAPI', {
-    send: (channel, data) => {
-        ipcRenderer.send(channel, data);
-    },
-    receive: (channel, func) => {
-        ipcRenderer.on(channel, (event, ...args) => func(...args));
+// Theme detection
+contextBridge.exposeInMainWorld('theme', {
+    isDarkMode: () => {
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     }
 });
