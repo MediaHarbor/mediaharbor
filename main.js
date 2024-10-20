@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
+const { shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -40,7 +41,6 @@ let db = new sqlite3.Database(dbPath, (err) => {
         )`);
     }
 });
-
 function saveDownloadToDatabase(downloadInfo) {
     const sql = `INSERT INTO downloads (downloadName, downloadArtistOrUploader, downloadLocation, downloadThumbnail) 
                  VALUES (?, ?, ?, ?)`;
@@ -496,6 +496,19 @@ async function startDownload(event, url, quality, settings, videoInfo = null, is
         }
     });
 }
+function closeDatabase() {
+    return new Promise((resolve, reject) => {
+        db.close((err) => {
+            if (err) {
+                reject(err);
+            } else {
+                console.log('Database connection closed.');
+                resolve();
+            }
+        });
+    });
+}
+
 ipcMain.handle('load-downloads', (event) => {
     return new Promise((resolve, reject) => {
         loadDownloadsFromDatabase((rows) => {
@@ -506,6 +519,81 @@ ipcMain.handle('load-downloads', (event) => {
             }
         });
     });
+});
+
+ipcMain.handle('deleteDownload', async (event, id) => {
+    return new Promise((resolve, reject) => {
+        const sql = 'DELETE FROM downloads WHERE id = ?';
+        db.run(sql, [id], (err) => {
+            if (err) {
+                console.error('Error deleting download:', err);
+                reject(err);
+                return;
+            }
+            resolve();
+        });
+    });
+});
+
+ipcMain.handle('showItemInFolder', async (event, filePath) => {
+    try {
+        // Normalize the path to handle any path format issues
+        const normalizedPath = path.normalize(filePath);
+
+        // Check if path exists
+        if (fs.existsSync(normalizedPath)) {
+            // If it's a directory, show the folder
+            if (fs.statSync(normalizedPath).isDirectory()) {
+                // On Windows, we can use explorer.exe to open the folder
+                if (process.platform === 'win32') {
+                    require('child_process').exec(`explorer "${normalizedPath}"`);
+                } else {
+                    shell.openPath(normalizedPath);
+                }
+            } else {
+                // If it's a file, show it in the folder
+                shell.showItemInFolder(normalizedPath);
+            }
+            return true;
+        } else {
+            throw new Error('File or folder not found');
+        }
+    } catch (error) {
+        console.error('Error showing item in folder:', error);
+        throw error;
+    }
+});
+
+ipcMain.handle('clearDownloadsDatabase', async () => {
+    console.log(userSettings.downloadsDatabasePath)
+    try {
+        await closeDatabase(); // Close the database connection first
+
+        if (fs.existsSync(userSettings.downloadsDatabasePath)) {
+            fs.unlinkSync(userSettings.downloadsDatabasePath);
+            let db = new sqlite3.Database(dbPath, (err) => {
+                if (err) {
+                    console.error('Error opening the database:', err.message);
+                } else {
+                    console.log('Connected to the SQLite database.');
+                    // Create the table if it doesn't exist
+                    db.run(`CREATE TABLE IF NOT EXISTS downloads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            downloadName TEXT,
+            downloadArtistOrUploader TEXT,
+            downloadLocation TEXT,
+            downloadThumbnail TEXT
+        )`);
+                }
+            });
+            return { success: true };
+        } else {
+            return { success: false, message: 'File not found' };
+        }
+    } catch (error) {
+        return { success: false, message: error.message };
+    }
+
 });
 
 function createWindow() {

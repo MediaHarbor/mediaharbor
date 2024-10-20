@@ -36,7 +36,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     // URL processing
-    processUrl: (url) => ipcRenderer.invoke('process-url', url)
+    processUrl: (url) => ipcRenderer.invoke('process-url', url),
+    deleteDownload: (id) => ipcRenderer.invoke('deleteDownload', id),
+    showItemInFolder: (location) => ipcRenderer.invoke('showItemInFolder', location),
+    clearDownloadsDatabase: () => ipcRenderer.invoke('clearDownloadsDatabase')
 });
 
 // Theme detection

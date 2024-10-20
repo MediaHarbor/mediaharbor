@@ -50,12 +50,9 @@ const pages = {
 
 async function initializeDownloadStatusPage() {
     console.log('Download status page initializing...');
-    console.log('electronAPI available:', !!window.electronAPI);
-    console.log('getDownloads available:', !!window.electronAPI.getDownloads);
     const downloadContainer = document.getElementById('download-history-container');
 
     try {
-        console.log('Fetching downloads...');
         const downloads = await window.electronAPI.getDownloads();
         console.log('Received downloads:', downloads);
 
@@ -64,26 +61,95 @@ async function initializeDownloadStatusPage() {
             return;
         }
 
-        const downloadsList = downloads.map(download => `
-            <div class="download-item">
-                <div class="download-thumbnail">
-                    ${download.downloadThumbnail ?
-            `<img src="${download.downloadThumbnail}" alt="${download.downloadName}">` :
-            '<div class="no-thumbnail">No thumbnail</div>'
-        }
+        const downloadsList = downloads.map(download => {
+            // Replace backslashes with forward slashes and escape special characters
+            const escapedLocation = download.downloadLocation
+                .replace(/\\/g, '\\\\')  // Escape backslashes first
+                .replace(/'/g, "\\'");    // Escape single quotes
+
+            return `
+                <div class="download-item" data-id="${download.id}">
+                    <div class="download-thumbnail">
+                        ${download.downloadThumbnail ?
+                `<img src="${download.downloadThumbnail}" alt="${download.downloadName}">` :
+                '<div class="no-thumbnail">No thumbnail</div>'
+            }
+                    </div>
+                    <div class="download-info">
+                        <h3 class="download-name">${download.downloadName}</h3>
+                        <p class="download-artist">${download.downloadArtistOrUploader}</p>
+                        <p class="download-location">${download.downloadLocation}</p>
+                        <div class="download-actions">
+                            <button class="fab-button delete" onclick="deleteDownload(${download.id})" title="Delete">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                            <button class="fab-button locate" onclick="locateDownload('${escapedLocation}')" title="Locate">
+                                <i class="fas fa-folder-open"></i>
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <div class="download-info">
-                    <h3 class="download-name">${download.downloadName}</h3>
-                    <p class="download-artist">${download.downloadArtistOrUploader}</p>
-                    <p class="download-location">${download.downloadLocation}</p>
-                </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         downloadContainer.innerHTML = downloadsList;
     } catch (error) {
         console.error('Error loading downloads:', error);
         downloadContainer.innerHTML = '<p class="error">Error loading downloads: ' + error.message + '</p>';
+    }
+}
+
+async function locateDownload(location) {
+    try {
+        console.log('Attempting to show file:', location);
+        const result = await window.electronAPI.showItemInFolder(location);
+        if (!result) {
+            console.error('Failed to show file location');
+        }
+    } catch (error) {
+        console.error('Error locating download:', error);
+        alert('Could not locate file: ' + error.message);
+    }
+}
+
+async function deleteDownload(id) {
+    try {
+        await window.electronAPI.deleteDownload(id);
+        const element = document.querySelector(`[data-id="${id}"]`);
+        if (element) {
+            element.remove();
+        }
+    } catch (error) {
+        console.error('Error deleting download:', error);
+    }
+}
+
+async function clearDownloadsDatabase() {
+    const result = await Swal.fire({
+        title: 'Clear Downloads?',
+        text: 'Are you sure you want to clear all downloads from the database?',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Yes, clear it!',
+        cancelButtonText: 'No, keep them',
+        reverseButtons: true,
+        customClass: {
+            confirmButton: 'btn btn-success',
+            cancelButton: 'btn btn-danger'
+        },
+        buttonsStyling: false
+    });
+
+    if (result.isConfirmed) {
+        try {
+            await window.electronAPI.clearDownloadsDatabase();
+            document.getElementById('download-history-container').innerHTML =
+                '<p class="no-downloads">No downloads found.</p>';
+            Swal.fire('Cleared!', 'Your download history has been cleared.', 'success');
+        } catch (error) {
+            console.error('Error clearing downloads database:', error);
+            Swal.fire('Error!', 'There was an error clearing the downloads database.', 'error');
+        }
     }
 }
 
