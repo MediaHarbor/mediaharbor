@@ -320,6 +320,8 @@ async function selectFileLocation(inputId) {
             const inputElement = document.getElementById(inputId);
             if (inputElement) {
                 inputElement.value = result;
+                settings[inputId] = result;
+                window.electronAPI.send('save-settings', settings);
             }
         }
     } catch (error) {
@@ -338,13 +340,16 @@ async function selectFolderLocation(inputId) {
             const inputElement = document.getElementById(inputId);
             if (inputElement) {
                 inputElement.value = result;
+                // Save settings right after updating the input
+                settings[inputId] = result;
+                window.electronAPI.send('save-settings', settings);
             }
         }
     } catch (error) {
         console.error('Error selecting folder location:', error);
     }
 }
-async function openFileLocation(inputId){
+async function openFileLocation(inputId) {
     try {
         // Get the folder path using system dialog
         const result = await window.electronAPI.fileSelectLocation();
@@ -354,6 +359,9 @@ async function openFileLocation(inputId){
             const inputElement = document.getElementById(inputId);
             if (inputElement) {
                 inputElement.value = result;
+                // Save settings right after updating the input
+                settings[inputId] = result;
+                window.electronAPI.send('save-settings', settings);
             }
         }
     } catch (error) {
@@ -525,6 +533,8 @@ function addSettingsListeners() {
             }
         }
     });
+
+
 }
 
 function initializeVideoTab() {
