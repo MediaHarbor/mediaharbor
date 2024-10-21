@@ -6,10 +6,15 @@
 }
 
 body {
+    -webkit-user-select: none;
+    -webkit-app-region: no-drag;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     display: flex;
     min-height: 100vh;
     background-color: #f0f0f0;
+}
+img {
+    pointer-events: none;
 }
 
 /* Window controls */
@@ -864,4 +869,10 @@ select.dropdown-btn:focus {
     color: #ff4444;
     text-align: center;
     padding: 20px;
+}
+.clear-all-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1;
 }

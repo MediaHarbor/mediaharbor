@@ -43,7 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
 const pages = {
     music: 'music.html',
     video: 'video.html',
-    downloads: 'download_status.html',
+    downloads: 'downloads.html',
     settings: 'settings.html',
     help: 'help.html'
 };

@@ -564,21 +564,8 @@ ipcMain.handle('clearDownloadsDatabase', async () => {
 
         if (fs.existsSync(userSettings.downloadsDatabasePath)) {
             fs.unlinkSync(userSettings.downloadsDatabasePath);
-            let db = new sqlite3.Database(dbPath, (err) => {
-                if (err) {
-                    console.error('Error opening the database:', err.message);
-                } else {
-                    console.log('Connected to the SQLite database.');
-                    // Create the table if it doesn't exist
-                    db.run(`CREATE TABLE IF NOT EXISTS downloads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            downloadName TEXT,
-            downloadArtistOrUploader TEXT,
-            downloadLocation TEXT,
-            downloadThumbnail TEXT
-        )`);
-                }
-            });
+            app.relaunch();
+            app.exit(0);
             return { success: true };
         } else {
             return { success: false, message: 'File not found' };
@@ -586,7 +573,6 @@ ipcMain.handle('clearDownloadsDatabase', async () => {
     } catch (error) {
         return { success: false, message: error.message };
     }
-
 });
 ipcMain.handle('dialog:openFile', async (event) => {
     const currentWindow = BrowserWindow.fromWebContents(event.sender);
@@ -642,13 +628,14 @@ function createWindow() {
         width: 1200,
         height: 800,
         frame: true,
+
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js')
         }
     });
-
+    win.removeMenu(null)
     win.loadFile('index.html');
     ipcMain.on('minimize-window', () => {
         win.minimize();
