@@ -718,116 +718,191 @@ function initializeMusicTab() {
 
 
 
-function handleYoutubeDownload() {
+// Function to display errors in the floating notification container
+function displayErrorNotification(errorMessage) {
+    const container = document.getElementById('floating-download-notifications');
 
+    // Create a new notification element
+    const notification = document.createElement('div');
+    notification.classList.add('download-notification', 'error'); // Add error-specific styling if needed
+
+    notification.innerHTML = `
+        <div class="notification-header">
+            <h3>Error</h3>
+            <button class="close-btn" onclick="removeErrorNotification(this)">x</button>
+        </div>
+        <div class="notification-body">${errorMessage}</div>
+    `;
+
+    container.appendChild(notification);
+
+    // Auto-remove the notification after some time (e.g., 5 seconds)
+    setTimeout(() => {
+        removeErrorNotification(notification);
+    }, 5000);
+}
+
+// Function to remove the notification
+function removeErrorNotification(element) {
+    if (element) {
+        element.remove();
+    }
+}
+
+// Updated handleYoutubeDownload function
+function handleYoutubeDownload() {
     const url = document.getElementById('youtube-url').value;
     const qualityDropdown = document.getElementById('youtube-quality');
     const qualityDropdownBtn = qualityDropdown.querySelector('.dropdown-btn');
     const qualityLink = qualityDropdown.querySelector('.dropdown-content a[data-value]');
     const quality = qualityLink ? qualityLink.getAttribute('data-value') : null;
 
-    window.electronAPI.send('start-yt-music-download', { url, quality });
-    // Initial placeholder for YouTube download
-    const downloadCount = state.downloads.length + 1;
-    updateDownload({
-        title: 'Fetching Title...',
-        uploader: 'Fetching Uploader...',
-        thumbnail: 'placeholder.png',
-        order: downloadCount,
-        progress: 0
-    });
+    try {
+        if (!url) {
+            throw new Error('YouTube URL is required.');
+        }
+        window.electronAPI.send('start-yt-music-download', { url, quality });
+
+        // Initial placeholder for YouTube download
+        const downloadCount = state.downloads.length + 1;
+        updateDownload({
+            title: 'Fetching Title...',
+            uploader: 'Fetching Uploader...',
+            thumbnail: 'placeholder.png',
+            order: downloadCount,
+            progress: 0
+        });
+    } catch (error) {
+        console.error('Error starting YouTube download:', error);
+        displayErrorNotification('Error starting YouTube download: ' + error.message);
+    }
 }
 
+// Updated startQobuzDownloadBatch function
 async function startQobuzDownloadBatch() {
-    // Await the result of the file location selection
-    const filePath = await openFileLocation();
+    try {
+        const filePath = await openFileLocation();
 
-    // Debug to see what the file path returns
-    console.log('startQobuzDownloadBatch - Selected file path:', filePath);
+        if (!filePath || typeof filePath !== 'string') {
+            throw new Error('Invalid file path selected.');
+        }
 
-    if (!filePath || typeof filePath !== 'string') {
-        console.error('Invalid file path selected.');
-        return;
+        if (!filePath.endsWith('.txt')) {
+            throw new Error('Invalid file type. Expected a .txt file.');
+        }
+
+        const qualityDropdown = document.getElementById('qobuz-quality');
+        let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "1";
+
+        window.electronAPI.send('start-qobuz-batch-download', { filePath, quality });
+    } catch (error) {
+        console.error('Error starting Qobuz batch download:', error);
+        displayErrorNotification('Error starting Qobuz batch download: ' + error.message);
     }
+}
 
-    // Optional: Check for valid file type (e.g., .txt)
-    if (!filePath.endsWith('.txt')) {
-        console.error('Invalid file type. Expected a .txt file.');
-        return;
+// Updated startTidalDownloadBatch function
+function startTidalDownloadBatch() {
+    try {
+        const filePath = openFileLocation();
+        if (!filePath) throw new Error('File path selection canceled.');
+
+        const qualityDropdown = document.getElementById('tidal-quality');
+        let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "1";
+
+        window.electronAPI.send('start-tidal-batch-download', { filePath, quality });
+    } catch (error) {
+        console.error('Error starting Tidal batch download:', error);
+        displayErrorNotification('Error starting Tidal batch download: ' + error.message);
     }
+}
 
+// Updated startDeezerDownloadBatch function
+function startDeezerDownloadBatch() {
+    try {
+        const filePath = openFileLocation();
+        if (!filePath) throw new Error('File path selection canceled.');
+
+        const qualityDropdown = document.getElementById('deezer-quality');
+        let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "1";
+
+        window.electronAPI.send('start-deezer-batch-download', { filePath, quality });
+    } catch (error) {
+        console.error('Error starting Deezer batch download:', error);
+        displayErrorNotification('Error starting Deezer batch download: ' + error.message);
+    }
+}
+
+// Updated handleQobuzDownload function
+function handleQobuzDownload() {
+    const url = document.getElementById('qobuz-url').value;
     const qualityDropdown = document.getElementById('qobuz-quality');
     let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "1";
 
-    // Send the file path directly to use with custom_rip file command
-    window.electronAPI.send('start-qobuz-batch-download', {
-        filePath,  // File path now validated
-        quality
-    });
-}
+    try {
+        if (!url) {
+            throw new Error('Qobuz URL is required.');
+        }
 
-
-function startTidalDownloadBatch() {
-    const filePath = openFileLocation();
-    if (!filePath) return;
-
-    const qualityDropdown = document.getElementById('tidal-quality');
-    let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "1";
-
-    window.electronAPI.send('start-tidal-batch-download', {
-        filePath,
-        quality
-    });
-}
-
-function startDeezerDownloadBatch() {
-    const filePath = openFileLocation();
-    if (!filePath) return;
-
-    const qualityDropdown = document.getElementById('deezer-quality');
-    let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "1";
-
-    window.electronAPI.send('start-deezer-batch-download', {
-        filePath,
-        quality
-    });
-}
-function handleQobuzDownload() {
-    const url = document.getElementById('qobuz-url').value;
-    const qualityDropdown = document.getElementById('qobuz-quality'); // Get the correct dropdown
-    let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value; // Fetch quality value
-
-    if (quality === undefined) {
-        quality = "1";
+        window.electronAPI.send('start-qobuz-download', { url, quality });
+    } catch (error) {
+        console.error('Error starting Qobuz download:', error);
+        displayErrorNotification('Error starting Qobuz download: ' + error.message);
     }
-    window.electronAPI.send('start-qobuz-download', { url, quality });
 }
 
+// Updated handleTidalDownload function
 function handleTidalDownload() {
     const url = document.getElementById('tidal-url').value;
     const qualityDropdown = document.getElementById('tidal-quality');
-    let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value; // Fetch quality value
+    let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "1";
 
-    if (quality === undefined) {
-        quality = "1";
+    try {
+        if (!url) {
+            throw new Error('Tidal URL is required.');
+        }
+
+        window.electronAPI.send('start-tidal-download', { url, quality });
+    } catch (error) {
+        console.error('Error starting Tidal download:', error);
+        displayErrorNotification('Error starting Tidal download: ' + error.message);
     }
-    window.electronAPI.send('start-tidal-download', { url, quality });
 }
 
+// Updated handleDeezerDownload function
 function handleDeezerDownload() {
     const url = document.getElementById('deezer-url').value;
     const qualityDropdown = document.getElementById('deezer-quality');
-    let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value; // Fetch quality value
-    if (quality === undefined) {
-        quality = "1";
+    let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "1";
+
+    try {
+        if (!url) {
+            throw new Error('Deezer URL is required.');
+        }
+
+        window.electronAPI.send('start-deezer-download', { url, quality });
+    } catch (error) {
+        console.error('Error starting Deezer download:', error);
+        displayErrorNotification('Error starting Deezer download: ' + error.message);
     }
-    window.electronAPI.send('start-deezer-download', { url, quality });
 }
 
+// Updated handleStreamripDownload function
 function handleStreamripDownload() {
     const command = document.getElementById('streamrip-input').value;
-    window.electronAPI.send('start-streamrip', command);
+
+    try {
+        if (!command) {
+            throw new Error('Streamrip command is required.');
+        }
+
+        window.electronAPI.send('start-streamrip', command);
+    } catch (error) {
+        console.error('Error starting streamrip:', error);
+        displayErrorNotification('Error starting streamrip: ' + error.message);
+    }
 }
+
 
 function initializeDropdowns() {
     const dropdowns = document.querySelectorAll('.dropdown');
@@ -860,8 +935,8 @@ function initializeDropdowns() {
             });
         });
     });
-}
-
+}let timeoutIds = {};
+let fadeOutTimeouts = {};
 
 function renderDownloads() {
     const downloadContainer = document.getElementById('download-container');
@@ -873,8 +948,12 @@ function renderDownloads() {
             downloadDiv = document.createElement('div');
             downloadDiv.id = `download-${download.order}`;
             downloadDiv.classList.add('download-entry');
-            downloadContainer.prepend(downloadDiv); // Add to the beginning of the container
+            downloadContainer.prepend(downloadDiv);
         }
+
+        // Only show the overall progress for batch downloads in main view
+        const batchButton = download.isBatch ?
+            `<button class="batch-download-btn" data-order="${download.order}">View Progress</button>` : '';
 
         downloadDiv.innerHTML = `
             <img src="${download.thumbnail || 'placeholder.png'}" class="thumbnail" alt="${download.title || 'Unknown Title'}" />
@@ -883,108 +962,131 @@ function renderDownloads() {
                 <p class="uploader">${download.uploader || download.artist || 'Unknown Artist'}</p>
                 ${download.album ? `<p class="album">${download.album}</p>` : ''}
                 <p>Download #${download.order}</p>
-                <button class="batch-download-btn" data-order="${download.order}">View Progress</button>
+                ${batchButton}
                 <div class="progress-bar"><div class="progress" style="width: ${download.progress}%;"></div></div>
                 <p class="progress-text">${download.progress.toFixed(1)}%</p>
             </div>
         `;
     });
 
-    // Add event listeners for newly added batch download buttons
+    // Add event listeners for batch download buttons
     document.querySelectorAll('.batch-download-btn').forEach(button => {
         button.addEventListener('click', (event) => {
-            const order = event.target.dataset.order;
-            showBatchDownloadNotification(order);
+            const order = parseInt(event.target.dataset.order);
+            const download = state.downloads.find(d => d.order === order);
+            if (download?.isBatch) {
+                showBatchDownloadNotification(order);
+            }
         });
     });
 }
 
-// Function to update multiple tracks downloading progress
 window.electronAPI.receive('download-update', (data) => {
-    const { tracksProgress, order } = data;
+    const { tracksProgress, order, isBatch } = data;
 
-    // Find or create the notification element for this batch
-    let notification = document.getElementById(`download-notification-${order}`);
-    if (!notification) {
-        showBatchDownloadNotification(order);
-        notification = document.getElementById(`download-notification-${order}`);
+    const downloadIndex = state.downloads.findIndex(d => d.order === order);
+    if (downloadIndex !== -1) {
+        state.downloads[downloadIndex].tracksProgress = tracksProgress;
+
+        if (tracksProgress && tracksProgress.length > 0) {
+            const totalProgress = tracksProgress.reduce((sum, track) => sum + track.progress, 0);
+            state.downloads[downloadIndex].progress = totalProgress / tracksProgress.length;
+        }
     }
 
-    const progressElement = notification.querySelector(`#download-progress-${order}`);
-    let progressHTML = '';
-
-    // Update the progress for all tracks in this batch
-    tracksProgress.forEach(track => {
-        progressHTML += `<p>${track.trackTitle}: ${track.progress.toFixed(2)}%</p>`;
-    });
-
-    // Update the notification with current progress of all tracks
-    progressElement.innerHTML = progressHTML;
+    renderDownloads();
+    updateBatchNotification(order, tracksProgress);
 });
 
-// Function to show a floating notification for batch downloads
-let timeoutIds = {}; // Store timeout IDs for each notification
-let fadeOutTimeouts = {}; // Store fade-out timeouts separately
-
 function showBatchDownloadNotification(order) {
+    // Remove existing notification if any
+    removeNotification(order);
+
+    const download = state.downloads.find(d => d.order === order);
+    if (!download?.isBatch) return;
+
     const container = document.getElementById('floating-download-notifications');
+    const notification = document.createElement('div');
+    notification.classList.add('download-notification');
+    notification.id = `download-notification-${order}`;
 
-    // Check if notification already exists
-    let notification = document.getElementById(`download-notification-${order}`);
-    if (!notification) {
-        // Create a new notification element
-        notification = document.createElement('div');
-        notification.classList.add('download-notification');
-        notification.id = `download-notification-${order}`;
+    notification.innerHTML = `
+        <div class="notification-header">
+            <h3>Batch Download #${order}</h3>
+            <button class="close-btn" onclick="removeNotification(${order})">×</button>
+        </div>
+        <div id="download-progress-${order}" class="notification-tracks">
+            ${download.tracksProgress ? download.tracksProgress.map(track => `
+                <div class="track-item">
+                    <span class="track-name">${track.trackTitle || 'Loading...'}</span>
+                    <div class="track-progress-bar">
+                        <div class="track-progress-fill" style="width: ${track.progress}%;"></div>
+                    </div>
+                    <span class="track-percentage">${track.progress.toFixed(1)}%</span>
+                </div>
+            `).join('') : 'Loading tracks...'}
+        </div>
+    `;
 
-        notification.innerHTML = `
-            <div class="notification-header">
-                <h3>Batch Download #${order}</h3>
-                <button class="close-btn" onclick="removeNotification(${order})">x</button>
-            </div>
-            <div id="download-progress-${order}">Loading tracks...</div>
-        `;
+    container.appendChild(notification);
 
-        container.appendChild(notification);
-
-        // Add event listeners to pause the timeout on hover
-        notification.addEventListener('mouseenter', () => {
-            // Cancel any active timeout when mouse is over the notification
-            if (timeoutIds[order]) {
-                clearTimeout(timeoutIds[order]); // Pause timeout
-            }
-            if (fadeOutTimeouts[order]) {
-                clearTimeout(fadeOutTimeouts[order]); // Cancel fade-out
-                notification.classList.remove('fade-out'); // Stop the fade-out if it has started
-            }
-        });
-
-        // Resume fade-out when the mouse leaves the notification
-        notification.addEventListener('mouseleave', () => {
-            startFadeOutTimeout(order, notification); // Restart timeout after mouse leaves
-        });
-    }
-
-    // Clear any existing timeout for this notification
-    if (timeoutIds[order]) {
-        clearTimeout(timeoutIds[order]);
-    }
-
-    // Start the fade-out timeout
-    startFadeOutTimeout(order, notification);
+    // Start automatic fade-out timer
+    startAutoFadeOut(order);
 }
 
-function startFadeOutTimeout(order, notification) {
-    // Automatically fade out the notification after 5 seconds
-    timeoutIds[order] = setTimeout(() => {
-        // Start fading out
-        notification.classList.add('fade-out'); // Trigger fade-out animation
+function updateBatchNotification(order, tracksProgress) {
+    const progressElement = document.getElementById(`download-progress-${order}`);
+    if (progressElement && tracksProgress) {
+        progressElement.innerHTML = tracksProgress.map(track => `
+            <div class="track-item">
+                <span class="track-name">${track.trackTitle || 'Loading...'}</span>
+                <div class="track-progress-bar">
+                    <div class="track-progress-fill" style="width: ${track.progress}%;"></div>
+                </div>
+                <span class="track-percentage">${track.progress.toFixed(1)}%</span>
+            </div>
+        `).join('');
+    }
+}
 
-        // Set a timeout to fully remove the notification after the fade-out completes
+function startAutoFadeOut(order) {
+    const notification = document.getElementById(`download-notification-${order}`);
+    if (!notification) return;
+
+    // Reset any existing timeouts
+    if (timeoutIds[order]) {
+        clearTimeout(timeoutIds[order]);
+        delete timeoutIds[order];
+    }
+    if (fadeOutTimeouts[order]) {
+        clearTimeout(fadeOutTimeouts[order]);
+        delete fadeOutTimeouts[order];
+    }
+
+    // Add mouseenter/mouseleave events to pause/resume the auto-hide
+    notification.addEventListener('mouseenter', () => {
+        if (timeoutIds[order]) {
+            clearTimeout(timeoutIds[order]);
+            delete timeoutIds[order];
+        }
+        if (fadeOutTimeouts[order]) {
+            clearTimeout(fadeOutTimeouts[order]);
+            delete fadeOutTimeouts[order];
+        }
+        notification.classList.remove('fade-out');
+    });
+
+    notification.addEventListener('mouseleave', () => {
+        startAutoFadeOut(order);
+    });
+
+    // Start the auto-hide timer
+    timeoutIds[order] = setTimeout(() => {
+        notification.classList.add('fade-out');
         fadeOutTimeouts[order] = setTimeout(() => {
-            removeNotification(order); // Remove the notification after fade-out completes
-        }, 500); // Wait for the fade-out transition to complete (0.5s)
-    }, 5000); // Timeout after 5 seconds
+            removeNotification(order);
+        }, 500); // 500ms for fade-out animation
+    }, 5000); // 5 seconds before starting fade-out
 }
 
 function removeNotification(order) {
@@ -993,7 +1095,7 @@ function removeNotification(order) {
         notification.remove();
     }
 
-    // Clear the stored timeout ID and fade-out timeout
+    // Clear any existing timeouts
     if (timeoutIds[order]) {
         clearTimeout(timeoutIds[order]);
         delete timeoutIds[order];
@@ -1004,18 +1106,12 @@ function removeNotification(order) {
     }
 }
 
-// Remove notification on download complete
 window.electronAPI.receive('download-complete', (data) => {
     const { order, completedTracks, totalTracks } = data;
-
-    // Check if all tracks are completed, then remove the notification
     if (completedTracks === totalTracks) {
         removeNotification(order);
     }
 });
-
-
-
 function updateDownload(data) {
     const existingDownload = state.downloads.find(d => d.order === data.order);
     if (existingDownload) {

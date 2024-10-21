@@ -357,7 +357,8 @@ class CustomRip {
         event.reply('download-info', {
             title: `Batch Download #${this.downloadCount}`,
             downloadArtistOrUploader: 'Qobuz',
-            order: this.downloadCount
+            order: this.downloadCount,
+            isBatch: true
         });
 
         const ripProcess = spawn('custom_rip', ripArgs);
@@ -500,7 +501,8 @@ class CustomRip {
                                 tracksProgress: Object.values(trackProgressMap), // Send all track progresses
                                 order: this.downloadCount,
                                 completedTracks,
-                                totalTracks
+                                totalTracks,
+                                isBatch: true
                             });
                         }
                     }
@@ -645,7 +647,9 @@ class CustomRip {
                         downloadName: `Batch Download #${this.downloadCount}`,
                         downloadArtistOrUploader: 'Tidal',
                         downloadLocation: downloadLocation,
-                        service: 'tidal'
+                        service: 'tidal',
+                        isBatch: true
+
                     };
                     this.saveDownloadToDatabase(downloadInfo);
                 });
