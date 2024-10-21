@@ -20,7 +20,7 @@
         <input type="text" id="youtube-url" placeholder="Enter YouTube URL">
 
         <div class="dropdown" id="youtube-quality">
-            <button class="dropdown-btn">Best</button>
+            <button data-value="0" class="dropdown-btn">Best</button>
             <div class="dropdown-content">
                 <a href="#" data-value="0">Best</a>
                 <a href="#" data-value="5">Meh</a>
@@ -34,7 +34,7 @@
         <h2>Qobuz</h2>
         <input type="text" id="qobuz-url" placeholder="Enter Qobuz URL">
         <div class="dropdown" id="qobuz-quality">
-            <button class="dropdown-btn">320 kbps MP3</button>
+            <button data-value="1" class="dropdown-btn">320 kbps MP3</button>
             <div class="dropdown-content">
                 <a href="#" data-value="1">320 kbps MP3</a>
                 <a href="#" data-value="2">16 bit, 44.1 kHz (CD)</a>
@@ -43,13 +43,14 @@
             </div>
         </div>
         <button id="qobuz-download-button">Download</button>
+        <button id="qobuzDownloadBatch_btn" title="Select .txt file instead"><span class="fas fa-file-lines"></span></button>
     </div>
 
     <div id="tidal" class="tab-content">
         <h2>Tidal</h2>
         <input type="text" id="tidal-url" placeholder="Enter Tidal URL">
         <div class="dropdown" id="tidal-quality">
-            <button class="dropdown-btn">128 kbps AAC</button>
+            <button data-value="0" class="dropdown-btn">128 kbps AAC</button>
             <div class="dropdown-content">
                 <a href="#" data-value="0">128 kbps AAC</a>
                 <a href="#" data-value="1">320 kbps AAC</a>
@@ -58,6 +59,7 @@
             </div>
         </div>
         <button id="tidal-download-button">Download</button>
+        <button id="tidalDownloadBatch_btn" onclick="startTidalDownloadBatch('tidalDownloadBatch')" title="Select .txt file instead"><span class="fas fa-file-lines"></span></button>
     </div>
 
     <div id="deezer" class="tab-content">
@@ -72,6 +74,7 @@
             </div>
         </div>
         <button id="deezer-download-button">Download</button>
+        <button id="deezerDownloadBatch_btn" onclick="startDeezerDownloadBatch('deezerDownloadBatch')" title="Select .txt file instead"><span class="fas fa-file-lines"></span></button>
     </div>
 
     <div id="streamrip" class="tab-content">
@@ -80,6 +83,7 @@
         <button id="streamrip-btn">Run</button>
     </div>
 
+    <div id="floating-download-notifications" class="floating-notifications-container"></div>
     <div id="download-container"></div>
 </div>
 </body>

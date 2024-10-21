@@ -62,8 +62,8 @@ ipcMain.handle('dialog:openFile', async (event) => {
 
     const { canceled, filePaths } = await dialog.showOpenDialog(currentWindow, {
         properties: ['openFile'],
-        filters: [{ name: 'Raw Cookies File', extensions: ['txt'] }],
-        title: 'Select Cookies.txt location'
+        filters: [{ name: 'Text files', extensions: ['txt'] }],
+        title: 'Select File'
     });
     if (canceled) {
         return null;
@@ -111,7 +111,7 @@ function createWindow() {
         width: 1200,
         height: 800,
         frame: true,
-
+        autoHideMenuBar: true,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -163,6 +163,17 @@ function createWindow() {
 
     ipcMain.on('start-tidal-download', (event, data) => {
         customRip.handleTidalDownload(event, data);
+    });
+    ipcMain.on('start-qobuz-batch-download', (event, data) => {
+        customRip.handleQobuzBatchDownload(event, data);
+    });
+
+    ipcMain.on('start-tidal-batch-download', (event, data) => {
+        customRip.handleTidalBatchDownload(event, data);
+    });
+
+    ipcMain.on('start-deezer-batch-download', (event, data) => {
+        customRip.handleDeezerBatchDownload(event, data);
     });
 }
 

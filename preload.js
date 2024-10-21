@@ -24,7 +24,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
             'load-settings',
             'get-default-settings',
             'download-complete',
-            'download-error'
+            'download-error',
+            'start-qobuz-batch-download',
+            'start-tidal-batch-download',
+            'start-deezer-batch-download',
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);

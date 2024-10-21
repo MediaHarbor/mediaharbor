@@ -788,6 +788,10 @@ select.dropdown-btn:focus {
 .dark .service-group h3 {
     color: #4CAF50;
 }
+.dark .download-notification {
+    background-color: #222222;
+    border: 1px solid #4caf50;
+}
 
 /* Animations */
 @keyframes fadeIn {
@@ -875,4 +879,42 @@ select.dropdown-btn:focus {
     bottom: 20px;
     right: 20px;
     z-index: 1;
+}
+
+.floating-notifications-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    max-width: 300px;
+    z-index: 1000;
+}
+
+/* Notification styles */
+.download-notification {
+    background-color: #f1f1f1;
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    opacity: 1;
+    transition: opacity 0.5s ease-in-out; /* Add a smooth fade-out */
+}
+
+.download-notification.fade-out {
+    opacity: 0; /* Fade out */
+    transition: opacity 0.5s ease-in-out;
+}
+
+.download-notification .notification-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.download-notification .close-btn {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
 }

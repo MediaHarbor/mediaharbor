@@ -346,6 +346,320 @@ class CustomRip {
             downloadLocation: this.app.getPath('downloads')
         };
     }
+    handleQobuzBatchDownload(event, data) {
+        const { filePath, quality } = data;
+        const ripArgs = ['-q', quality, 'file', filePath];
+        this.downloadCount++;
+        let totalTracks = 0;
+        let completedTracks = 0;
+        let trackProgressMap = {}; // To store the progress of each track
+
+        event.reply('download-info', {
+            title: `Batch Download #${this.downloadCount}`,
+            downloadArtistOrUploader: 'Qobuz',
+            order: this.downloadCount
+        });
+
+        const ripProcess = spawn('custom_rip', ripArgs);
+        let currentTrackId = null;
+
+        ripProcess.stdout.on('data', (data) => {
+            const output = data.toString();
+            console.log(output);
+
+            // Detect total tracks in batch
+            const loadingMatch = output.match(/Loading (\d+) items/);
+            if (loadingMatch) {
+                totalTracks = parseInt(loadingMatch[1]);
+            }
+
+            // Track progress detection
+            const trackMatch = output.match(/Downloading: Track (\d+): track-id=(\d+) (\d+)\/(\d+) \((\d+\.\d+)%\)/);
+            if (trackMatch) {
+                const trackNumber = trackMatch[1];
+                const trackId = trackMatch[2];
+                const progress = parseFloat(trackMatch[5]);
+
+                // Fetch the title if the track is new
+                if (!trackProgressMap[trackId]) {
+                    currentTrackId = trackId;
+                    this.getQobuzDetails(trackId, {
+                        reply: (channel, details) => {
+                            if (channel === 'qobuz-details') {
+                                trackProgressMap[trackId] = {
+                                    trackTitle: details.title, // Store track title
+                                    trackId,
+                                    progress
+                                };
+
+                                // Send the updated progress to the frontend
+                                event.reply('download-update', {
+                                    tracksProgress: Object.values(trackProgressMap),
+                                    order: this.downloadCount,
+                                    completedTracks,
+                                    totalTracks
+                                });
+                            }
+                        }
+                    });
+                } else {
+                    // Update progress for the track
+                    trackProgressMap[trackId].progress = progress;
+
+                    // Send the updated progress to the frontend
+                    event.reply('download-update', {
+                        tracksProgress: Object.values(trackProgressMap),
+                        order: this.downloadCount,
+                        completedTracks,
+                        totalTracks
+                    });
+                }
+            }
+
+            // Track completion detection
+            if (output.includes('Completed: Track')) {
+                completedTracks++;
+                const completedTrackMatch = output.match(/Completed: Track \d+: track-id=(\d+)/);
+                if (completedTrackMatch) {
+                    const completedTrackId = completedTrackMatch[1];
+                    delete trackProgressMap[completedTrackId]; // Remove the completed track from the map
+                }
+
+                // Send completion to the frontend
+                event.reply('download-complete', {
+                    order: this.downloadCount,
+                    completedTracks,
+                    totalTracks
+                });
+            }
+        });
+
+        ripProcess.stderr.on('data', (errorData) => {
+            const errorOutput = errorData.toString();
+            console.error(`Error: ${errorOutput}`);
+            event.reply('download-error', `Error: ${errorOutput}`);
+        });
+
+        ripProcess.on('exit', (code) => {
+            if (code === 0) {
+                event.reply('download-complete', {
+                    order: this.downloadCount,
+                    completedTracks,
+                    totalTracks
+                });
+            } else {
+                event.reply('download-error', `Process exited with code ${code}`);
+            }
+        });
+    }
+
+    handleDeezerBatchDownload(event, data) {
+        const { filePath, quality } = data;
+        const ripArgs = ['-q', quality, 'file', filePath];
+        this.downloadCount++;
+        let totalTracks = 0;
+        let completedTracks = 0;
+        let trackProgressMap = {}; // To store the progress of each track
+
+        event.reply('download-info', {
+            title: `Batch Download #${this.downloadCount}`,
+            downloadArtistOrUploader: 'Deezer',
+            order: this.downloadCount
+        });
+
+        const ripProcess = spawn('custom_rip', ripArgs);
+
+        ripProcess.stdout.on('data', (data) => {
+            const output = data.toString();
+            console.log(output);
+
+            // Detect total tracks in batch
+            const loadingMatch = output.match(/Loading (\d+) items/);
+            if (loadingMatch) {
+                totalTracks = parseInt(loadingMatch[1]);
+            }
+
+            // Track progress detection (handle multiple tracks concurrently)
+            const trackMatch = output.match(/Downloading: Track \d+: track-id=(\d+) (\d+)\/(\d+) \((\d+\.\d+)%\)/);
+            if (trackMatch) {
+                const trackId = trackMatch[1];
+                const progress = parseFloat(trackMatch[4]);
+
+                // Fetch the track details
+                this.getDeezerDetails(trackId, {
+                    reply: (channel, details) => {
+                        if (channel === 'deezer-details') {
+                            trackProgressMap[trackId] = {
+                                trackTitle: details.title, // Store track title
+                                artist: details.artist.name,
+                                progress
+                            };
+
+                            // Send updated progress to the frontend
+                            event.reply('download-update', {
+                                tracksProgress: Object.values(trackProgressMap), // Send all track progresses
+                                order: this.downloadCount,
+                                completedTracks,
+                                totalTracks
+                            });
+                        }
+                    }
+                });
+            }
+
+            // Track completion detection
+            if (output.includes('Completed: Track')) {
+                completedTracks++;
+                const completedTrackMatch = output.match(/Completed: Track \d+: track-id=(\d+)/);
+                if (completedTrackMatch) {
+                    const completedTrackId = completedTrackMatch[1];
+                    delete trackProgressMap[completedTrackId]; // Remove completed track
+                }
+
+                // Send completion to the frontend
+                event.reply('download-complete', {
+                    order: this.downloadCount,
+                    completedTracks,
+                    totalTracks
+                });
+            }
+        });
+
+        ripProcess.stderr.on('data', (errorData) => {
+            const errorOutput = errorData.toString();
+            console.error(`Error: ${errorOutput}`);
+            event.reply('download-error', `Error: ${errorOutput}`);
+        });
+
+        ripProcess.on('exit', (code) => {
+            if (code === 0) {
+                fs.readFile(this.settingsFilePath, 'utf8', (err, settingsData) => {
+                    const settings = err ? this.getDefaultSettings() : JSON.parse(settingsData);
+                    const downloadLocation = settings.downloadLocation || this.app.getPath('downloads');
+
+                    const downloadInfo = {
+                        downloadName: `Batch Download #${this.downloadCount}`,
+                        downloadArtistOrUploader: 'Deezer',
+                        downloadLocation: downloadLocation,
+                        service: 'deezer'
+                    };
+                    this.saveDownloadToDatabase(downloadInfo);
+                });
+                event.reply('download-complete', {
+                    order: this.downloadCount,
+                    completedTracks,
+                    totalTracks
+                });
+            } else {
+                event.reply('download-error', `Process exited with code ${code}`);
+            }
+        });
+    }
+
+
+    handleTidalBatchDownload(event, data) {
+        const { filePath, quality } = data;
+        const ripArgs = ['-q', quality, 'file', filePath];
+        this.downloadCount++;
+        let totalTracks = 0;
+        let completedTracks = 0;
+        let trackProgressMap = {}; // To store the progress of each track
+
+        event.reply('download-info', {
+            title: `Batch Download #${this.downloadCount}`,
+            downloadArtistOrUploader: 'Tidal',
+            order: this.downloadCount
+        });
+
+        const ripProcess = spawn('custom_rip', ripArgs);
+
+        ripProcess.stdout.on('data', (data) => {
+            const output = data.toString();
+            console.log(output);
+
+            // Detect total tracks in batch
+            const loadingMatch = output.match(/Loading (\d+) items/);
+            if (loadingMatch) {
+                totalTracks = parseInt(loadingMatch[1]);
+            }
+
+            // Track progress detection (handle multiple tracks concurrently)
+            const trackMatch = output.match(/Downloading: Track \d+: track-id=(\d+) (\d+)\/(\d+) \((\d+\.\d+)%\)/);
+            if (trackMatch) {
+                const trackId = trackMatch[1];
+                const progress = parseFloat(trackMatch[4]);
+
+                // Fetch the track details
+                this.getTidalDetails(trackId, {
+                    reply: (channel, details) => {
+                        if (channel === 'tidal-details') {
+                            trackProgressMap[trackId] = {
+                                trackTitle: details.title, // Store track title
+                                artist: details.artist,
+                                progress
+                            };
+
+                            // Send updated progress to the frontend
+                            event.reply('download-update', {
+                                tracksProgress: Object.values(trackProgressMap), // Send all track progresses
+                                order: this.downloadCount,
+                                completedTracks,
+                                totalTracks
+                            });
+                        }
+                    }
+                });
+            }
+
+            // Track completion detection
+            if (output.includes('Completed: Track')) {
+                completedTracks++;
+                const completedTrackMatch = output.match(/Completed: Track \d+: track-id=(\d+)/);
+                if (completedTrackMatch) {
+                    const completedTrackId = completedTrackMatch[1];
+                    delete trackProgressMap[completedTrackId]; // Remove completed track
+                }
+
+                // Send completion to the frontend
+                event.reply('download-complete', {
+                    order: this.downloadCount,
+                    completedTracks,
+                    totalTracks
+                });
+            }
+        });
+
+        ripProcess.stderr.on('data', (errorData) => {
+            const errorOutput = errorData.toString();
+            console.error(`Error: ${errorOutput}`);
+            event.reply('download-error', `Error: ${errorOutput}`);
+        });
+
+        ripProcess.on('exit', (code) => {
+            if (code === 0) {
+                fs.readFile(this.settingsFilePath, 'utf8', (err, settingsData) => {
+                    const settings = err ? this.getDefaultSettings() : JSON.parse(settingsData);
+                    const downloadLocation = settings.downloadLocation || this.app.getPath('downloads');
+
+                    const downloadInfo = {
+                        downloadName: `Batch Download #${this.downloadCount}`,
+                        downloadArtistOrUploader: 'Tidal',
+                        downloadLocation: downloadLocation,
+                        service: 'tidal'
+                    };
+                    this.saveDownloadToDatabase(downloadInfo);
+                });
+                event.reply('download-complete', {
+                    order: this.downloadCount,
+                    completedTracks,
+                    totalTracks
+                });
+            } else {
+                event.reply('download-error', `Process exited with code ${code}`);
+            }
+        });
+    }
+
 }
 
 module.exports = CustomRip;
