@@ -342,7 +342,12 @@ button:hover {
     font-weight: normal;
     margin: 0 10px;
 }
-
+.tab-button svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+    vertical-align: middle;
+}
 .tab-button:hover,
 .tab-button.active {
     color: #4CAF50;
@@ -917,4 +922,44 @@ select.dropdown-btn:focus {
     border: none;
     font-size: 1.2rem;
     cursor: pointer;
+}
+.helpPop {
+    position: relative;
+    cursor: pointer;
+    color: currentColor;
+}
+
+/* Pop-up box styling */
+.help-popup-content {
+    display: none;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 120%; /* Slightly below the icon */
+    background-color: #fff;
+    padding: 10px;
+    border: 1px solid #d9534f;
+    border-radius: 5px;
+    z-index: 10;
+    width: 300px;
+    font-family: "Segoe UI";
+    font-size: inherit;
+}
+
+/* Show popup when hovering over icon or popup itself */
+.helpPop:hover .help-popup-content,
+.help-popup-content:hover {
+    display: block;
+}
+
+/* Styling the popup text */
+.help-popup-content h3 {
+    margin: 0;
+    color: #d9534f;
+    font-weight: bold;
+}
+
+.help-popup-content a {
+    color: #337ab7;
+    text-decoration: none;
 }
