@@ -2,13 +2,12 @@ name: Build and Release Source Code
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     strategy:
@@ -33,20 +32,19 @@ jobs:
       - run: npm run build --if-present
 
   release:
-
     runs-on: ubuntu-latest
-
     needs: build
 
     steps:
       # Checkout the code
       - uses: actions/checkout@v4
 
-      # Create a new Git tag
+      # Create a new Git tag (v1.Y.Z)
       - name: Create Git Tag
         id: tag
         run: |
-          TAG_NAME=v1.${{ github.run_number }}
+          # Increment minor version based on the run number
+          TAG_NAME=v1.0.${{ github.run_number }}  # Adjust minor and patch as necessary
           git tag $TAG_NAME
           git push origin $TAG_NAME
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
@@ -54,7 +52,8 @@ jobs:
       # Get Changelog for the latest commit
       - name: Get Changelog
         id: changelog
-        run: echo "CHANGELOG=$(git log -1 --pretty=format:'%h - %s (%an, %ad)')" >> $GITHUB_ENV
+        run: |
+          echo "CHANGELOG=$(git log -1 --pretty=format:'%h - %s (%an, %ad)')" >> $GITHUB_ENV
 
       # Create GitHub Release with source code only
       - name: Create GitHub Release
