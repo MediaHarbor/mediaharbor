@@ -43,15 +43,20 @@ jobs:
       - name: Get Latest Release Version
         id: get_version
         run: |
-          # Try to get the latest tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null)
-          if [[ $? -eq 0 && $LATEST_TAG =~ v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-            MAJOR=${BASH_REMATCH[1]}
-            MINOR=${BASH_REMATCH[2]}
-            PATCH=${BASH_REMATCH[3]}
-            # Increment patch version for new unstable release
-            PATCH=$((PATCH + 1))
-            TAG_NAME="v${MAJOR}.${MINOR}.${PATCH}"
+          # Check if there are any commits
+          if git rev-parse --quiet --verify refs/tags > /dev/null; then
+            # Try to get the latest tag
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null)
+            if [[ $LATEST_TAG =~ v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+              MAJOR=${BASH_REMATCH[1]}
+              MINOR=${BASH_REMATCH[2]}
+              PATCH=${BASH_REMATCH[3]}
+              # Increment patch version for new unstable release
+              PATCH=$((PATCH + 1))
+              TAG_NAME="v${MAJOR}.${MINOR}.${PATCH}"
+            else
+              TAG_NAME="v1.0.1"  # Fallback if no valid tags found
+            fi
           else
             TAG_NAME="v1.0.1"  # Fallback if no tags found
           fi
