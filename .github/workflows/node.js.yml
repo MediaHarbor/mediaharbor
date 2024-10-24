@@ -39,15 +39,28 @@ jobs:
       # Checkout the code
       - uses: actions/checkout@v4
 
-      # Create a new Git tag (v1.Y.Z)
-      - name: Create Git Tag
-        id: tag
+      # Get the latest release version
+      - name: Get Latest Release Version
+        id: get_version
         run: |
-          # Increment minor version based on the run number
-          TAG_NAME=v1.0.${{ github.run_number }}  # Adjust minor and patch as necessary
-          git tag $TAG_NAME
-          git push origin $TAG_NAME
+          LATEST_TAG=$(git describe --tags --abbrev=0)
+          if [[ $LATEST_TAG =~ v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            MAJOR=${BASH_REMATCH[1]}
+            MINOR=${BASH_REMATCH[2]}
+            PATCH=${BASH_REMATCH[3]}
+            # Increment patch version for new unstable release
+            PATCH=$((PATCH + 1))
+            TAG_NAME="v${MAJOR}.${MINOR}.${PATCH}"
+          else
+            TAG_NAME="v1.0.1"  # Fallback if no tags found
+          fi
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+
+      # Create a new Git tag
+      - name: Create Git Tag
+        run: |
+          git tag ${{ env.TAG_NAME }}
+          git push origin ${{ env.TAG_NAME }}
 
       # Get Changelog for the latest commit
       - name: Get Changelog
