@@ -1,7 +1,7 @@
 # This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
 
-name: Electron workflow
+name: Electron Workflow
 
 on:
   push:
@@ -45,10 +45,20 @@ jobs:
       # Checkout the code
       - uses: actions/checkout@v4
 
-      # Create release with source code only
+      # Create a new Git tag
+      - name: Create Git Tag
+        id: tag
+        run: |
+          TAG_NAME=v1.${{ github.run_number }}
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
+          echo "::set-output name=TAG_NAME::$TAG_NAME"
+
+      # Create GitHub Release with the new tag
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ steps.tag.outputs.TAG_NAME }}
           files: |
             **/*.js
             **/*.json
