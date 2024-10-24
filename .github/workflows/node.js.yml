@@ -9,26 +9,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         node-version: [18.x, 20.x, 22.x]
 
     steps:
-      # Checkout the code
       - uses: actions/checkout@v4
-
-      # Set up Node.js
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
-
-      # Install dependencies
       - run: npm ci
-
-      # Build the project
       - run: npm run build --if-present
 
   release:
@@ -36,45 +28,34 @@ jobs:
     needs: build
 
     steps:
-      # Checkout the code
       - uses: actions/checkout@v4
 
-      # Get the latest release version
       - name: Get Latest Release Version
         id: get_version
         run: |
-          # Check if there are any commits
-          if git rev-parse --quiet --verify refs/tags > /dev/null; then
-            # Try to get the latest tag
-            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null)
-            if [[ $LATEST_TAG =~ v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-              MAJOR=${BASH_REMATCH[1]}
-              MINOR=${BASH_REMATCH[2]}
-              PATCH=${BASH_REMATCH[3]}
-              # Increment patch version for new unstable release
-              PATCH=$((PATCH + 1))
-              TAG_NAME="v${MAJOR}.${MINOR}.${PATCH}"
-            else
-              TAG_NAME="v1.0.1"  # Fallback if no valid tags found
-            fi
+          LATEST_TAG=$(git describe --tags --abbrev=0)
+          if [[ $LATEST_TAG =~ v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            MAJOR=${BASH_REMATCH[1]}
+            MINOR=${BASH_REMATCH[2]}
+            PATCH=${BASH_REMATCH[3]}
+            PATCH=$((PATCH + 1))
+            TAG_NAME="v${MAJOR}.${MINOR}.${PATCH}"
           else
-            TAG_NAME="v1.0.1"  # Fallback if no tags found
+            TAG_NAME="v1.0.1"
           fi
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
 
-      # Create a new Git tag
       - name: Create Git Tag
         run: |
           git tag ${{ env.TAG_NAME }}
           git push origin ${{ env.TAG_NAME }}
 
-      # Get Changelog for the latest commit
       - name: Get Changelog
         id: changelog
         run: |
-          echo "CHANGELOG=$(git log -1 --pretty=format:'%h - %s (%an, %ad)')" >> $GITHUB_ENV
+          CHANGELOG=$(git log --pretty=format:'- %s' $(git describe --tags --abbrev=0)..HEAD)
+          echo "CHANGELOG=$CHANGELOG" >> $GITHUB_ENV
 
-      # Create GitHub Release with source code only
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2.0.8
         with:
