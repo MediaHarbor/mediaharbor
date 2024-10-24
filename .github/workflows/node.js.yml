@@ -53,12 +53,6 @@ jobs:
         run: |
           git tag ${{ env.TAG_NAME }}
           git push origin ${{ env.TAG_NAME }} || echo "Tag already exists, skipping push."
-      
-
-      - name: Create Git Tag
-        run: |
-          git tag ${{ env.TAG_NAME }}
-          git push origin ${{ env.TAG_NAME }}
 
       - name: Get Changelog
         id: changelog
