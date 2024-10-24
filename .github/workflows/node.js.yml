@@ -58,7 +58,7 @@ jobs:
 
       # Create GitHub Release with source code only
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1.21.1
+        uses: softprops/action-gh-release@v2.0.8
         with:
           tag_name: ${{ env.TAG_NAME }}
           body: |
