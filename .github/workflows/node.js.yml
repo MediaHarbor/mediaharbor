@@ -63,5 +63,6 @@ jobs:
           body: |
             ## Changelog
             ${{ env.CHANGELOG }}
+            prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
