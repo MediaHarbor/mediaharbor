@@ -150,6 +150,10 @@ function createWindow() {
         {saveDownloadToDatabase}
     );
 
+    ipcMain.on('start-spotify-download', (event, command) => {
+        gamRip.handleSpotify(event, command);
+    })
+
     ipcMain.on('start-apple-download', (event, command) => {
         gamRip.handleApple(event, command);
     })

@@ -10,6 +10,136 @@ class gamRip {
         this.saveDownloadToDatabase = dbFunctions.saveDownloadToDatabase;
     }
 
+    handleSpotify(event, command) {
+        const { url, quality } = command;
+
+        fs.readFile(this.settingsFilePath, 'utf8', (err, settingsData) => {
+            if (err) {
+                event.reply('download-error', 'Could not read settings file');
+                return;
+            }
+
+            try {
+                const settings = JSON.parse(settingsData);
+                const cookiesPath = settings.spotifyCookiesPath || path.join(process.env.USERPROFILE, 'Downloads', 'spotify.com_cookies.txt');
+
+                const votifyArgs = [
+                    '-a', quality || 'vorbis-low',
+                    '--cookies-path', cookiesPath,
+                    url
+                ];
+
+                this.downloadCount++;
+
+                event.reply('download-info', {
+                    title: 'Spotify Download',
+                    order: this.downloadCount
+                });
+
+                const votifyProcess = spawn('custom_votify', votifyArgs, {
+                    encoding: 'utf8',
+                    env: {
+                        ...process.env,
+                        PYTHONIOENCODING: 'utf-8',
+                        LANG: 'en_US.UTF-8',
+                        LC_ALL: 'en_US.UTF-8'
+                    }
+                });
+
+                let trackInfo = {
+                    cover: null,
+                    title: null,
+                    album: null,
+                    artist: null,
+                    progress: 0,
+                    order: this.downloadCount
+                };
+
+                let buffer = '';
+
+                // Handle both stdout and stderr for metadata
+                const handleOutput = (data) => {
+                    buffer += data.toString('utf8');
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    lines.forEach(line => {
+                        console.log('Line:', line);
+
+                        // Remove the "Error: " prefix if it exists
+                        const cleanLine = line.replace(/^Error:\s*/, '').trim();
+
+                        // Parse metadata
+                        if (cleanLine.includes('Cover:')) {
+                            trackInfo.cover = cleanLine.split('Cover:')[1].trim();
+                            trackInfo.thumbnail = trackInfo.cover;
+                        } else if (cleanLine.includes('Title:')) {
+                            trackInfo.title = cleanLine.split('Title:')[1].trim();
+                        } else if (cleanLine.includes('Album:')) {
+                            trackInfo.album = cleanLine.split('Album:')[1].trim();
+                        } else if (cleanLine.includes('Artist:')) {
+                            trackInfo.artist = cleanLine.split('Artist:')[1].trim();
+                        }
+
+                        // Parse download progress
+                        const progressMatch = cleanLine.match(/\[download\]\s+(\d+\.\d+)%/);
+                        if (progressMatch) {
+                            trackInfo.progress = parseFloat(progressMatch[1]);
+
+                            event.reply('download-update', {
+                                order: this.downloadCount,
+                                progress: trackInfo.progress,
+                                title: trackInfo.title,
+                                thumbnail: trackInfo.cover,
+                                artist: trackInfo.artist,
+                                album: trackInfo.album,
+                                isBatch: false
+                            });
+                        }
+                    });
+                };
+
+                // Apply the handler to both stdout and stderr
+                votifyProcess.stdout.on('data', handleOutput);
+                votifyProcess.stderr.on('data', handleOutput);
+
+                votifyProcess.on('exit', (code) => {
+                    if (code === 0) {
+                        fs.readFile(this.settingsFilePath, 'utf8', (err, settingsData) => {
+                            const settings = err ? this.getDefaultSettings() : JSON.parse(settingsData);
+                            const downloadLocation = settings.downloadLocation || this.app.getPath('downloads');
+
+                            const downloadInfo = {
+                                downloadName: trackInfo.title,
+                                downloadArtistOrUploader: trackInfo.artist,
+                                downloadLocation: downloadLocation,
+                                downloadThumbnail: trackInfo.cover,
+                                service: 'Spotify',
+                                albumName: trackInfo.album
+                            };
+                            this.saveDownloadToDatabase(downloadInfo);
+
+                            event.reply('download-complete', {
+                                order: this.downloadCount,
+                                location: downloadLocation,
+                                title: trackInfo.title,
+                                thumbnail: trackInfo.cover,
+                                artist: trackInfo.artist,
+                                album: trackInfo.album,
+                                progress: 100,
+                                isBatch: false
+                            });
+                        });
+                    } else {
+                        event.reply('download-error', `Process exited with code ${code}`);
+                    }
+                });
+
+            } catch (error) {
+                event.reply('download-error', `Failed to parse settings: ${error.message}`);
+            }
+        });
+    }
     handleApple(event, command) {
         const { url, quality } = command;
 
@@ -149,7 +279,8 @@ class gamRip {
     getDefaultSettings() {
         return {
             downloadLocation: this.app.getPath('downloads'),
-            appleMusicCookiesPath: path.join(process.env.USERPROFILE, 'Downloads', 'apple.com_cookies.txt')
+            appleMusicCookiesPath: path.join(process.env.USERPROFILE, 'Downloads', 'apple.com_cookies.txt'),
+            spotifyCookiesPath: path.join(process.env.USERPROFILE, 'Downloads', 'spotify.com_cookies.txt')
         };
     }
 }

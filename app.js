@@ -712,7 +712,8 @@ function initializeMusicTab() {
     document.getElementById('deezer-download-button').addEventListener('click', handleDeezerDownload);
     document.getElementById('streamrip-btn').addEventListener('click', handleStreamripDownload);
     document.getElementById('qobuzDownloadBatch_btn').addEventListener('click', startQobuzDownloadBatch);
-    document.getElementById('appleMusic-download-button').addEventListener("click", handleAppleDownload)
+    document.getElementById('appleMusic-download-button').addEventListener("click", handleAppleDownload);
+    document.getElementById('spotify-download-button').addEventListener('click', handleSpotifyDownload);
     renderDownloads();
 
 }
@@ -883,6 +884,21 @@ function handleDeezerDownload() {
         displayErrorNotification('Error starting Deezer download: ' + error.message);
     }
 }
+function handleSpotifyDownload() {
+    const url = document.getElementById('spotify-url').value;
+    const qualityDropdown = document.getElementById('spotify-quality');
+    let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "1";
+
+    try {
+        if (!url) {
+            throw new Error('Spotify URL is required.');
+        }
+        window.electronAPI.send('start-spotify-download', { url, quality });
+    } catch (error) {
+        console.error('Error starting Spotıfy download:', error);
+        displayErrorNotification('Error starting Spotıfy download: ' + error.message);
+    }
+}
 
 function handleAppleDownload() {
     const url = document.getElementById('appleMusic-url').value;
@@ -896,7 +912,7 @@ function handleAppleDownload() {
 
         window.electronAPI.send('start-apple-download', { url, quality });
     } catch (error) {
-        console.error('Error  starting Apple download:', error);
+        console.error('Error starting Apple download:', error);
         displayErrorNotification('Error starting Apple Music download: ' + error.message);
     }
 }

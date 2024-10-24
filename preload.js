@@ -28,7 +28,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
             'start-qobuz-batch-download',
             'start-tidal-batch-download',
             'start-deezer-batch-download',
-            'start-apple-download'
+            'start-apple-download',
+            'start-spotify-download'
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);
