@@ -6,6 +6,7 @@ const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
 const { saveDownloadToDatabase, loadDownloadsFromDatabase, deleteFromDatabase, deleteDataBase} = require('./funcs/db');
 const {getDefaultSettings} = require('./funcs/defaults.js');
 const {handleYtDlpDownload, handleYtDlpMusicDownload} = require('./funcs/yt_dlp_downloaders')
+const GamRip = require('./funcs/gamRip');
 const CustomRip = require('./funcs/customRip');
 const { setupSettingsHandlers } = require('./funcs/settings');
 
@@ -142,6 +143,16 @@ function createWindow() {
             handleYtDlpDownload(event, data, settings, true);
         });
     });
+
+    const gamRip = new GamRip(
+        settingsFilePath,
+        app,
+        {saveDownloadToDatabase}
+    );
+
+    ipcMain.on('start-apple-download', (event, command) => {
+        gamRip.handleApple(event, command);
+    })
 
     const customRip = new CustomRip(
         settingsFilePath,

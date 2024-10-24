@@ -712,6 +712,7 @@ function initializeMusicTab() {
     document.getElementById('deezer-download-button').addEventListener('click', handleDeezerDownload);
     document.getElementById('streamrip-btn').addEventListener('click', handleStreamripDownload);
     document.getElementById('qobuzDownloadBatch_btn').addEventListener('click', startQobuzDownloadBatch);
+    document.getElementById('appleMusic-download-button').addEventListener("click", handleAppleDownload)
     renderDownloads();
 
 }
@@ -749,7 +750,7 @@ function removeErrorNotification(element) {
     }
 }
 
-// Updated handleYoutubeDownload function
+
 function handleYoutubeDownload() {
     const url = document.getElementById('youtube-url').value;
     const qualityDropdown = document.getElementById('youtube-quality');
@@ -778,7 +779,6 @@ function handleYoutubeDownload() {
     }
 }
 
-// Updated startQobuzDownloadBatch function
 async function startQobuzDownloadBatch() {
     try {
         const filePath = await openFileLocation();
@@ -801,7 +801,6 @@ async function startQobuzDownloadBatch() {
     }
 }
 
-// Updated startTidalDownloadBatch function
 function startTidalDownloadBatch() {
     try {
         const filePath = openFileLocation();
@@ -817,7 +816,6 @@ function startTidalDownloadBatch() {
     }
 }
 
-// Updated startDeezerDownloadBatch function
 function startDeezerDownloadBatch() {
     try {
         const filePath = openFileLocation();
@@ -833,7 +831,6 @@ function startDeezerDownloadBatch() {
     }
 }
 
-// Updated handleQobuzDownload function
 function handleQobuzDownload() {
     const url = document.getElementById('qobuz-url').value;
     const qualityDropdown = document.getElementById('qobuz-quality');
@@ -851,7 +848,7 @@ function handleQobuzDownload() {
     }
 }
 
-// Updated handleTidalDownload function
+
 function handleTidalDownload() {
     const url = document.getElementById('tidal-url').value;
     const qualityDropdown = document.getElementById('tidal-quality');
@@ -887,7 +884,23 @@ function handleDeezerDownload() {
     }
 }
 
-// Updated handleStreamripDownload function
+function handleAppleDownload() {
+    const url = document.getElementById('appleMusic-url').value;
+    const qualityDropdown = document.getElementById('appleMusic-quality');
+    let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "aac";
+
+    try {
+        if (!url) {
+            throw new Error('AppleMusic URL is required.');
+        }
+
+        window.electronAPI.send('start-apple-download', { url, quality });
+    } catch (error) {
+        console.error('Error  starting Apple download:', error);
+        displayErrorNotification('Error starting Apple Music download: ' + error.message);
+    }
+}
+
 function handleStreamripDownload() {
     const command = document.getElementById('streamrip-input').value;
 
