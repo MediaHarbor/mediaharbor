@@ -33,7 +33,7 @@ jobs:
       - name: Get Latest Release Version
         id: get_version
         run: |
-          LATEST_TAG=$(git describe --tags --abbrev=0)
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
           if [[ $LATEST_TAG =~ v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
             MAJOR=${BASH_REMATCH[1]}
             MINOR=${BASH_REMATCH[2]}
@@ -41,7 +41,7 @@ jobs:
             PATCH=$((PATCH + 1))
             TAG_NAME="v${MAJOR}.${MINOR}.${PATCH}"
           else
-            TAG_NAME="v1.0.1"
+            TAG_NAME="v1.0.1"  # Fallback if no valid tag is found
           fi
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
 
