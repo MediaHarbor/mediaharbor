@@ -43,8 +43,9 @@ jobs:
       - name: Get Latest Release Version
         id: get_version
         run: |
-          LATEST_TAG=$(git describe --tags --abbrev=0)
-          if [[ $LATEST_TAG =~ v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+          # Try to get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null)
+          if [[ $? -eq 0 && $LATEST_TAG =~ v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
             MAJOR=${BASH_REMATCH[1]}
             MINOR=${BASH_REMATCH[2]}
             PATCH=${BASH_REMATCH[3]}
