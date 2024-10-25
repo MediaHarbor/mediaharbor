@@ -40,6 +40,7 @@ function getDefaultSettings() {
         no_sponsorblock: false,
         sponsorblock_api_url: "https://sponsor.ajay.app",
 
+        // Streamrip settings
         disc_subdirectories: true,
         concurrency: true,
         max_connections: 6,
@@ -64,9 +65,49 @@ function getDefaultSettings() {
         meta_album_name_playlist_check: false,
         meta_album_order_playlist_check: false,
         meta_exclude_tags_check: false,
-        excluded_tags: ""
+        excluded_tags: "",
 
+        // Spotify Settings
+        spotify_output_path: "Spotify",
+        spotify_temp_path: "temp",
+        spotify_enable_videos: true,
+        spotify_download_music_videos: true,
+        spotify_download_podcast_videos: true,
+        spotify_force_premium: true,
+        spotify_download_premium_videos: false,
+        spotify_download_mode: "ytdlp",
+        spotify_video_format: "mp4",
+        spotify_remux_mode_video: "ffmpeg",
+        spotify_template_folder_album: "{album_artist}/{album}",
+        spotify_template_folder_compilation: "Compilations/{album}",
+        spotify_template_file_single_disc: "{track:02d} {title}",
+        spotify_template_file_multi_disc: "{disc}-{track:02d} {title}",
+        // Apple Settings
+        apple_output_path: "Apple Music",
+        apple_temp_path: "temp",
+        apple_download_mode: "ytdlp",
+        apple_remux_mode: "ffmpeg",
+        apple_cover_format: "jpg",
+        apple_synced_lyrics_format: "lrc",
+        apple_template_folder_album: "{album_artist}/{album}",
+        apple_template_folder_compilation: "Compilations/{album}",
+        apple_template_file_single_disc: "{track:02d} {title}",
+        apple_template_file_multi_disc: "{disc}-{track:02d} {title}",
+        spotify_wait_interval: 5,
+        spotify_no_exceptions: true,
+        spotify_save_cover: true,
+        spotify_save_playlist: true,
+        spotify_overwrite: true,
+        spotify_lrc_only: true,
+        spotify_no_lrc: false,
+        apple_disable_music_video_skip: true,
+        apple_save_cover: true,
+        apple_overwrite: true,
+        apple_save_playlist: true,
+        apple_synced_lyrics_only: true,
+        apple_no_synced_lyrics: false,
+        apple_cover_size: 1200,
     };
 }
 
-module.exports = { getDefaultSettings,};
+module.exports = { getDefaultSettings };

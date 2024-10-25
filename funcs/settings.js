@@ -6,6 +6,18 @@ const { spawn } = require("child_process");
 const { getDefaultSettings } = require("./defaults");
 
 const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
+const spotifyConfigPath = path.join(app.getPath('userData'), 'spotify_config.json');
+const appleConfigPath = path.join(app.getPath('userData'), 'apple_config.json');
+
+const mergeServiceSettings = (defaultSettings, serviceConfig, servicePrefix) => {
+    return Object.entries(defaultSettings)
+        .filter(([key]) => key.startsWith(servicePrefix))
+        .reduce((obj, [key, defaultValue]) => {
+            const configKey = key.replace(servicePrefix + '_', '');
+            obj[key] = serviceConfig[configKey] || defaultValue;
+            return obj;
+        }, {});
+};
 
 // Load initial settings
 const userSettings = loadTheSettings();
@@ -17,6 +29,37 @@ function loadTheSettings() {
     } catch (err) {
         console.log('No user settings found, using default settings.');
         return getDefaultSettings();
+    }
+}
+async function saveServiceConfig(configPath, settings, servicePrefix) {
+    // Extract service-specific settings from the main settings object
+    const serviceSettings = Object.entries(settings)
+        .filter(([key]) => key.startsWith(servicePrefix))
+        .reduce((obj, [key, value]) => {
+            const configKey = key.replace(servicePrefix + '_', '');
+            obj[configKey] = value;
+            return obj;
+        }, {});
+
+    try {
+        await fs.promises.writeFile(
+            configPath,
+            JSON.stringify(serviceSettings, null, 4),
+            'utf8'
+        );
+    } catch (err) {
+        console.error(`Error saving service config to ${configPath}:`, err);
+        throw err;
+    }
+}
+
+async function loadServiceConfig(configPath) {
+    try {
+        const data = await fs.promises.readFile(configPath, 'utf8');
+        return JSON.parse(data);
+    } catch (err) {
+        console.log(`No config found at ${configPath}, will be created on next save`);
+        return {};
     }
 }
 
@@ -67,7 +110,10 @@ async function saveSettings(event, settings) {
         event.reply('settings-error', 'Failed to save application settings');
         return;
     }
-
+    await Promise.all([
+        saveServiceConfig(spotifyConfigPath, settings, 'spotify'),
+        saveServiceConfig(appleConfigPath, settings, 'apple')
+    ]);
     // Get streamrip config path
     getStreamripPaths(async (paths) => {
         if (!paths?.configPath) {
@@ -171,7 +217,7 @@ async function saveSettings(event, settings) {
 }
 
 function loadSettings(event) {
-    fs.readFile(settingsFilePath, 'utf8', (err, data) => {
+    fs.readFile(settingsFilePath, 'utf8', async (err, data) => {
         let settings;
 
         if (err) {
@@ -184,6 +230,24 @@ function loadSettings(event) {
                 console.log('Error parsing settings JSON, using defaults:', parseErr);
                 settings = getDefaultSettings();
             }
+        }
+
+        try {
+            const [spotifyConfig, appleConfig] = await Promise.all([
+                loadServiceConfig(spotifyConfigPath),
+                loadServiceConfig(appleConfigPath)
+            ]);
+
+            // Merge service defaults with configs
+            const defaultSettings = getDefaultSettings();
+            settings = {
+                ...settings,
+                ...mergeServiceSettings(defaultSettings, spotifyConfig, 'spotify'),
+                ...mergeServiceSettings(defaultSettings, appleConfig, 'apple')
+            };
+
+        } catch (err) {
+            console.error('Error loading service configs:', err);
         }
 
         getStreamripPaths((paths) => {
