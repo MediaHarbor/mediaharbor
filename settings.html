@@ -11,7 +11,6 @@
     <div class="tabs">
         <button class="tab-button active" data-tab="app-settings">
             <i class="mediaHarborLogo">
-                <!-- Inline your SVG directly here, or load it as an external resource -->
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 733.48 831.18" class="mediaHarborIcon">
                     <defs>
                         <style>
@@ -37,16 +36,21 @@
                     <line id="uuid-5b749952-ed7e-4d52-a69c-f1923e41debb" class="uuid-819933e5-bf62-42aa-bfba-7d87473c537b" x1="29.19" y1="479.19" x2="349.19" y2="479.19"/>
 
                 </svg>
-            </i> App Settings
+            </i><br>App Settings
         </button>
-        <button class="tab-button" data-tab="yt-dlp-settings"><i class="fa-brands fa-youtube"></i>YT-DLP Settings</button>
+        <button class="tab-button" data-tab="yt-dlp-settings"><i class="fa-brands fa-youtube"></i><br>YT-DLP Settings</button>
         <button class="tab-button" data-tab="streamrip-settings">
             <svg id="uuid-34530134-8d10-42ab-9beb-89ba55b16c0d" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 890 890">
                 <path d="M250.09,38.53c123.31-51.32,266.29-51.41,389.6,0,142.97,56.05,261.95,201.31,249.4,363.68-6.83,134.02-101.62,248.19-216.08,305.65-26.86,9.26-16.15,41.96-8.03,61.34,8.86,32.42,29.91,73.15,3.05,102.36-29.17,29.49-82.42,21.55-106.88-11.15-24.37,39.22-90.18,39.51-114.64.57-28.24,36.48-92.12,40.45-117.96-.85-25.84,36.86-89.81,41.96-114.08,1.13-20.12-49.24,31.29-98.01,15.14-145.45-46.43-27.41-93.78-55.1-130.7-95.74C20.63,539.91-18.51,419.03,8.54,307.79,36.23,182.47,136.28,85.12,250.09,38.53M180.77,251.75c-1.11,91.3-.46,182.6-.37,273.99-2.68,13.52,15.41,23.53,25.38,15.12,77.44-46.41,155.71-91.77,232.05-139.88.65-4.06,1.75-12.1,2.31-16.16-6.55-9.64-18-13.61-27.14-19.94-70.8-41.96-140.94-85.06-212.02-126.46l-9.23-.19c-2.77,3.4-8.21,10.11-10.98,13.52M463.12,266.02c-1.02,3.31-3.05,9.73-4.15,12.95,45.87,82.23,91.1,165.3,139.65,245.73,4.34.38,12.83,1.04,17.17,1.42,49.01-77.12,91.1-159.44,137.07-238.74,10.8-11.63-2.22-31.28-16.61-27.41-89.44.66-178.97-1.61-268.23,1.13l-4.89,4.91M391.03,686.69c36.27.85,72.64.47,108.92.19l2.58-7.47c-17.91-31.76-35.35-63.8-54.18-94.98-22.98,30.81-43.94,65.97-57.32,102.26Z"/>
-            </svg> Streamrip Settings
+            </svg><br>Streamrip Settings
         </button>
-
-        <button class="tab-button" data-tab="search-settings"><i class="fa-solid fa-magnifying-glass"></i> Search Settings</button>
+        <button class="tab-button" data-tab="spotify-settings">
+            <i class="si si-spotify"></i><br>Spotify Settings
+        </button>
+        <button class="tab-button" data-tab="applemusic-settings">
+            <i class="si si-applemusic"></i><br>Apple Music Settings
+        </button>
+        <button class="tab-button" data-tab="search-settings"><i class="fa-solid fa-magnifying-glass"></i><br>Search Settings</button>
     </div>
 
     <div id="app-settings" class="tab-content active">
@@ -587,12 +591,276 @@
 
     </div>
     </div>
-</div>
     <div id="search-settings" class="tab-content">
         <div class="settings-container">
-        <h2>Search Settings</h2>
+            <h2>Search Settings</h2>
             <h4>Coming Soon</h4>
+        </div>
     </div>
+    <div id="spotify-settings" class="tab-content">
+        <div class="settings-container">
+            <div class="settings-section">
+                <div class="settings-header" onclick="toggleSection('spotify-download-options')">
+                    <i class="fas fa-download"></i>
+                    <h2>Download Options</h2>
+                </div>
+                <div id="spotify-download-options" class="settings-content">
+                    <div class="settings-grid">
+                        <div>
+                            <label for="spotify_output_path">Output Path:</label>
+                            <input type="text" id="spotify_output_path" value="Spotify">
+                        </div>
+                        <div>
+                            <label for="spotify_temp_path">Temp Path:</label>
+                            <input type="text" id="spotify_temp_path" value="temp">
+                        </div>
+                        <div>
+                            <label for="spotify_wait_interval">Wait Interval:</label>
+                            <input type="number" id="spotify_wait_interval" value="5">
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_no_exceptions">
+                                No Exceptions
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_save_cover">
+                                Save Cover
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_save_playlist">
+                                Save Playlist
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_overwrite">
+                                Overwrite
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_lrc_only">
+                                LRC Only
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_no_lrc">
+                                No LRC
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_enable_videos">
+                                Enable Videos
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_download_music_videos">
+                                Download Music Videos
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_download_podcast_videos">
+                                Download Podcast Videos
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_force_premium">
+                                Force Premium
+                            </label>
+                        </div>
+                        <div>
+                            <label for="spotify_download_mode">Download Mode:</label>
+                            <select id="spotify_download_mode" class="dropdown-btn">
+                                <option value="ytdlp">ytdlp</option>
+                                <option value="aria2c">aria2c</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="spotify_video_format">Video Format:</label>
+                            <select id="spotify_video_format" class="dropdown-btn">
+                                <option value="mp4">mp4</option>
+                                <option value="webm">webm</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="spotify_remux_mode_video">Remux Mode Video:</label>
+                            <select id="spotify_remux_mode_video" class="dropdown-btn">
+                                <option value="ffmpeg">ffmpeg</option>
+                                <option value="mp4box">mp4box</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-header" onclick="toggleSection('spotify-template-options')">
+                    <i class="fas fa-folder"></i>
+                    <h2>Template Options</h2>
+                </div>
+                <div id="spotify-template-options" class="settings-content">
+                    <div class="settings-grid">
+                        <div>
+                            <label for="spotify_template_folder_album">Template Folder Album:</label>
+                            <div style="display: flex">
+                                <input type="text" id="spotify_template_folder_album" value="{album_artist}/{album}">
+                                <button onclick="openPopup('https://github.com/glomatico/gamdl?tab=readme-ov-file#tags-variables')" title="Help">
+                                    <span class="fa fa-question-circle"></span>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label for="spotify_template_folder_compilation">Template Folder Compilation:</label>
+                            <input type="text" id="spotify_template_folder_compilation" value="Compilations/{album}">
+                        </div>
+                        <div>
+                            <label for="spotify_template_file_single_disc">Template File Single Disc:</label>
+                            <input type="text" id="spotify_template_file_single_disc" value="{track:02d} {title}">
+                        </div>
+                        <div>
+                            <label for="spotify_template_file_multi_disc">Template File Multi Disc:</label>
+                            <input type="text" id="spotify_template_file_multi_disc" value="{disc}-{track:02d} {title}">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <div id="applemusic-settings" class="tab-content">
+        <div class="settings-container">
+            <div class="settings-section">
+                <div class="settings-header" onclick="toggleSection('applemusic-download-options')">
+                    <i class="fas fa-download"></i>
+                    <h2>Download Options</h2>
+                </div>
+                <div id="applemusic-download-options" class="settings-content">
+                    <div class="settings-grid">
+                        <div>
+                            <label for="apple_output_path">Output Path:</label>
+                            <input type="text" id="apple_output_path" value="Apple Music">
+                        </div>
+                        <div>
+                            <label for="apple_temp_path">Temp Path:</label>
+                            <input type="text" id="apple_temp_path" value="temp">
+                        </div>
+                        <div>
+                            <label for="apple_download_mode">Download Mode:</label>
+                            <select id="apple_download_mode" class="dropdown-btn">
+                                <option value="ytdlp">ytdlp</option>
+                                <option value="nm3u8dlre">nm3u8dlre</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="apple_remux_mode">Remux Mode:</label>
+                            <select id="apple_remux_mode" class="dropdown-btn">
+                                <option value="ffmpeg">ffmpeg</option>
+                                <option value="mp4box">mp4box</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="apple_disable_music_video_skip">
+                                Disable Music Video Skip
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="apple_save_cover">
+                                Save Cover
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="apple_overwrite">
+                                Overwrite
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="apple_save_playlist">
+                                Save Playlist
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="apple_synced_lyrics_only">
+                                Synced Lyrics Only
+                            </label>
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="apple_no_synced_lyrics">
+                                No Synced Lyrics
+                            </label>
+                        </div>
+                        <div>
+                            <label for="apple_cover_size">Cover Size:</label>
+                            <input type="number" id="apple_cover_size" value="1200">
+                        </div>
+                        <div>
+                            <label for="apple_cover_format">Cover Format:</label>
+                            <select id="apple_cover_format" class="dropdown-btn">
+                                <option value="jpg">jpg</option>
+                                <option value="png">png</option>
+                                <option value="raw">raw</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="apple_synced_lyrics_format">Synced Lyrics Format:</label>
+                            <select id="apple_synced_lyrics_format" class="dropdown-btn">
+                                <option value="lrc">lrc</option>
+                                <option value="srt">srt</option>
+                                <option value="ttml">ttml</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-header" onclick="toggleSection('applemusic-template-options')">
+                    <i class="fas fa-folder"></i>
+                    <h2>Template Options</h2>
+                </div>
+                <div id="applemusic-template-options" class="settings-content">
+                    <div class="settings-grid">
+                        <div>
+                            <label for="apple_template_folder_album">Template Folder Album:</label>
+                            <div style="display: flex">
+                                <input type="text" id="apple_template_folder_album" value="{album_artist}/{album}">
+                                <button onclick="openPopup('https://github.com/glomatico/gamdl?tab=readme-ov-file#tags-variables')" title="Help">
+                                    <span class="fa fa-question-circle"></span>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label for="apple_template_folder_compilation">Template Folder Compilation:</label>
+                            <input type="text" id="apple_template_folder_compilation" value="Compilations/{album}">
+                        </div>
+                        <div>
+                            <label for="apple_template_file_single_disc">Template File Single Disc:</label>
+                            <input type="text" id="apple_template_file_single_disc" value="{track:02d} {title}">
+                        </div>
+                        <div>
+                            <label for="apple_template_file_multi_disc">Template File Multi Disc:</label>
+                            <input type="text" id="apple_template_file_multi_disc" value="{disc}-{track:02d} {title}">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 </body>
 </html>
