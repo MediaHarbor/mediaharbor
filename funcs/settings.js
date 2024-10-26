@@ -110,6 +110,20 @@ async function saveSettings(event, settings) {
         event.reply('settings-error', 'Failed to save application settings');
         return;
     }
+    let spotifyOutputPath, appleOutputPath;
+
+    if (settings.createPlatformSubfolders) {
+        spotifyOutputPath = path.join(settings.downloadLocation, "Spotify");
+        appleOutputPath = path.join(settings.downloadLocation, "Apple Music");
+    } else {
+        spotifyOutputPath = settings.downloadLocation;
+        appleOutputPath = settings.downloadLocation;
+    }
+
+    // Update Spotify and Apple configurations with the determined paths
+    settings.spotify_output_path = spotifyOutputPath;
+    settings.apple_output_path = appleOutputPath;
+
     await Promise.all([
         saveServiceConfig(spotifyConfigPath, settings, 'spotify'),
         saveServiceConfig(appleConfigPath, settings, 'apple')
