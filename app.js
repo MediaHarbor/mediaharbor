@@ -376,6 +376,30 @@ async function openFileLocation(inputId) {
         return null;  // Handle errors by returning null
     }
 }
+async function openWvdLocation(inputId) {
+    try {
+        // Get the folder path using system dialog
+        const result = await window.electronAPI.openWvdLocation();
+
+        if (result && typeof result === 'string') {
+            // Update the corresponding input field with the selected path
+            const inputElement = document.getElementById(inputId);
+            if (inputElement) {
+                inputElement.value = result;
+                // Save settings right after updating the input
+                settings[inputId] = result;
+                window.electronAPI.send('save-settings', settings);
+            }
+            return result;
+        } else {
+            console.error('Invalid file path selected:', result);
+            return null;  // Ensure we handle invalid file paths
+        }
+    } catch (error) {
+        console.error('Error selecting folder location:', error);
+        return null;  // Handle errors by returning null
+    }
+}
 
 function handleTabSwitch() {
     const tabButtons = document.querySelectorAll('.tab-button');
@@ -454,7 +478,7 @@ function populateSettings() {
         'apple_template_folder_album': 'value', 'apple_template_folder_compilation': 'value', 'apple_template_file_single_disc': 'value', 'apple_template_file_multi_disc': 'value',
         "spotify_wait_interval" : "value", "spotify_no_exceptions": "checked", "spotify_save_cover": "checked", "spotify_save_playlist": "checked", "spotify_overwrite": "checked", "spotify_lrc_only": "checked", "spotify_no_lrc": "checked",
         "apple_disable_music_video_skip": "checked", "apple_save_cover": "checked", "apple_overwrite": "checked", "apple_save_playlist": "checked", "apple_synced_lyrics_only": "checked", "apple_no_synced_lyrics": "checked", "apple_cover_size": "value",
-        "apple_cookies_path": "value", "spotify_cookies_path": "value"
+        "apple_cookies_path": "value", "spotify_cookies_path": "value", "spotify_wvd_path": "value",
     };
 
     Object.keys(settingFields).forEach(id => {
@@ -569,6 +593,7 @@ function addSettingsListeners() {
         {id: "apple_cover_size", key: "apple_cover_size", type: "value"},
         {id: "spotify_cookies_path", key: "spotify_cookies_path", type: "value"},
         {id: "apple_cookies_path", key: "apple_cookies_path", type: "value"},
+        {id: "spotify_wvd_path", key:"spotify_wvd_path", type: "value"},
     ];
 
     settingsMapping.forEach(({ id, key, type }) => {

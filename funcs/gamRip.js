@@ -1,6 +1,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const {app} = require("electron");
 
 class gamRip {
     constructor(settingsFilePath, app, dbFunctions) {
@@ -12,7 +13,6 @@ class gamRip {
 
     handleSpotify(event, command) {
         const { url, quality } = command;
-
         fs.readFile(this.settingsFilePath, 'utf8', (err, settingsData) => {
             if (err) {
                 event.reply('download-error', 'Could not read settings file');
@@ -21,11 +21,11 @@ class gamRip {
 
             try {
                 const settings = JSON.parse(settingsData);
-                const cookiesPath = settings.spotify_cookies_path || path.join(process.env.USERPROFILE, 'Downloads', 'spotify.com_cookies.txt');
+                const configPath = path.join(app.getPath('userData'), 'spotify_config.json');
 
                 const votifyArgs = [
                     '-a', quality || 'vorbis-low',
-                    '--cookies-path', cookiesPath,
+                    '--config-path', configPath,
                     url
                 ];
 

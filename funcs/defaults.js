@@ -69,6 +69,7 @@ function getDefaultSettings() {
 
         // Spotify Settings
         spotify_cookies_path: "",
+        spotify_wvd_path: "",
         spotify_output_path: "Spotify",
         spotify_temp_path: "temp",
         spotify_enable_videos: true,

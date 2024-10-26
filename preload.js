@@ -47,4 +47,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     fileLocation: () => ipcRenderer.invoke('dialog:saveFile'),
     folderLocation: () => ipcRenderer.invoke('dialog:openFolder'),
     fileSelectLocation: () => ipcRenderer.invoke('dialog:openFile'),
+    openWvdLocation: () => ipcRenderer.invoke('dialog:openwvdFile'),
 });

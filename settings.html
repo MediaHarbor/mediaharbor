@@ -622,6 +622,13 @@
                             <input type="number" id="spotify_wait_interval" value="5">
                         </div>
                         <div>
+                            <label for="spotify_wvd_path">WVD File:</label>
+                            <div style="display: flex">
+                                <input type="text" id="spotify_wvd_path" value="">
+                                <button title="Select Cookies file" onclick="openWvdLocation('spotify_wvd_path')"><span class="fas fa-file"></span></button>
+                            </div>
+                        </div>
+                        <div>
                             <label class="checkbox-label">
                                 <input type="checkbox" id="spotify_no_exceptions">
                                 No Exceptions
@@ -774,6 +781,7 @@
                                 <option value="mp4box">mp4box</option>
                             </select>
                         </div>
+
                         <div>
                             <label class="checkbox-label">
                                 <input type="checkbox" id="apple_disable_music_video_skip">

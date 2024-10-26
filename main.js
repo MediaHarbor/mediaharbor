@@ -58,6 +58,20 @@ ipcMain.handle('showItemInFolder', async (event, filePath) => {
 ipcMain.handle('clearDownloadsDatabase', async () => {
     await deleteDataBase()
 });
+ipcMain.handle('dialog:openwvdFile', async (event) => {
+    const currentWindow = BrowserWindow.fromWebContents(event.sender);
+
+    const { canceled, filePaths } = await dialog.showOpenDialog(currentWindow, {
+        properties: ['openFile'],
+        filters: [{ name: 'Widevine Device Files', extensions: ['wvd'] }],
+        title: 'Select File'
+    });
+    if (canceled) {
+        return null;
+    } else {
+        return filePaths[0];
+    }
+});
 ipcMain.handle('dialog:openFile', async (event) => {
     const currentWindow = BrowserWindow.fromWebContents(event.sender);
 
