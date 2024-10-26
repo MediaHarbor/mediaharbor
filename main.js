@@ -10,6 +10,15 @@ const GamRip = require('./funcs/gamRip');
 const CustomRip = require('./funcs/customRip');
 const { setupSettingsHandlers } = require('./funcs/settings');
 
+const searchUrls = {
+    youtube: "https://music.youtube.com/search?q=",
+    spotify: "https://open.spotify.com/search/",
+    qobuz: "https://www.qobuz.com/gb-en/search?q=",
+    tidal: "https://listen.tidal.com/search?q=",
+    deezer: "https://www.deezer.com/us/search/",
+    appleMusic: "https://music.apple.com/search?term="
+};
+
 ipcMain.handle('load-downloads', (event) => {
     return new Promise((resolve, reject) => {
         loadDownloadsFromDatabase((rows) => {
@@ -204,6 +213,31 @@ function createWindow() {
     ipcMain.on('start-deezer-batch-download', (event, data) => {
         customRip.handleDeezerBatchDownload(event, data);
     });
+    ipcMain.on('search-on-browser', (event, searchData) => {
+        console.log('Main: Received search data:', searchData);
+        const { query, activeTab } = searchData;
+
+        if (!query) {
+            console.error('Main: No query provided');
+            return;
+        }
+
+        if (!searchUrls[activeTab]) {
+            console.error('Main: Invalid activeTab:', activeTab);
+            return;
+        }
+
+        const searchUrl = searchUrls[activeTab] + encodeURIComponent(query);
+        console.log('Main: Opening URL:', searchUrl);
+
+        shell.openExternal(searchUrl)
+            .then(() => {
+                console.log('Main: Browser opened successfully');
+            })
+            .catch(err => {
+                console.error('Main: Failed to open external browser:', err);
+            });
+    });
 }
 
 app.whenReady().then(createWindow);
@@ -219,3 +253,4 @@ app.on('activate', () => {
         createWindow();
     }
 });
+

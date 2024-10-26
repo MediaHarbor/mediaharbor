@@ -71,7 +71,8 @@ const pages = {
     video: 'video.html',
     downloads: 'downloads.html',
     settings: 'settings.html',
-    help: 'help.html'
+    help: 'help.html',
+    search: 'web_search.html'
 };
 
 
@@ -129,6 +130,50 @@ async function clearDownloadsDatabase() {
     }
 }
 
+// URL mappings for each service's search
+const searchUrls = {
+    youtube: "https://music.youtube.com/search?q=",
+    spotify: "https://open.spotify.com/search/",
+    qobuz: "https://www.qobuz.com/gb-en/search?q=",
+    tidal: "https://listen.tidal.com/search?q=",
+    deezer: "https://www.deezer.com/us/search/",
+    appleMusic: "https://music.apple.com/search?term="
+};
+
+// Set default tab
+let activeTab = "youtube";
+
+// Function to update the active tab
+function updateActiveTab(tab) {
+    document.querySelector('.tab-button.active').classList.remove('active');
+    document.querySelector(`button[data-tab="${tab}"]`).classList.add('active');
+    activeTab = tab;
+}
+
+// Add event listeners to each tab button
+function initializeSearchPage() {
+    document.querySelectorAll('.tab-button').forEach(button => {
+        button.addEventListener('click', () => {
+            updateActiveTab(button.getAttribute('data-tab'));
+        });
+    });
+}
+
+// Function to perform the search
+function performSearch() {
+    const query = document.getElementById('searchInput').value;
+    console.log('Renderer: Attempting search with:', { query, activeTab });
+    if (query) {
+        try {
+            window.electronAPI.performSearch({ query, activeTab });
+            console.log('Renderer: Search request sent to main process');
+        } catch (error) {
+            console.error('Renderer: Error sending search:', error);
+        }
+    }
+}
+
+
 async function loadPage(pageName) {
     const contentDiv = document.getElementById('content');
     try {
@@ -151,6 +196,9 @@ async function loadPage(pageName) {
         }
         else if (pageName === 'downloads') {
             await initializeDownloadStatusPage();
+        }
+        else if (pageName === 'search') {
+            await initializeSearchPage()
         }
     } catch (error) {
         contentDiv.innerHTML = '<p>Error loading the page: ' + error.message + '</p>';
@@ -1313,6 +1361,7 @@ window.electronAPI.receive('download-complete', (data) => {
 document.getElementById('musicBtn').addEventListener('click', () => loadPage('music'));
 document.getElementById('videoBtn').addEventListener('click', () => loadPage('video'));
 document.getElementById('downloadsBtn').addEventListener('click', () => loadPage('downloads'));
+document.getElementById('searchBtn').addEventListener('click', () => loadPage('search'));
 document.getElementById('settingsBtn').addEventListener('click', () => loadPage('settings'));
 document.getElementById('helpBtn').addEventListener('click', () => loadPage('help'));
 

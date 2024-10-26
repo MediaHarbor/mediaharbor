@@ -48,4 +48,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     folderLocation: () => ipcRenderer.invoke('dialog:openFolder'),
     fileSelectLocation: () => ipcRenderer.invoke('dialog:openFile'),
     openWvdLocation: () => ipcRenderer.invoke('dialog:openwvdFile'),
+    performSearch: (searchData) => {
+        console.log('Preload: Sending search data:', searchData);
+        return ipcRenderer.send('search-on-browser', searchData);
+    }
 });

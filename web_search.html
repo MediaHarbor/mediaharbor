@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Search</title>
+    <style>
+        #searchInputContainer {
+            display: flex;
+            padding: 10px;
+            background-color: #f4f4f4;
+        }
+        #searchInput {
+            flex: 1;
+            padding: 8px;
+            font-size: 1em;
+        }
+        iframe {
+            flex-grow: 1;
+            width: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+<!-- Tab Bar -->
+<div class="tab-bar">
+    <button class="tab-button active" data-tab="youtube">YouTube</button>
+    <button class="tab-button" data-tab="spotify">Spotify</button>
+    <button class="tab-button" data-tab="qobuz">Qobuz</button>
+    <button class="tab-button" data-tab="tidal">Tidal</button>
+    <button class="tab-button" data-tab="deezer">Deezer</button>
+    <button class="tab-button" data-tab="appleMusic">Apple Music</button>
+</div>
+
+<!-- Search Input -->
+<div id="searchInputContainer">
+    <input type="text" id="searchInput" placeholder="Enter search query...">
+    <button onclick="performSearch()">Search</button>
+</div>
+
+<!-- Iframe for displaying search results -->
+<iframe id="searchFrame"></iframe>
+
+</body>
+</html>
