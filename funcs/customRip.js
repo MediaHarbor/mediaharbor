@@ -1,30 +1,21 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
-
+const { getNextDownloadOrder } = require('./downloadorder');
 class CustomRip {
     constructor(settingsFilePath, app, dbFunctions) {
         this.settingsFilePath = settingsFilePath;
         this.app = app;
-        this.downloadCount = 0;
-        this.activeDownloads = new Set();
         this.saveDownloadToDatabase = dbFunctions.saveDownloadToDatabase;
     }
 
-    // Add this new method to manage download counting
-    getNextDownloadOrder() {
-        this.downloadCount++;
-        this.activeDownloads.add(this.downloadCount);
-        return this.downloadCount;
-    }
 
-    // Helper method to create environment with proper encoding
     createProcessEnv() {
         return {
             ...process.env,
             PYTHONIOENCODING: 'utf-8',
             LANG: 'en_US.UTF-8',
             LC_ALL: 'en_US.UTF-8',
-            FORCE_COLOR: '1' // This ensures rich library outputs colors correctly
+            FORCE_COLOR: '1'
         };
     }
 
@@ -64,7 +55,7 @@ class CustomRip {
     handleQobuzDownload(event, data) {
         const { url, quality } = data;
         const ripArgs = ['-q', quality, 'url', url];
-        const downloadOrder = this.getNextDownloadOrder();
+        const downloadOrder = getNextDownloadOrder();
 
         event.reply('download-info', {
             title: 'Qobuz Download',
@@ -134,7 +125,7 @@ class CustomRip {
     handleDeezerDownload(event, data) {
         const { url, quality } = data;
         const ripArgs = ['-q', quality, 'url', url];
-        const downloadOrder = this.getNextDownloadOrder();;
+        const downloadOrder = getNextDownloadOrder();
 
         event.reply('download-info', {
             title: 'Deezer Download',
@@ -202,7 +193,7 @@ class CustomRip {
     handleTidalDownload(event, data) {
         const { url, quality } = data;
         const ripArgs = ['-q', quality, 'url', url];
-        const downloadOrder = this.getNextDownloadOrder();;
+        const downloadOrder = getNextDownloadOrder();
 
         event.reply('download-info', {
             title: 'Tidal Download',
@@ -379,7 +370,7 @@ class CustomRip {
     handleQobuzBatchDownload(event, data) {
         const { filePath, quality } = data;
         const ripArgs = ['-q', quality, 'file', filePath];
-        const downloadOrder = this.getNextDownloadOrder();;
+        const downloadOrder = getNextDownloadOrder();
         let totalTracks = 0;
         let completedTracks = 0;
         let trackProgressMap = {}; // To store the progress of each track
@@ -487,7 +478,7 @@ class CustomRip {
     handleDeezerBatchDownload(event, data) {
         const { filePath, quality } = data;
         const ripArgs = ['-q', quality, 'file', filePath];
-        const downloadOrder = this.getNextDownloadOrder();;
+        const downloadOrder = getNextDownloadOrder();
         let totalTracks = 0;
         let completedTracks = 0;
         let trackProgressMap = {}; // To store the progress of each track
@@ -592,7 +583,7 @@ class CustomRip {
     handleTidalBatchDownload(event, data) {
         const { filePath, quality } = data;
         const ripArgs = ['-q', quality, 'file', filePath];
-        const downloadOrder = this.getNextDownloadOrder();;
+        const downloadOrder = getNextDownloadOrder();
         let totalTracks = 0;
         let completedTracks = 0;
         let trackProgressMap = {}; // To store the progress of each track

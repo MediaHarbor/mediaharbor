@@ -4,6 +4,7 @@ const { spawn } = require("child_process");
 const { app } = require("electron");
 const { saveDownloadToDatabase } = require("./db");
 const { fetchWebsiteTitle, extractDomain, fetchHighResImageOrFavicon } = require("./fetchers");
+const { getNextDownloadOrder } = require('./downloadorder');
 let downloadCount = 0;
 const activeDownloads = new Map();
 function buildYtDlpMusicArgs(url, quality, settings) {
@@ -156,9 +157,10 @@ function buildYtDlpArgs(url, quality, settings, isGeneric = false) {
 }
 
 async function handleYtDlpMusicDownload(event, data, settings) {
+
     const { url, quality } = data;
     const ytDlpCommand = 'yt-dlp';
-    const downloadId = ++downloadCount;
+    const downloadId = getNextDownloadOrder();
 
     activeDownloads.set(downloadId, {
         url,
@@ -298,9 +300,7 @@ function startMusicDownload(event, url, quality, settings, videoInfo, downloadId
 async function handleYtDlpDownload(event, data, settings, isGeneric = false) {
     const { url, quality } = data;
     const ytDlpCommand = 'yt-dlp';
-
-    // Generate a unique download ID before starting the process
-    const downloadId = ++downloadCount;
+    const downloadId = getNextDownloadOrder();
 
     // Store initial state in activeDownloads
     activeDownloads.set(downloadId, {

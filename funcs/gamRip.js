@@ -2,12 +2,12 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const {app} = require("electron");
+const { getNextDownloadOrder } = require('./downloadorder');
 
 class gamRip {
     constructor(settingsFilePath, app, dbFunctions) {
         this.settingsFilePath = settingsFilePath;
         this.app = app;
-        this.downloadCount = 0;
         this.saveDownloadToDatabase = dbFunctions.saveDownloadToDatabase;
     }
 
@@ -29,11 +29,11 @@ class gamRip {
                     url
                 ];
 
-                this.downloadCount++;
+                const downloadOrder = getNextDownloadOrder();
 
                 event.reply('download-info', {
                     title: 'Spotify Download',
-                    order: this.downloadCount
+                    order: downloadOrder
                 });
 
                 const votifyProcess = spawn('custom_votify', votifyArgs, {
@@ -52,7 +52,7 @@ class gamRip {
                     album: null,
                     artist: null,
                     progress: 0,
-                    order: this.downloadCount
+                    order: downloadOrder
                 };
 
                 let buffer = '';
@@ -87,7 +87,7 @@ class gamRip {
                             trackInfo.progress = parseFloat(progressMatch[1]);
 
                             event.reply('download-update', {
-                                order: this.downloadCount,
+                                order: downloadOrder,
                                 progress: trackInfo.progress,
                                 title: trackInfo.title,
                                 thumbnail: trackInfo.cover,
@@ -120,7 +120,7 @@ class gamRip {
                             this.saveDownloadToDatabase(downloadInfo);
 
                             event.reply('download-complete', {
-                                order: this.downloadCount,
+                                order: downloadOrder,
                                 location: downloadLocation,
                                 title: trackInfo.title,
                                 thumbnail: trackInfo.cover,
@@ -159,11 +159,11 @@ class gamRip {
                     url
                 ];
 
-                this.downloadCount++;
+                const downloadOrder = getNextDownloadOrder();
 
                 event.reply('download-info', {
                     title: 'Apple Music Download',
-                    order: this.downloadCount
+                    order: downloadOrder
                 });
 
                 const gamDLProcess = spawn('custom_gamdl', gamdlArgs, {
@@ -181,7 +181,7 @@ class gamRip {
                     title: null,
                     album: null,
                     progress: 0,
-                    order: this.downloadCount
+                    order: downloadOrder
                 };
 
                 let buffer = '';
@@ -213,7 +213,7 @@ class gamRip {
 
                             // Send update matching the frontend rendering format
                             event.reply('download-update', {
-                                order: this.downloadCount,
+                                order: downloadOrder,
                                 progress: trackInfo.progress,
                                 title: trackInfo.title,
                                 thumbnail: trackInfo.cover,
@@ -255,7 +255,7 @@ class gamRip {
 
                             // Send final update matching frontend format
                             event.reply('download-complete', {
-                                order: this.downloadCount,
+                                order: downloadOrder,
                                 location: downloadLocation,
                                 title: trackInfo.title,
                                 thumbnail: trackInfo.cover,
