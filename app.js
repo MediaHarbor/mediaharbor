@@ -454,6 +454,7 @@ function populateSettings() {
         'apple_template_folder_album': 'value', 'apple_template_folder_compilation': 'value', 'apple_template_file_single_disc': 'value', 'apple_template_file_multi_disc': 'value',
         "spotify_wait_interval" : "value", "spotify_no_exceptions": "checked", "spotify_save_cover": "checked", "spotify_save_playlist": "checked", "spotify_overwrite": "checked", "spotify_lrc_only": "checked", "spotify_no_lrc": "checked",
         "apple_disable_music_video_skip": "checked", "apple_save_cover": "checked", "apple_overwrite": "checked", "apple_save_playlist": "checked", "apple_synced_lyrics_only": "checked", "apple_no_synced_lyrics": "checked", "apple_cover_size": "value",
+        "apple_cookies_path": "value", "spotify_cookies_path": "value"
     };
 
     Object.keys(settingFields).forEach(id => {
@@ -566,6 +567,8 @@ function addSettingsListeners() {
         {id: "apple_synced_lyrics_only", key: "apple_synced_lyrics_only", type: "checked"},
         {id: "apple_no_synced_lyrics", key: "apple_no_synced_lyrics", type: "checked"},
         {id: "apple_cover_size", key: "apple_cover_size", type: "value"},
+        {id: "spotify_cookies_path", key: "spotify_cookies_path", type: "value"},
+        {id: "apple_cookies_path", key: "apple_cookies_path", type: "value"},
     ];
 
     settingsMapping.forEach(({ id, key, type }) => {

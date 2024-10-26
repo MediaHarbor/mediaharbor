@@ -21,7 +21,7 @@ class gamRip {
 
             try {
                 const settings = JSON.parse(settingsData);
-                const cookiesPath = settings.spotifyCookiesPath || path.join(process.env.USERPROFILE, 'Downloads', 'spotify.com_cookies.txt');
+                const cookiesPath = settings.spotify_cookies_path || path.join(process.env.USERPROFILE, 'Downloads', 'spotify.com_cookies.txt');
 
                 const votifyArgs = [
                     '-a', quality || 'vorbis-low',
@@ -151,7 +151,7 @@ class gamRip {
 
             try {
                 const settings = JSON.parse(settingsData);
-                const cookiesPath = settings.appleMusicCookiesPath || path.join(process.env.USERPROFILE, 'Downloads', 'apple.com_cookies.txt');
+                const cookiesPath = settings.apple_cookies_path || path.join(process.env.USERPROFILE, 'Downloads', 'apple.com_cookies.txt');
 
                 const gamdlArgs = [
                     '-c', cookiesPath,

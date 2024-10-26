@@ -68,6 +68,7 @@ function getDefaultSettings() {
         excluded_tags: "",
 
         // Spotify Settings
+        spotify_cookies_path: "",
         spotify_output_path: "Spotify",
         spotify_temp_path: "temp",
         spotify_enable_videos: true,
@@ -83,6 +84,7 @@ function getDefaultSettings() {
         spotify_template_file_single_disc: "{track:02d} {title}",
         spotify_template_file_multi_disc: "{disc}-{track:02d} {title}",
         // Apple Settings
+        apple_cookies_path: "",
         apple_output_path: "Apple Music",
         apple_temp_path: "temp",
         apple_download_mode: "ytdlp",
