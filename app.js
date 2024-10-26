@@ -10,13 +10,39 @@ function applyTheme(theme) {
     document.body.classList.remove('dark', 'light');
 
     if (theme === 'auto') {
-        // Check system theme and apply accordingly
         const isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
         document.body.classList.add(isDarkMode ? 'dark' : 'light');
+        applyDarkModeScrollbars(isDarkMode);
     } else if (theme === 'dark') {
         document.body.classList.add('dark');
+        applyDarkModeScrollbars(true);
     } else {
         document.body.classList.add('light');
+        applyDarkModeScrollbars(false);
+    }
+}
+function applyDarkModeScrollbars(isDarkMode) {
+    let styleElement = document.getElementById('scrollbar-styles');
+
+    if (!styleElement) {
+        styleElement = document.createElement('style');
+        styleElement.id = 'scrollbar-styles';
+        document.head.appendChild(styleElement);
+    }
+
+    if (isDarkMode) {
+        styleElement.innerHTML = `
+            *::-webkit-scrollbar-track {
+                background: #1d1d1d;
+            }
+            *::-webkit-scrollbar-thumb {
+                background-color: #4CAF50;
+                border-radius: 10px;
+                border: 3px solid #2f2f2f;
+            }
+        `;
+    } else {
+        styleElement.innerHTML = ''; // Remove the dark mode styles
     }
 }
 

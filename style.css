@@ -168,17 +168,44 @@ button:hover {
 }
 
 /* Download container */
-#download-container {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    padding: 20px;
-}
 #download-history-container {
     display: flex;
     flex-direction: column;
     gap: 20px;
     padding: 20px;
+}
+.download-item {
+    display: flex;
+    align-items: flex-start;
+    background-color: #fff;
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    animation: fadeIn 1s ease-in-out;
+}
+.dark .download-item {
+    background-color: #222222;
+}
+.dark .download-item h3{
+    color: #e0e0e0;
+}
+.dark .download-item p{
+    color: #666;
+}
+.dark .uuid-05bd5b1d-e43f-4ffd-8b8d-2a01f8bc0f4c {
+    fill: currentColor;
+}
+
+.dark .uuid-005cb519-6a5d-4f39-95d2-ae1f52d90fc1 {
+    fill: #3b3f45;
+}
+/* Qobuz Logo */
+.uuid-05bd5b1d-e43f-4ffd-8b8d-2a01f8bc0f4c {
+    fill: currentColor;
+}
+
+.uuid-005cb519-6a5d-4f39-95d2-ae1f52d90fc1 {
+    fill: #fff;
 }
 
 .download-entry {
@@ -315,6 +342,23 @@ button:hover {
     border: 3px solid #f1f1f1;
 }
 
+*::-webkit-scrollbar {
+    width: 17px;
+}
+*::-webkit-scrollbar-track {
+    background: #ffffff;
+}
+*::-webkit-scrollbar-thumb {
+    background-color: #45a049;
+    border-radius: 10px;
+    border: 3px solid #f1f1f1;
+}
+
+
+*::-webkit-scrollbar-thumb:hover {
+    background-color: #4CAF50;
+}
+
 @keyframes slideDown {
     0% { opacity: 0; transform: translateY(-10px); }
     100% { opacity: 1; transform: translateY(0); }
@@ -352,7 +396,6 @@ button:hover {
 .tab-button.active {
     color: #4CAF50;
 }
-
 
 /* Tab content */
 .tab-content {
@@ -425,7 +468,6 @@ body.dark {
     background-color: #121212;
     color: #e0e0e0;
 }
-
 .dark .navbar {
     background-color: #1e1e1e;
 }
@@ -815,15 +857,6 @@ select.dropdown-btn:focus {
     display: block;
 }
 
-.download-item {
-    display: flex;
-    padding: 15px;
-    margin-bottom: 15px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    background-color: #fff;
-}
-
 .download-thumbnail {
     width: 120px;
     height: 120px;
@@ -962,4 +995,27 @@ select.dropdown-btn:focus {
 .help-popup-content a {
     color: #337ab7;
     text-decoration: none;
+}
+
+.download-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.download-actions .fab-button {
+    padding: 13px 15px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.download-actions .fab-button i {
+    font-size: 16px;
+}
+
+.download-actions {
+    padding: 5px 0px 0px 0px;
 }
