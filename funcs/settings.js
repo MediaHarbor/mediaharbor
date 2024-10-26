@@ -37,7 +37,12 @@ async function saveServiceConfig(configPath, settings, servicePrefix) {
         .filter(([key]) => key.startsWith(servicePrefix))
         .reduce((obj, [key, value]) => {
             const configKey = key.replace(servicePrefix + '_', '');
-            obj[configKey] = value;
+
+            // Skip empty values (null, undefined, empty string)
+            if (value !== null && value !== undefined && value !== '') {
+                obj[configKey] = value;
+            }
+
             return obj;
         }, {});
 

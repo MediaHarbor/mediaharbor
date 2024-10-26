@@ -42,7 +42,6 @@ class TidalAPI:
 
         response = self.session.post(self.TOKEN_URL, headers=headers, data=data)
         response.raise_for_status()
-
         token_data = response.json()
         self.access_token = token_data['access_token']
         self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=token_data['expires_in'])

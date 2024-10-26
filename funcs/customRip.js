@@ -6,7 +6,35 @@ class CustomRip {
         this.settingsFilePath = settingsFilePath;
         this.app = app;
         this.downloadCount = 0;
+        this.activeDownloads = new Set();
         this.saveDownloadToDatabase = dbFunctions.saveDownloadToDatabase;
+    }
+
+    // Add this new method to manage download counting
+    getNextDownloadOrder() {
+        this.downloadCount++;
+        this.activeDownloads.add(this.downloadCount);
+        return this.downloadCount;
+    }
+
+    // Helper method to create environment with proper encoding
+    createProcessEnv() {
+        return {
+            ...process.env,
+            PYTHONIOENCODING: 'utf-8',
+            LANG: 'en_US.UTF-8',
+            LC_ALL: 'en_US.UTF-8',
+            FORCE_COLOR: '1' // This ensures rich library outputs colors correctly
+        };
+    }
+
+    // Modified spawn method that includes proper encoding
+    spawnProcess(command, args) {
+        return spawn(command, args, {
+            env: this.createProcessEnv(),
+            stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true
+        });
     }
 
     handleStreamRip(event, command) {
@@ -36,24 +64,24 @@ class CustomRip {
     handleQobuzDownload(event, data) {
         const { url, quality } = data;
         const ripArgs = ['-q', quality, 'url', url];
-        this.downloadCount++;
+        const downloadOrder = this.getNextDownloadOrder();
 
         event.reply('download-info', {
             title: 'Qobuz Download',
-            order: this.downloadCount
+            order: downloadOrder
         });
 
-        const ripProcess = spawn('custom_rip', ripArgs);
+        const ripProcess = this.spawnProcess('custom_rip', ripArgs);
         let currentEid = null;
 
         ripProcess.stdout.on('data', (data) => {
-            const output = data.toString();
+            const output = data.toString('utf-8');
             console.log(output);
 
             const eidMatch = output.match(/track-id=(\d+)/);
             if (eidMatch && eidMatch[1] !== currentEid) {
                 currentEid = eidMatch[1];
-                this.getQobuzDetails(currentEid, event, this.downloadCount);
+                this.getQobuzDetails(currentEid, event, downloadOrder);
             }
 
             const progressMatch = output.match(/(\d+\.\d+)%/);
@@ -61,16 +89,17 @@ class CustomRip {
                 const progress = parseFloat(progressMatch[1]);
                 event.reply('download-update', {
                     progress,
-                    order: this.downloadCount
+                    order: downloadOrder
                 });
             }
         });
 
         ripProcess.stderr.on('data', (errorData) => {
-            const errorOutput = errorData.toString();
+            const errorOutput = errorData.toString('utf-8');
             console.error(`Error: ${errorOutput}`);
             event.reply('download-error', `Error: ${errorOutput}`);
         });
+
 
         ripProcess.on('exit', (code) => {
             if (code === 0) {
@@ -92,10 +121,10 @@ class CustomRip {
                                     this.saveDownloadToDatabase(downloadInfo);
                                 }
                             }
-                        }, this.downloadCount);
+                        }, downloadOrder);
                     }
                 });
-                event.reply('download-complete', { order: this.downloadCount });
+                event.reply('download-complete', { order: downloadOrder });
             } else {
                 event.reply('download-error', `Process exited with code ${code}`);
             }
@@ -105,31 +134,31 @@ class CustomRip {
     handleDeezerDownload(event, data) {
         const { url, quality } = data;
         const ripArgs = ['-q', quality, 'url', url];
-        this.downloadCount++;
+        const downloadOrder = this.getNextDownloadOrder();;
 
         event.reply('download-info', {
             title: 'Deezer Download',
-            order: this.downloadCount
+            order: downloadOrder
         });
 
         let trackId = null;
         const deezerIdMatch = url.match(/\/track\/(\d+)/);
         if (deezerIdMatch) {
             trackId = deezerIdMatch[1];
-            this.getDeezerDetails(trackId, event, this.downloadCount);
+            this.getDeezerDetails(trackId, event, downloadOrder);
         }
 
-        const ripProcess = spawn('custom_rip', ripArgs);
+        const ripProcess = this.spawnProcess('custom_rip', ripArgs);
 
         ripProcess.stdout.on('data', (data) => {
-            const output = data.toString();
+            const output = data.toString('utf-8');
             console.log(output);
             const progressMatch = output.match(/(\d+\.\d+)%/);
             if (progressMatch) {
                 const progress = parseFloat(progressMatch[1]);
                 event.reply('download-update', {
                     progress,
-                    order: this.downloadCount
+                    order: downloadOrder
                 });
             }
         });
@@ -160,10 +189,10 @@ class CustomRip {
                                     this.saveDownloadToDatabase(downloadInfo);
                                 }
                             }
-                        }, this.downloadCount);
+                        }, downloadOrder);
                     }
                 });
-                event.reply('download-complete', { order: this.downloadCount });
+                event.reply('download-complete', { order: downloadOrder });
             } else {
                 event.reply('download-error', `Process exited with code ${code}`);
             }
@@ -173,31 +202,31 @@ class CustomRip {
     handleTidalDownload(event, data) {
         const { url, quality } = data;
         const ripArgs = ['-q', quality, 'url', url];
-        this.downloadCount++;
+        const downloadOrder = this.getNextDownloadOrder();;
 
         event.reply('download-info', {
             title: 'Tidal Download',
-            order: this.downloadCount
+            order: downloadOrder
         });
 
         let currentTrackId = null;
         const tidalIdMatch = url.match(/\/track\/(\d+)/);
         if (tidalIdMatch) {
             currentTrackId = tidalIdMatch[1];
-            this.getTidalDetails(currentTrackId, event, this.downloadCount);
+            this.getTidalDetails(currentTrackId, event, downloadOrder);
         }
 
-        const ripProcess = spawn('custom_rip', ripArgs);
+        const ripProcess = this.spawnProcess('custom_rip', ripArgs);
 
         ripProcess.stdout.on('data', (data) => {
-            const output = data.toString();
+            const output = data.toString('utf-8');
             console.log(output);
             const progressMatch = output.match(/(\d+\.\d+)%/);
             if (progressMatch) {
                 const progress = parseFloat(progressMatch[1]);
                 event.reply('download-update', {
                     progress,
-                    order: this.downloadCount
+                    order: downloadOrder
                 });
             }
         });
@@ -228,10 +257,10 @@ class CustomRip {
                                     this.saveDownloadToDatabase(downloadInfo);
                                 }
                             }
-                        }, this.downloadCount);
+                        }, downloadOrder);
                     }
                 });
-                event.reply('download-complete', { order: this.downloadCount });
+                event.reply('download-complete', { order: downloadOrder });
             } else {
                 event.reply('download-error', `Process exited with code ${code}`);
             }
@@ -243,7 +272,7 @@ class CustomRip {
         let output = '';
 
         pythonProcess.stdout.on('data', (data) => {
-            output += data.toString();
+            output += data.toString('utf-8');
         });
 
         pythonProcess.stderr.on('data', (data) => {
@@ -254,11 +283,12 @@ class CustomRip {
             if (code === 0) {
                 try {
                     const details = JSON.parse(output);
+                    console.log(details.data.attributes.name);  // Should print Japanese characters
                     const trackDetails = {
                         title: details.data.attributes.title,
-                        artist: details.included[0].attributes.name,
+                        artist: details.included[1].attributes.name,
                         quality: details.data.attributes.mediaTags[0],
-                        thumbnail: details.included[1].attributes.imageLinks[0].href
+                        thumbnail: details.included[0].attributes.imageLinks[1].href
                     };
                     event.reply('tidal-details', {
                         order: downloadCount,
@@ -278,7 +308,7 @@ class CustomRip {
         let output = '';
 
         pythonProcess.stdout.on('data', (data) => {
-            output += data.toString();
+            output += data.toString('utf-8');
         });
 
         pythonProcess.stderr.on('data', (data) => {
@@ -307,7 +337,7 @@ class CustomRip {
         let output = '';
 
         pythonProcess.stdout.on('data', (data) => {
-            output += data.toString();
+            output += data.toString('utf-8');
         });
 
         pythonProcess.stderr.on('data', (data) => {
@@ -349,15 +379,15 @@ class CustomRip {
     handleQobuzBatchDownload(event, data) {
         const { filePath, quality } = data;
         const ripArgs = ['-q', quality, 'file', filePath];
-        this.downloadCount++;
+        const downloadOrder = this.getNextDownloadOrder();;
         let totalTracks = 0;
         let completedTracks = 0;
         let trackProgressMap = {}; // To store the progress of each track
 
         event.reply('download-info', {
-            title: `Batch Download #${this.downloadCount}`,
+            title: `Batch Download #${downloadOrder}`,
             downloadArtistOrUploader: 'Qobuz',
-            order: this.downloadCount,
+            order: downloadOrder,
             isBatch: true
         });
 
@@ -396,7 +426,7 @@ class CustomRip {
                                 // Send the updated progress to the frontend
                                 event.reply('download-update', {
                                     tracksProgress: Object.values(trackProgressMap),
-                                    order: this.downloadCount,
+                                    order: downloadOrder,
                                     completedTracks,
                                     totalTracks
                                 });
@@ -410,7 +440,7 @@ class CustomRip {
                     // Send the updated progress to the frontend
                     event.reply('download-update', {
                         tracksProgress: Object.values(trackProgressMap),
-                        order: this.downloadCount,
+                        order: downloadOrder,
                         completedTracks,
                         totalTracks
                     });
@@ -428,7 +458,7 @@ class CustomRip {
 
                 // Send completion to the frontend
                 event.reply('download-complete', {
-                    order: this.downloadCount,
+                    order: downloadOrder,
                     completedTracks,
                     totalTracks
                 });
@@ -444,7 +474,7 @@ class CustomRip {
         ripProcess.on('exit', (code) => {
             if (code === 0) {
                 event.reply('download-complete', {
-                    order: this.downloadCount,
+                    order: downloadOrder,
                     completedTracks,
                     totalTracks
                 });
@@ -457,15 +487,15 @@ class CustomRip {
     handleDeezerBatchDownload(event, data) {
         const { filePath, quality } = data;
         const ripArgs = ['-q', quality, 'file', filePath];
-        this.downloadCount++;
+        const downloadOrder = this.getNextDownloadOrder();;
         let totalTracks = 0;
         let completedTracks = 0;
         let trackProgressMap = {}; // To store the progress of each track
 
         event.reply('download-info', {
-            title: `Batch Download #${this.downloadCount}`,
+            title: `Batch Download #${downloadOrder}`,
             downloadArtistOrUploader: 'Deezer',
-            order: this.downloadCount
+            order: downloadOrder
         });
 
         const ripProcess = spawn('custom_rip', ripArgs);
@@ -499,7 +529,7 @@ class CustomRip {
                             // Send updated progress to the frontend
                             event.reply('download-update', {
                                 tracksProgress: Object.values(trackProgressMap), // Send all track progresses
-                                order: this.downloadCount,
+                                order: downloadOrder,
                                 completedTracks,
                                 totalTracks,
                                 isBatch: true
@@ -520,7 +550,7 @@ class CustomRip {
 
                 // Send completion to the frontend
                 event.reply('download-complete', {
-                    order: this.downloadCount,
+                    order: downloadOrder,
                     completedTracks,
                     totalTracks
                 });
@@ -540,7 +570,7 @@ class CustomRip {
                     const downloadLocation = settings.downloadLocation || this.app.getPath('downloads');
 
                     const downloadInfo = {
-                        downloadName: `Batch Download #${this.downloadCount}`,
+                        downloadName: `Batch Download #${downloadOrder}`,
                         downloadArtistOrUploader: 'Deezer',
                         downloadLocation: downloadLocation,
                         service: 'deezer'
@@ -548,7 +578,7 @@ class CustomRip {
                     this.saveDownloadToDatabase(downloadInfo);
                 });
                 event.reply('download-complete', {
-                    order: this.downloadCount,
+                    order: downloadOrder,
                     completedTracks,
                     totalTracks
                 });
@@ -562,15 +592,15 @@ class CustomRip {
     handleTidalBatchDownload(event, data) {
         const { filePath, quality } = data;
         const ripArgs = ['-q', quality, 'file', filePath];
-        this.downloadCount++;
+        const downloadOrder = this.getNextDownloadOrder();;
         let totalTracks = 0;
         let completedTracks = 0;
         let trackProgressMap = {}; // To store the progress of each track
 
         event.reply('download-info', {
-            title: `Batch Download #${this.downloadCount}`,
+            title: `Batch Download #${downloadOrder}`,
             downloadArtistOrUploader: 'Tidal',
-            order: this.downloadCount
+            order: downloadOrder
         });
 
         const ripProcess = spawn('custom_rip', ripArgs);
@@ -604,7 +634,7 @@ class CustomRip {
                             // Send updated progress to the frontend
                             event.reply('download-update', {
                                 tracksProgress: Object.values(trackProgressMap), // Send all track progresses
-                                order: this.downloadCount,
+                                order: downloadOrder,
                                 completedTracks,
                                 totalTracks
                             });
@@ -624,7 +654,7 @@ class CustomRip {
 
                 // Send completion to the frontend
                 event.reply('download-complete', {
-                    order: this.downloadCount,
+                    order: downloadOrder,
                     completedTracks,
                     totalTracks
                 });
@@ -644,7 +674,7 @@ class CustomRip {
                     const downloadLocation = settings.downloadLocation || this.app.getPath('downloads');
 
                     const downloadInfo = {
-                        downloadName: `Batch Download #${this.downloadCount}`,
+                        downloadName: `Batch Download #${downloadOrder}`,
                         downloadArtistOrUploader: 'Tidal',
                         downloadLocation: downloadLocation,
                         service: 'tidal',
@@ -654,7 +684,7 @@ class CustomRip {
                     this.saveDownloadToDatabase(downloadInfo);
                 });
                 event.reply('download-complete', {
-                    order: this.downloadCount,
+                    order: downloadOrder,
                     completedTracks,
                     totalTracks
                 });
