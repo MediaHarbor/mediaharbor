@@ -7,26 +7,45 @@
 </head>
 <body>
 <div class="help-container">
-    <h1>Help Center</h1>
+    <h1 class="helph1">Help Center</h1>
     <section id="yt-dlp-help">
-        <h2>YT-DLP Help</h2>
-        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla convallis egestas rhoncus. Donec facilisis fermentum sem, ac viverra ante luctus vel. Donec vel mauris quam.</p>
-        <p>Etiam vitae lectus vel tortor ullamcorper venenatis. Duis tincidunt, urna quis varius placerat, libero ligula laoreet arcu, sed rutrum leo tortor nec nibh. Nunc sed fringilla magna.</p>
+        <h2 class="helph2"><i class="fas fa-video"></i> YT-DLP FAQ</h2>
+        <div class="faq-content">
+            <h3>Which sites are supported?</h3>
+            <p>Find supported sites in the generic video downloading tab's supported sites section.</p>
+        </div>
+    </section>
+    <section id="generic-faq">
+        <h2 class="helph2"><i class="fas fa-question-circle"></i> Generic FAQ</h2>
+        <div class="faq-content">
+            <h3>Downloads get stuck, what to do?</h3>
+            <p>Make sure to diagnose the issue. Currently, you can start the app from the terminal to debug.</p>
+            <h3>Deleted files aren’t removed from my PC.</h3>
+            <p>This is expected behavior for now. We’ll be fixing this in a future update.</p>
+            <h3>How to report an issue/feature request?</h3>
+            <p>Visit our main project page and create a new issue: <a class="linkRef" onclick=openPopup("https://github.com/MediaHarbor/mediaharbor/issues")>GitHub Issues</a>.</p>
+        </div>
     </section>
     <section id="streamrip-help">
-        <h2>Streamrip Help</h2>
-        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Quisque at tincidunt magna. Phasellus sed nulla augue. Integer congue, eros non commodo viverra, urna eros tristique est, ac hendrerit urna est non felis.</p>
-        <p>Maecenas ut dolor in libero consequat scelerisque. Curabitur eu nibh ac lorem feugiat euismod vel nec libero. Donec non risus sollicitudin, fermentum turpis nec, congue elit.</p>
+        <h2 class="helph2"><i class="fas fa-music"></i> Streamrip FAQ</h2>
+        <div class="faq-content">
+            <h3>Streamrip downloads (Qobuz, Deezer, Tidal) get stuck, what to do?</h3>
+            <p>Try running <code>$custom_rip config reset</code>. If unresolved, try downloading from your terminal. If it fixes, create a new issue</p>
+        </div>
     </section>
     <section id="search-help">
-        <h2>Search Help</h2>
-        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Praesent commodo cursus magna, vel scelerisque nisl consectetur et. Cras mattis consectetur purus sit amet fermentum.</p>
-        <p>Aenean lacinia bibendum nulla sed consectetur. Donec ullamcorper nulla non metus auctor fringilla. Nullam id dolor id nibh ultricies vehicula ut id elit.</p>
+        <h2 class="helph2"><i class="fas fa-search"></i> Search FAQ</h2>
+        <div class="faq-content">
+            <h3>What is this?</h3>
+            <p>A search function using API requests is in progress. Meanwhile, use your service’s search page.</p>
+        </div>
     </section>
-    <section id="general-help">
-        <h2>General Help</h2>
-        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer posuere erat a ante venenatis dapibus posuere velit aliquet. Maecenas faucibus mollis interdum.</p>
-        <p>Sed posuere consectetur est at lobortis. Vivamus sagittis lacus vel augue laoreet rutrum faucibus dolor auctor. Duis mollis, est non commodo luctus.</p>
+    <section id="sponsor-help">
+        <h2 class="helph2"><i class="fas fa-hand-holding-usd"></i> How to Sponsor this Project?</h2>
+        <div class="faq-content">
+            <p>Support us via the sponsor button on our project page: <a class="linkRef" onclick=openPopup("https://github.com/MediaHarbor/mediaharbor/")>GitHub Sponsor</a>.</p>
+            <p>All donations are appreciated!</p>
+        </div>
     </section>
 </div>
 </body>

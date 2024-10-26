@@ -167,8 +167,25 @@ function updateActiveNavButton(pageName) {
         }
     });
 }
-function initializeHelpTab(){
+async function initializeHelpTab(){
+    // Toggle visibility of FAQ sections with animations
+    document.querySelectorAll("section").forEach(section => {
+        section.addEventListener("click", () => {
+            const content = section.querySelector(".faq-content");
+            const allSections = document.querySelectorAll("section");
 
+            // Collapse other sections and open the clicked one
+            allSections.forEach(sec => sec.classList.remove("opened"));
+            section.classList.toggle("opened");
+
+            // Adjust the FAQ content display
+            document.querySelectorAll(".faq-content").forEach(c => {
+                if (c !== content) c.style.display = "none";
+            });
+
+            content.style.display = content.style.display === "block" ? "none" : "block";
+        });
+    });
 }
 
 function inToggleActiveOnChange(checkboxId, fieldSelector) {
@@ -375,6 +392,7 @@ async function selectFolderLocation(inputId) {
         console.error('Error selecting folder location:', error);
     }
 }
+
 async function openFileLocation(inputId) {
     try {
         // Get the folder path using system dialog
