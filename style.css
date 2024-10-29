@@ -284,6 +284,7 @@ button:hover {
 }
 
 .dropdown-content {
+    z-index: 8;
     position: absolute;
     top: 100%;
     left: 0;
@@ -1084,4 +1085,140 @@ h3, p, a {
 .linkRef {
     color: #45a049;
     text-decoration: none;
+}
+
+/* styles.css */
+.result-card {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin: 10px;
+    padding: 15px;
+    display: flex;
+    background: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.card-content {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 7px;
+}
+.dark .result-card {
+    border: 1px solid #444;
+    border-radius: 8px;
+    margin: 10px;
+    padding: 15px;
+    display: flex;
+    background: #222;
+    box-shadow: 0 2px 4px rgba(255, 255, 255, 0.1);
+}
+
+.dark .card-content {
+    display: flex;
+    width: 100%;
+    align-items: center;
+}
+
+.dark .result-thumbnail {
+    width: 120px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 4px;
+    margin-right: 15px;
+}
+
+.dark .result-info {
+    flex-grow: 1;
+}
+
+.dark .result-info h3 {
+    margin: 0 0 10px 0;
+    font-size: 18px;
+    color: white;
+}
+
+.dark .result-info p {
+    margin: 5px 0;
+    color: #bbb;
+}
+
+
+.dark .floating-notifications-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+}
+
+.dark .notification {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    animation: fadeIn 0.3s, fadeOut 0.3s 2.7s;
+}
+
+
+
+.result-thumbnail {
+    width: 120px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 4px;
+    margin-right: 15px;
+}
+
+.result-info {
+    flex-grow: 1;
+}
+
+.result-info h3 {
+    margin: 0 0 10px 0;
+    font-size: 18px;
+}
+
+.result-info p {
+    margin: 5px 0;
+    color: #666;
+}
+
+
+.floating-notifications-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+}
+
+.notification {
+    background: rgba(0,0,0,0.8);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    animation: fadeIn 0.3s, fadeOut 0.3s 2.7s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-20px); }
+}
+
+.card-content button {
+    padding: 13px 15px;
+    gap: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    margin-left: 10px
 }
