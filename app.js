@@ -734,8 +734,15 @@ function initializeDropdown(dropdown) {
         });
     });
 
-    button.addEventListener('click', () => {
+    button.addEventListener('click', (e) => {
+        e.stopPropagation();
         content.style.display = content.style.display === 'block' ? 'none' : 'block';
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!dropdown.contains(e.target)) {
+            content.style.display = 'none';
+        }
     });
 }
 
@@ -1756,7 +1763,7 @@ function initializeDropdowns() {
             option.addEventListener('click', (e) => {
                 e.preventDefault();
                 btn.textContent = option.textContent;
-                btn.dataset.value = option.dataset.value; // Save the value to the button's dataset
+                btn.dataset.value = option.dataset.value;
                 dropdown.classList.remove('active');
 
                 // Trigger change event for compatibility with existing code
@@ -1786,7 +1793,7 @@ function renderDownloads() {
             `<button class="batch-download-btn" data-order="${download.order}">View Progress</button>` : '';
 
         downloadDiv.innerHTML = `
-            <img src="${download.thumbnail || 'placeholder.png'}" class="thumbnail" alt="${download.title || 'Unknown Title'}" />
+            <img src="${download.thumbnail || './assets/placeholder.png'}" class="thumbnail" alt="${download.title || 'Unknown Title'}" />
             <div class="download-info">
                 <h3>${download.title || 'Unknown Title'}</h3>
                 <p class="uploader">${download.uploader || download.artist || 'Unknown Artist'}</p>
