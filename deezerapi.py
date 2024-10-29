@@ -26,12 +26,18 @@ def search_artists(query):
     response = requests.get(search_url)
     return response.json()['data']
 
+def search_playlists(query):
+    search_url = f'https://api.deezer.com/search/playlist?q={query}'
+    response = requests.get(search_url)
+    return response.json()['data']
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Deezer API Script')
     parser.add_argument('--get-details', type=int, help='Get details of a track by ID')
     parser.add_argument('--search-track', type=str, help='Search for tracks')
     parser.add_argument('--search-album', type=str, help='Search for albums')
     parser.add_argument('--search-artist', type=str, help='Search for artists')
+    parser.add_argument('--search-playlist', type=str, help='Search for playlists')
 
     args = parser.parse_args()
 
@@ -50,3 +56,7 @@ if __name__ == '__main__':
     if args.search_artist:
         found_artists = search_artists(args.search_artist)
         print(json.dumps(found_artists, indent=4))  # Print as formatted JSON
+
+    if args.search_playlist:
+        found_playlists = search_playlists(args.search_playlist)
+        print(json.dumps(found_playlists, indent=4))
