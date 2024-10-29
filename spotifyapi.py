@@ -79,17 +79,57 @@ class SpotifyAPI:
         }
         return self.make_request("GET", f"{self.API_URL}/search", params=params)
 
+    def search_playlists(self, query: str, limit: int = 10):
+        params = {
+            "q": query,
+            "type": "playlist",
+            "limit": limit
+        }
+        return self.make_request("GET", f"{self.API_URL}/search", params=params)
+
+    def search_episodes(self, query: str, limit: int = 10):
+        params = {
+            "q": query,
+            "type": "episode",
+            "limit": limit,
+            "market": "US"
+        }
+        return self.make_request("GET", f"{self.API_URL}/search", params=params)
+
+    def search_artists(self, query: str, limit: int = 10):
+        params = {
+            "q": query,
+            "type": "artist",
+            "limit": limit
+        }
+        return self.make_request("GET", f"{self.API_URL}/search", params=params)
+
+    def search_podcasts(self, query: str, limit: int = 10):
+        params = {
+            "q": query,
+            "type": "show",  # Spotify uses 'show' type for podcasts
+            "limit": limit,
+            "market": "US"  # Adding market parameter
+        }
+        return self.make_request("GET", f"{self.API_URL}/search", params=params)
+
+
+
 def main():
     parser = argparse.ArgumentParser(description="Spotify API script")
     parser.add_argument('--get-track', help='Track ID to get details for')
     parser.add_argument('--get-album', help='Album ID to get details for')
     parser.add_argument('--search-track', help='Track name to search for')
     parser.add_argument('--search-album', help='Album name to search for')
-    
+    parser.add_argument('--search-playlist', help='Playlist name to search for')
+    parser.add_argument('--search-episode', help='Episode name to search for')
+    parser.add_argument('--search-artist', help='Artist name to search for')
+    parser.add_argument('--search-podcast', help='Podcast name to search for')
+
     args = parser.parse_args()
-    
+
     spotify_api = SpotifyAPI()
-    
+
     try:
         if args.get_track:
             track_details = spotify_api.get_track(track_id=args.get_track)
@@ -98,17 +138,29 @@ def main():
         if args.get_album:
             album_details = spotify_api.get_album(album_id=args.get_album)
             print(json.dumps(album_details, indent=4))
-        
+
         if args.search_track:
-            print(f"Searching for track: {args.search_track}")
             search_results = spotify_api.search_tracks(query=args.search_track)
-            print("Track Search Results JSON:")
             print(json.dumps(search_results, indent=4))
 
         if args.search_album:
-            print(f"Searching for album: {args.search_album}")
             search_results = spotify_api.search_albums(query=args.search_album)
-            print("Album Search Results JSON:")
+            print(json.dumps(search_results, indent=4))
+
+        if args.search_playlist:
+            search_results = spotify_api.search_playlists(query=args.search_playlist)
+            print(json.dumps(search_results, indent=4))
+
+        if args.search_episode:
+            search_results = spotify_api.search_episodes(query=args.search_episode)
+            print(json.dumps(search_results, indent=4))
+
+        if args.search_artist:
+            search_results = spotify_api.search_artists(query=args.search_artist)
+            print(json.dumps(search_results, indent=4))
+
+        if args.search_podcast:
+            search_results = spotify_api.search_podcasts(query=args.search_podcast)
             print(json.dumps(search_results, indent=4))
 
     except requests.exceptions.RequestException as e:
