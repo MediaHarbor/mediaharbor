@@ -72,7 +72,7 @@ const pages = {
     downloads: 'downloads.html',
     settings: 'settings.html',
     help: 'help.html',
-    search: 'web_search.html'
+    search: 'search.html'
 };
 
 
@@ -130,50 +130,6 @@ async function clearDownloadsDatabase() {
     }
 }
 
-// URL mappings for each service's search
-const searchUrls = {
-    youtube: "https://music.youtube.com/search?q=",
-    spotify: "https://open.spotify.com/search/",
-    qobuz: "https://www.qobuz.com/gb-en/search?q=",
-    tidal: "https://listen.tidal.com/search?q=",
-    deezer: "https://www.deezer.com/us/search/",
-    appleMusic: "https://music.apple.com/search?term="
-};
-
-// Set default tab
-let activeTab = "youtube";
-
-// Function to update the active tab
-function updateActiveTab(tab) {
-    document.querySelector('.tab-button.active').classList.remove('active');
-    document.querySelector(`button[data-tab="${tab}"]`).classList.add('active');
-    activeTab = tab;
-}
-
-// Add event listeners to each tab button
-function initializeSearchPage() {
-    document.querySelectorAll('.tab-button').forEach(button => {
-        button.addEventListener('click', () => {
-            updateActiveTab(button.getAttribute('data-tab'));
-        });
-    });
-}
-
-// Function to perform the search
-function performSearch() {
-    const query = document.getElementById('searchInput').value;
-    console.log('Renderer: Attempting search with:', { query, activeTab });
-    if (query) {
-        try {
-            window.electronAPI.performSearch({ query, activeTab });
-            console.log('Renderer: Search request sent to main process');
-        } catch (error) {
-            console.error('Renderer: Error sending search:', error);
-        }
-    }
-}
-
-
 async function loadPage(pageName) {
     const contentDiv = document.getElementById('content');
     try {
@@ -192,7 +148,7 @@ async function loadPage(pageName) {
             initializeSettingsTab();
         }
         else if (pageName === 'help') {
-            initializeHelpTab();
+            await initializeHelpTab();
         }
         else if (pageName === 'downloads') {
             await initializeDownloadStatusPage();
@@ -710,6 +666,667 @@ function addSettingsListeners() {
 
 }
 
+
+// Search Tab
+function initializeSearchPage() {
+    handleTabSwitch();
+    // Initialize all search inputs and buttons
+    const platforms = ['youtube', 'youtubeMusic', 'spotify', 'deezer', 'qobuz', 'tidal'];
+
+    platforms.forEach(platform => {
+        const searchInput = document.getElementById(`${platform}-search`);
+        const searchButton = document.getElementById(`${platform}-search-button`);
+        const searchType = document.getElementById(`${platform}-search-type`);
+
+        // Add event listeners for search
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                performSearch(platform);
+            }
+        });
+
+        searchButton.addEventListener('click', () => {
+            performSearch(platform);
+        });
+
+        // Initialize dropdown functionality
+        if (searchType) {
+            initializeDropdown(searchType);
+        }
+    });
+
+    // Set up event listeners for search results and stream ready events
+    window.api.onSearchResults(handleSearchResults);
+    window.api.onError(handleError);
+}
+
+function initializeDropdown(dropdown) {
+    const button = dropdown.querySelector('.dropdown-btn');
+    const content = dropdown.querySelector('.dropdown-content');
+
+    content.querySelectorAll('a').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            button.textContent = item.textContent;
+            button.dataset.value = item.dataset.value;
+            content.style.display = 'none';
+        });
+    });
+
+    button.addEventListener('click', () => {
+        content.style.display = content.style.display === 'block' ? 'none' : 'block';
+    });
+}
+
+async function performSearch(platform) {
+    const searchInput = document.getElementById(`${platform}-search`);
+    const searchType = document.getElementById(`${platform}-search-type`);
+    const query = searchInput.value.trim();
+    const type = searchType ? searchType.querySelector('.dropdown-btn').dataset.value : 'track';
+
+    if (!query) {
+        showNotification('Please enter a search query');
+        return;
+    }
+
+    showNotification('Searching...');
+
+    try {
+        const result = await window.api.performSearch({ platform, query, type });
+        handleSearchResults(result, type);
+    } catch (error) {
+        handleError(error);
+    }
+}
+function showLoadingOverlay() {
+    const overlay = document.createElement('div');
+    overlay.id = 'loading-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 2000;
+    `;
+
+    const spinner = document.createElement('div');
+    spinner.style.cssText = `
+        width: 50px;
+        height: 50px;
+        border: 5px solid #f3f3f3;
+        border-top: 5px solid #45a049; 
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    `;
+
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    `;
+
+    document.head.appendChild(style);
+    overlay.appendChild(spinner);
+    document.body.appendChild(overlay);
+}
+
+function hideLoadingOverlay() {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        overlay.remove();
+    }
+}
+
+function handleSearchResults({ results, platform }, type) {
+    const container = document.getElementById('search-container');
+    container.innerHTML = '';
+
+    let normalizedResults = normalizeResults(results, platform, type);
+    normalizedResults.forEach(result => {
+        const resultCard = createResultCard(result, platform, type);
+        container.appendChild(resultCard);
+    });
+    window.api.onStreamReady(({ streamUrl, platform }) => {
+        const isVideo = platform === 'youtube';
+        const player = document.createElement(isVideo ? 'video' : 'audio');
+        player.controls = true;
+        player.autoplay = true;
+        player.src = streamUrl;
+
+        const popup = document.createElement('div');
+        popup.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    `;
+
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = '×';
+        closeBtn.style.cssText = `
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: none;
+        border: none;
+        color: white;
+        font-size: 24px;
+        cursor: pointer;
+    `;
+        closeBtn.onclick = () => {
+            popup.remove();
+            player.pause();
+        };
+
+        const playerContainer = document.createElement('div');
+        playerContainer.style.cssText = `
+        max-width: 90%;
+        max-height: 90%;
+    `;
+
+        playerContainer.appendChild(player);
+        popup.appendChild(closeBtn);
+        popup.appendChild(playerContainer);
+        document.body.appendChild(popup);
+    });
+    window.api.onStreamReady(handleStreamReady);
+}
+
+function normalizeResults(results, platform, type = 'track') {
+    switch (platform) {
+        case 'spotify':
+            switch(type) {
+                case 'track':
+                    return results.tracks?.items || [];
+                case 'album':
+                    return results.albums?.items || [];
+                case 'artist':
+                    return results.artists?.items || [];
+                case 'playlist':
+                    return results.playlists?.items || [];
+                case 'podcast':
+                    return results.shows?.items;
+                case 'episode':
+                    return results.episodes?.items;
+                default:
+                    return [];
+            }
+
+
+        case 'qobuz':
+            switch(type) {
+                case 'track':
+                    return results.tracks?.items || [];
+                case 'album':
+                    return results.albums?.items || [];
+                case 'artist':
+                    return results.artists?.items || [];
+                case 'playlist':
+                    return results.playlists?.items || [];
+                default:
+                    return [];
+            }
+
+        case 'tidal':
+            switch(type) {
+                case 'track':
+                    return results.tracks.map(track => track.resource) || [];
+                case 'album':
+                    return results.albums.map(album => album.resource) || [];
+                case 'artist':
+                    return results.artists.map(artist => artist.resource) || [];
+                default:
+                case 'video':
+                    return results.videos.map(video => video.resource) || [];
+                    return [];
+            }
+
+        default:
+            return Array.isArray(results) ? results : [];
+    }
+}
+
+function createResultCard(result, platform, type = 'track') {
+    const card = document.createElement('div');
+    card.className = 'result-card';
+
+    const cardData = getCardData(result, platform, type);
+
+    card.innerHTML = `
+        <div class="card-content">
+            <img src="${cardData.thumbnail}" alt="Thumbnail" class="result-thumbnail">
+            <div class="result-info">
+                <h3>${cardData.title}</h3>
+                ${cardData.details}
+            </div>
+            <button class="play-button" data-url="${cardData.playUrl}" data-type="${type}">
+               <span class="fa-solid fa-play"></span>
+            </button>
+            <button class="copy-button" data-url="${cardData.copyUrl}" data-type="${type}">
+                <span class="fa-regular fa-copy"></span>
+            </button>
+        </div>
+    `;
+
+    const copyBtn = card.querySelector('.copy-button');
+    if (copyBtn) {
+        copyBtn.addEventListener('click', () => {
+            const urlToCopy = copyBtn.dataset.url; // Fixed variable name
+            copyClipboard(urlToCopy);
+        });
+    }
+
+    const playBtn = card.querySelector('.play-button');
+    if (playBtn) {
+        // Add debouncing to prevent multiple clicks
+        let isPlaying = false;
+        playBtn.addEventListener('click', async () => {
+            if (isPlaying) return;
+            isPlaying = true;
+            playBtn.disabled = true;
+
+            showLoadingOverlay();
+
+            try {
+                await window.api.playMedia({
+                    url: playBtn.dataset.url,
+                    platform,
+                    type,
+                    id: result.id
+                });
+            } catch (error) {
+                handleError(error);
+                hideLoadingOverlay();
+            } finally {
+                isPlaying = false;
+                playBtn.disabled = false;
+            }
+        });
+    }
+
+    return card;
+}
+
+function copyClipboard(url) {
+    if (!url) {
+        console.error('No URL provided to copy.');
+        return;
+    }
+
+    navigator.clipboard.writeText(url)
+        .then(() => {
+            console.log('URL copied to clipboard:', url);
+            // Optionally, show a success message to the user
+        })
+        .catch(err => {
+            console.error('Failed to copy: ', err);
+            // Optionally, show an error message to the user
+        });
+}
+
+function handleStreamReady({ streamUrl, platform }) {
+    hideLoadingOverlay();
+
+    const isVideo = platform === 'youtube';
+    const player = document.createElement(isVideo ? 'video' : 'audio');
+    player.controls = true;
+    player.autoplay = true;
+    player.src = streamUrl;
+
+    const popup = document.createElement('div');
+    popup.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    `;
+
+    // Cleanup function
+    const cleanup = () => {
+        popup.remove();
+        player.pause();
+        player.src = '';
+        player.load();
+    };
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = `
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: none;
+        border: none;
+        color: white;
+        font-size: 24px;
+        cursor: pointer;
+    `;
+    closeBtn.onclick = cleanup;
+
+    const playerContainer = document.createElement('div');
+    playerContainer.style.cssText = `
+        max-width: 90%;
+        max-height: 90%;
+    `;
+
+    playerContainer.appendChild(player);
+    popup.appendChild(closeBtn);
+    popup.appendChild(playerContainer);
+    document.body.appendChild(popup);
+}
+
+
+function getCardData(result, platform, type = 'track') {
+    switch (platform) {
+        case 'youtube':
+            switch (type){
+                case 'video':
+                    return {
+                        thumbnail: result.Thumbnail,
+                        title: result['Video Title'],
+                        details: `<p>Channel: ${result['Channel Title']}</p>`,
+                        playUrl: result['Video URL'],
+                        copyUrl: result['Video URL']
+                    };
+                case 'playlist':
+                    return {
+                        thumbnail: result.Thumbnail,
+                        title: result['Playlist Title'],
+                        details: `<p>Channel: ${result['Channel Title']}</p>`,
+                        playUrl: result['Playlist URL'],
+                        copyUrl: result['Playlist URL']
+                    };
+                case 'channel':
+                    return {
+                        thumbnail: result.Thumbnail,
+                        title: result['Channel Title'],
+                        details: `<p>Channel ID: ${result['Channel ID']}</p>`,
+                        playUrl: 'WIP',
+                        copyUrl: result['Channel URL'],
+                    }
+            }
+        case 'youtubeMusic':
+            switch (type){
+                case "album":
+                    return {
+                        thumbnail: result.AlbumCover,
+                        title: result.AlbumTitle,
+                        details: `
+                        <p>Artist: ${result.ArtistName}</p>`,
+                        playUrl: result.AlbumURL,
+                        copyUrl: result.AlbumURL
+                    };
+                case "playlist":
+                    return {
+                        thumbnail: result.PlaylistCover,
+                        title: result.PlaylistTitle,
+                        details: `
+                        <p>${result.Author}`,
+                        playUrl: result.PlaylistURL,
+                        copyUrl: result.PlaylistURL
+                    };
+                case "song":
+                    return {
+                        thumbnail: result.AlbumCover,
+                        title: result.TrackTitle,
+                        details: `
+                    <p>Album: ${result.AlbumTitle}</p>
+                    <p>Artist: ${result.ArtistName}</p>
+                `,
+                        playUrl: result.TrackURL,
+                        copyUrl: result.TrackURL
+                    };
+                case "podcast":
+                    return {
+                        thumbnail: result.PodcastCover,
+                        title: result.PodcastTitle,
+                        details: '<p></p>'
+                    }
+                case "episode":
+                    return {
+                        thumbnail: result.EpisodeCover,
+                        title: result.EpisodeTitle,
+                        details: `<p>${result.Podcast}</p>`,
+                        playUrl: result.EpisodeURL,
+                        copyUrl: result.EpisodeURL
+                    }
+                case "artist":
+                    return {
+                        thumbnail: result.ArtistCover,
+                        title: result.ArtistName,
+                        details: `<p></p>`,
+                        playUrl: result.ArtistURL,
+                        copyUrl: result.ArtistURL
+                    }
+            }
+            break;
+        case 'spotify':
+            switch(type) {
+                case 'track':
+                    return {
+                        thumbnail: result.album?.images[0]?.url || result.Thumbnail,
+                        title: result.name,
+                        details: `
+                            <p>Album: ${result.album?.name || 'Unknown Album'}</p>
+                            <p>Artist: ${result.artists[0]?.name || 'Unknown Artist'}</p>
+                        `,
+                        playUrl: result.preview_url,
+                        copyUrl: result.external_urls.spotify
+                    };
+                case 'album':
+                    return {
+                        thumbnail: result.images[0]?.url || '',
+                        title: result.name,
+                        details: `<p>Artist: ${result.artists[0]?.name || 'Unknown Artist'}</p>`,
+                        playUrl: `WIP`,
+                        copyUrl: result.external_urls.spotify
+                    };
+                case 'artist':
+                    return {
+                        thumbnail: result.images[0]?.url || '',
+                        title: result.name,
+                        details: `<p>Followers: ${result.followers?.total || 0}</p>`,
+                        playUrl: `WIP`,
+                        copyUrl: result.external_urls.spotify
+                    };
+                case 'playlist':
+                    return {
+                        thumbnail: result.images[0]?.url || '',
+                        title: result.name,
+                        details: `<p>By: ${result.owner?.display_name || 'Unknown'}</p>`,
+                        playUrl: `WIP`,
+                        copyUrl: result.external_urls.spotify
+                    };
+                case 'podcast':
+                    return {
+                        thumbnail:  result.images[0]?.url || '',
+                        title: result.name,
+                        details: `<p>By: ${result.publisher}</p>`,
+                        copyUrl: result.external_urls.spotify
+                    };
+                case 'episode':
+                    return {
+                        thumbnail: result.images[0].url,
+                        title: result.name,
+                        details: `<p>${result.release_date}</p>`,
+                        copyUrl: result.external_urls.spotify
+                    }
+            }
+            break;
+        case 'deezer':
+            switch(type) {
+                case 'track':
+                    return {
+                        thumbnail: result.album?.cover_medium,
+                        title: result.title_short,
+                        details: `
+                            <p>Album: ${result.album?.title || 'Unknown Album'}</p>
+                            <p>Artist: ${result.artist?.name || 'Unknown Artist'}</p>
+                        `,
+                        playUrl: result.preview,
+                        copyUrl: result.link
+                    };
+                case 'album':
+                    return {
+                        thumbnail: result.cover_medium,
+                        title: result.title,
+                        details: `<p>Artist: ${result.artist?.name || 'Unknown Artist'}</p>`,
+                        playUrl: `WIP`,
+                        copyUrl: result.link
+                    };
+                case 'artist':
+                    return {
+                        thumbnail: result.picture_medium,
+                        title: result.name,
+                        details: `<p>Fans: ${result.nb_fan || 0}</p>`,
+                        playUrl: `WIP`,
+                        copyUrl: result.link
+                    };
+                case 'playlist':
+                    return {
+                        thumbnail: result.picture_medium,
+                        title: result.title,
+                        details: `<p>Tracks: ${result.nb_tracks || 0}</p>`,
+                        playUrl: `WIP`,
+                        copyUrl: result.link
+                    };
+            }
+            break;
+        case 'qobuz':
+            switch (type) {
+                case 'track':
+                    return {
+                        thumbnail: result.album?.image?.small || result.Thumbnail,
+                        title: result.title || 'Unknown Title',
+                        details: `
+                    <p>Album: ${result.album?.title || 'Unknown Album'}</p>
+                    <p>Artist: ${result.album?.artist?.name || 'Unknown Artist'}</p>
+                `,
+                        playUrl: `https://play.qobuz.com/track/${result.id}`,
+                        copyUrl: `https://play.qobuz.com/track/${result.id}`
+                    };
+                case 'album':
+                    return {
+                        thumbnail: result.image?.small || result.Thumbnail,
+                        title: result.title || 'Unknown Title',
+                        details: `
+                    <p>Artist: ${result.artist?.name || 'Unknown Artist'}</p>
+                `,
+                        playUrl: 'WIP',
+                        copyUrl: `https://play.qobuz.com/album/${result.id}`,
+                    };
+                case 'playlist':
+                    return {
+                        thumbnail: result.image_rectangle[0],
+                        title: result.name,
+                        details: `<p>${result.genres[0].percent}% ${result.genres[0].name}</p>`,
+                        playUrl: `WIP`,
+                        copyUrl: `https://play.qobuz.com/playlist/${result.id}`,
+                    }
+                case 'artist':
+                    return {
+                        thumbnail: result.image?.medium || 'https://www.qobuz.com/assets-static/img/common/default_artist.svg'|| result.image.small,
+                        title: result.name,
+                        details: `<p/>`,
+                        playUrl: `WIP`,
+                        copyUrl: `https://play.qobuz.com/artist/${result.id}`
+                    }
+            }
+            break;
+        case 'tidal':
+            switch (type) {
+                case 'track':
+                    return {
+                        thumbnail: result.album.imageCover[2].url, // Using the 160x160 version
+                        title: result.title,
+                        details: `
+                    <p>Album: ${result.album?.title || 'Unknown Album'}</p>
+                    <p>Artist: ${result.artists[0]?.name || 'Unknown Artist'}</p>
+                `,
+                        playUrl: result.id,
+                        copyUrl: result.tidalUrl
+                    };
+                case 'album':
+                    return {
+                        thumbnail: result.imageCover[2].url, // Using the 160x160 version
+                        title: result.title,
+                        details: `
+                    <p>Artist: ${result.artists[0]?.name || 'Unknown Artist'}</p>
+                    <p>Release: ${result.releaseDate}</p>
+                    <p>${result.numberOfTracks} / ${result.numberOfVolumes} </p>
+                `,
+                        playUrl: "WIP",
+                        copyUrl: result.tidalUrl
+                    };
+                case 'artist':
+                    return {
+                        thumbnail: findFirstSquareImage(result.picture),
+                        title: result.name,
+                        details: ` <p/>
+                `,
+                        playUrl: "WIP",
+                        copyUrl: result.tidalUrl
+                    };
+                case 'video':
+                    return {
+                        thumbnail: findFirstSquareImage(result.image),
+                        title: result.title,
+                        details: `<p>Artist: ${result.artists[0].name}</p>`,
+                        playUrl: result.tidalUrl,
+                        copyUrl: result.tidalUrl
+                    }
+            }
+            break;
+        default:
+            return {
+                thumbnail: '',
+                title: 'Unknown Title',
+                details: '',
+                playUrl: '#'
+            };
+    }
+}
+const findFirstSquareImage = (pictures) => {
+    return pictures.find(pic => pic.width === pic.height)?.url || 'https://tidal.com/browse/assets/images/defaultImages/defaultArtistImage.png';
+}
+
+function handleError(error) {
+    showNotification(`Error: ${error.message}`);
+}
+
+function showNotification(message) {
+    const container = document.getElementById('floating-search-notifications');
+    const notification = document.createElement('div');
+    notification.className = 'notification';
+    notification.textContent = message;
+
+    container.appendChild(notification);
+
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
+}
+
+
 function initializeVideoTab() {
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
@@ -737,7 +1354,7 @@ function initializeVideoTab() {
     // Initialize download container
     renderDownloads();
 }
-
+// Video Tab
 function handleYoutubeVideoDownload() {
     const url = document.getElementById('youtube-url').value;
     const qualityDropdown = document.getElementById('youtube-quality');
