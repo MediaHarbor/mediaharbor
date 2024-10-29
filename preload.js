@@ -29,7 +29,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
             'start-tidal-batch-download',
             'start-deezer-batch-download',
             'start-apple-download',
-            'start-spotify-download'
+            'start-spotify-download',
+            'clear-database'
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);
@@ -75,3 +76,9 @@ contextBridge.exposeInMainWorld(
         }
     }
 );
+contextBridge.exposeInMainWorld("electron", {
+    ipcRenderer: {
+        send: (channel, data) => ipcRenderer.send(channel, data),
+        on: (channel, func) => ipcRenderer.on(channel, (event, ...args) => func(...args)),
+    },
+});
