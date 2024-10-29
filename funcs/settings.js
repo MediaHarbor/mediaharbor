@@ -4,6 +4,7 @@ const path = require("path");
 const { app } = require("electron");
 const { spawn } = require("child_process");
 const { getDefaultSettings } = require("./defaults");
+const stream = require("node:stream");
 
 const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
 const spotifyConfigPath = path.join(app.getPath('userData'), 'spotify_config.json');
@@ -133,6 +134,7 @@ async function saveSettings(event, settings) {
 
             // Other config sections remain the same...
             config.qobuz = {
+                quality: settings.qobuz_quality,
                 download_booklets: settings.qobuz_download_booklets,
                 use_auth_token: settings.qobuz_token_or_email,
                 email_or_userid: settings.qobuz_email_or_userid,
@@ -146,10 +148,19 @@ async function saveSettings(event, settings) {
             };
 
             config.tidal = {
+               quality: settings.tidal_quality,
+               user_id: settings.tidal_user_id,
+               country_code: settings.tidal_country_code,
+               access_token: settings.tidal_access_token,
+               refresh_token: settings.tidal_refresh_token,
+               token_expiry: settings.tidal_token_expiry,
+
                 download_videos: settings.tidal_download_videos
             };
 
             config.deezer = {
+                quality: settings.deezer_quality,
+                deezloader_warnings: settings.deezloader_warnings,
                 use_deezloader: settings.deezer_use_deezloader,
                 arl: settings.deezer_arl
             };
@@ -165,7 +176,8 @@ async function saveSettings(event, settings) {
                 enabled: settings.conversion_check,
                 codec: settings.conversion_codec,
                 sampling_rate: parseInt(settings.conversion_sampling_rate),
-                bit_depth: parseInt(settings.conversion_bit_depth || 16)
+                bit_depth: parseInt(settings.conversion_bit_depth || 16),
+                lossy_bitrate: parseInt(settings.conversion_bit_depth || 320)
             };
 
             config.metadata = {
@@ -228,12 +240,21 @@ function loadSettings(event) {
                                     disc_subdirectories: streamripConfig.downloads?.disc_subdirectories || true,
                                     max_connections: streamripConfig.downloads?.max_connections || 6,
                                     concurrency: streamripConfig.downloads?.concurrency || true,
+                                    qobuz_quality: streamripConfig.qobuz?.quality || 3,
                                     qobuz_download_booklets: streamripConfig.qobuz?.download_booklets || true,
                                     qobuz_token_or_email: streamripConfig.qobuz?.use_auth_token || true,
                                     qobuz_email_or_userid: streamripConfig.qobuz?.email_or_userid || "",
                                     qobuz_password_or_token: streamripConfig.qobuz?.password_or_token || "",
                                     qobuz_app_id: streamripConfig.qobuz?.app_id || "",
                                     qobuz_secrets: streamripConfig.qobuz?.secrets,
+                                    tidal_quality: streamripConfig.tidal?.quality || 3,
+                                    tidal_user_id: streamripConfig.tidal?.user_id || '',
+                                    tidal_country_code: streamripConfig.tidal?.country_code || "US",
+                                    tidal_access_token: streamripConfig.tidal?.access_token || "",
+                                    tidal_refresh_token: streamripConfig.tidal?.refresh_token || "",
+                                    tidal_token_expiry: streamripConfig.tidal?.token_expiry || "",
+                                    deezer_quality: streamripConfig.deezer?.quality || "1",
+                                    deezloader_warnings: streamripConfig.deezer?.deezloader_warnings || false,
                                     tidal_download_videos: streamripConfig.tidal?.download_videos,
                                     deezer_use_deezloader: streamripConfig.deezer?.use_deezloader,
                                     deezer_arl: streamripConfig.deezer?.arl || '',
@@ -244,6 +265,7 @@ function loadSettings(event) {
                                     conversion_check: streamripConfig.conversion?.enabled,
                                     conversion_codec: streamripConfig.conversion?.codec || "ALAC",
                                     conversion_sampling_rate: streamripConfig.conversion?.sampling_rate || 48000,
+                                    covnersionlossy_bitrate: streamripConfig.conversion?.lossy_bitrate || 320,
                                     meta_album_name_playlist_check: streamripConfig.metadata?.set_playlist_to_album,
                                     meta_album_order_playlist_check: streamripConfig.metadata?.renumber_playlist_tracks,
                                     excluded_tags: streamripConfig.metadata?.exclude || [],
