@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain,dialog } = require('electron');
 const { shell } = require('electron');
+const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
@@ -9,15 +10,6 @@ const {handleYtDlpDownload, handleYtDlpMusicDownload} = require('./funcs/yt_dlp_
 const GamRip = require('./funcs/gamRip');
 const CustomRip = require('./funcs/customRip');
 const { setupSettingsHandlers } = require('./funcs/settings');
-
-const searchUrls = {
-    youtube: "https://music.youtube.com/search?q=",
-    spotify: "https://open.spotify.com/search/",
-    qobuz: "https://www.qobuz.com/gb-en/search?q=",
-    tidal: "https://listen.tidal.com/search?q=",
-    deezer: "https://www.deezer.com/us/search/",
-    appleMusic: "https://music.apple.com/search?term="
-};
 
 ipcMain.handle('load-downloads', (event) => {
     return new Promise((resolve, reject) => {
@@ -128,7 +120,156 @@ ipcMain.handle('dialog:openFolder', async (event) => {
         return filePaths[0];
     }
 });
+ipcMain.handle('perform-search', async (event, { platform, query, type }) => {
+    return new Promise((resolve, reject) => {
+        let command;
 
+        switch(platform) {
+            case 'youtube':
+                command = `py .\\ytsearchapi.py -q "${query}" ${type ? `-t ${type}` : ''}`;
+                break;
+            case 'youtubeMusic':
+                command = `py .\\ytmusicsearchapi.py -q "${query}" ${type ? `-t ${type}` : 'song'}`;
+                break;
+            case 'spotify':
+                command = `py .\\spotifyapi.py --search-${type || 'track'} "${query}"`;
+                break;
+            case 'tidal':
+                command = `py .\\tidalapi.py --search-${type || 'track'} "${query}"`;
+                break;
+            case 'deezer':
+                command = `py .\\deezerapi.py --search-${type || 'track'} "${query}"`;
+                break;
+            case 'qobuz':
+                command = `py .\\qobuzapi.py --search-${type || 'track'} "${query}"`;
+                break;
+            default:
+                reject(new Error('Invalid platform'));
+                return;
+        }
+
+        exec(command, (error, stdout, stderr) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+
+            try {
+                const results = JSON.parse(stdout);
+                resolve({ results, platform });
+            } catch (e) {
+                reject(new Error('Failed to parse results'));
+            }
+        });
+    });
+});
+
+ipcMain.handle('play-media', async (event, { url, platform }) => {
+    return new Promise((resolve, reject) => {
+        console.log('Input URL:', url);
+        if (!url) {
+            reject(new Error('URL cannot be null'));
+            return;
+        }
+
+        const options = {
+            encoding: 'utf8',
+            env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        };
+
+        let command;
+
+        switch(platform) {
+            case 'youtube':
+                command = `py .\\ytvideostream.py --url "${url}"`;
+                break;
+            case 'youtubeMusic':
+                command = `py .\\ytaudiostream.py --url "${url}"`;
+                break;
+            case 'qobuz':
+                command = `custom_rip -q 1 -ndb streamurl "${url}"`;
+                break;
+            case 'tidal':
+                if (url === 'WIP') {
+                    reject(new Error('Work In Progress'));
+                    break;
+                }
+                command = `py .\\tidalapi.py --get-stream "${url}" --user-id "${process.env.TIDAL_USER_ID}" --user-token "${process.env.TIDAL_TOKEN}"`;
+                break;
+            default:
+                if (url !== "null"){
+                    event.sender.send('stream-ready', { streamUrl: url, platform });
+                    resolve({ streamUrl: url, platform });
+                    return;
+                }
+                else if (url === 'WIP') {
+                    reject(new Error('Work In Progress'));
+                }
+                reject(new Error('No Stream Found'));
+        }
+
+        exec(command, options, (error, stdout, stderr) => {
+            if (error) {
+                console.error('Execution error:', error);
+                reject(error);
+                return;
+            }
+
+            let streamUrl = '';
+
+            if (platform === 'qobuz') {
+                const lines = stdout.split('\n');
+                const urlStartMarker = 'https://streaming-qobuz-std.akamaized.net';
+                let isCapturing = false;
+
+                for (const line of lines) {
+                    if (line.includes(urlStartMarker)) {
+                        isCapturing = true;
+                    }
+                    if (isCapturing) {
+                        streamUrl += line.trim();
+                    }
+                    if (isCapturing && line.trim() === '') {
+                        break;
+                    }
+                }
+
+                if (!streamUrl.startsWith(urlStartMarker)) {
+                    console.error('Invalid Qobuz URL format:', streamUrl);
+                    reject(new Error('Invalid Qobuz URL format'));
+                    return;
+                }
+
+                console.log('Found complete Qobuz stream URL:', streamUrl);
+            } else if (platform === 'deezer') {
+                const match = stdout.match(/Stream URL for the track is:\s*(.*)/);
+                streamUrl = match ? match[1].trim() : null;
+
+                if (!streamUrl) {
+                    reject(new Error('Could not extract stream URL from output'));
+                    return;
+                }
+            } else {
+                streamUrl = stdout.trim();
+            }
+
+            if (!streamUrl || streamUrl === '') {
+                console.error('Stream URL is empty or invalid');
+                reject(new Error('Invalid stream URL'));
+                return;
+            }
+
+            console.log('Sending stream URL to renderer:', streamUrl);
+            event.sender.send('stream-ready', { streamUrl, platform });
+            resolve({ streamUrl, platform });
+        });
+
+    });
+});
+
+ipcMain.handle('stream-ready', async (event, { streamUrl, platform }) => {
+    event.sender.send('stream-ready', { streamUrl, platform });
+});
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -213,31 +354,12 @@ function createWindow() {
     ipcMain.on('start-deezer-batch-download', (event, data) => {
         customRip.handleDeezerBatchDownload(event, data);
     });
-    ipcMain.on('search-on-browser', (event, searchData) => {
-        console.log('Main: Received search data:', searchData);
-        const { query, activeTab } = searchData;
-
-        if (!query) {
-            console.error('Main: No query provided');
-            return;
-        }
-
-        if (!searchUrls[activeTab]) {
-            console.error('Main: Invalid activeTab:', activeTab);
-            return;
-        }
-
-        const searchUrl = searchUrls[activeTab] + encodeURIComponent(query);
-        console.log('Main: Opening URL:', searchUrl);
-
-        shell.openExternal(searchUrl)
-            .then(() => {
-                console.log('Main: Browser opened successfully');
-            })
-            .catch(err => {
-                console.error('Main: Failed to open external browser:', err);
-            });
+    ipcMain.on('perform-search', (event, { platform, query, type }) => {
+        // Your search logic here
+        const results = performPlatformSearch(platform, query, type); // Assume this function gets search results
+        event.reply('search-results', { results, platform });
     });
+
 }
 
 app.whenReady().then(createWindow);
