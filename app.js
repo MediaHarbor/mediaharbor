@@ -3,6 +3,8 @@ const state = {
     downloads: [],
     currentPage: 'music'
 };
+let settings = {};
+
 window.addEventListener('DOMContentLoaded', initializeTheme);
 // theme checker
 function applyTheme(theme) {
@@ -98,6 +100,27 @@ async function deleteDownload(id) {
         }
     } catch (error) {
         console.error('Error deleting download:', error);
+    }
+}
+async function clearStreamripDatabase() {
+    const { value: formValues } = await Swal.fire({
+        title: "Select Databases to Clear",
+        html:
+            '<input type="checkbox" id="failedDownloads" /> Failed Downloads Database<br>' +
+            '<input type="checkbox" id="downloads" /> Downloads Database',
+        showCancelButton: true,
+        confirmButtonText: "Delete",
+        preConfirm: () => {
+            return {
+                failedDownloads: document.getElementById('failedDownloads').checked,
+                downloads: document.getElementById('downloads').checked
+            };
+        }
+    });
+
+    // Proceed if user confirmed
+    if (formValues) {
+        window.electron.ipcRenderer.send("clear-database", formValues);
     }
 }
 
@@ -331,9 +354,7 @@ function openPopup(url) {
     window.open(url, '_blank', 'width=600,height=8000');
 }
 
-// Initialize settings
-let settings = {};
-
+// Settings Tab
 function initializeSettingsTab() {
     initializeDropdowns();
     handleTabSwitch();
@@ -939,7 +960,6 @@ function createResultCard(result, platform, type = 'track') {
             playBtn.disabled = true;
 
             showLoadingOverlay();
-
             try {
                 await window.api.playMedia({
                     url: playBtn.dataset.url,
@@ -1262,7 +1282,7 @@ function getCardData(result, platform, type = 'track') {
                     <p>Album: ${result.album?.title || 'Unknown Album'}</p>
                     <p>Artist: ${result.artists[0]?.name || 'Unknown Artist'}</p>
                 `,
-                        playUrl: result.id,
+                        playUrl: result.tidalUrl,
                         copyUrl: result.tidalUrl
                     };
                 case 'album':

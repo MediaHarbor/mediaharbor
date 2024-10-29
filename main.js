@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain,dialog } = require('electron');
 const { shell } = require('electron');
 const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
@@ -10,6 +11,26 @@ const {handleYtDlpDownload, handleYtDlpMusicDownload} = require('./funcs/yt_dlp_
 const GamRip = require('./funcs/gamRip');
 const CustomRip = require('./funcs/customRip');
 const { setupSettingsHandlers } = require('./funcs/settings');
+
+let settings = loadTheSettings(); // initialize with defaults
+const downloadsDatabasePath = settings.downloads_database;
+const failedDownloadsDatabasePath = settings.failed_downloads_database
+function loadTheSettings() {
+    try {
+        const settingsData = fs.readFileSync(settingsFilePath, 'utf8');
+        return JSON.parse(settingsData);
+    } catch (err) {
+        console.log('No user settings found, using default settings.');
+        return getDefaultSettings();
+    }
+}
+try {
+    const settingsData = fs.readFileSync(settingsFilePath, 'utf8');
+    settings = JSON.parse(settingsData);
+} catch (error) {
+    console.warn('Failed to load settings, using defaults:', error);
+}
+
 
 ipcMain.handle('load-downloads', (event) => {
     return new Promise((resolve, reject) => {
@@ -187,14 +208,15 @@ ipcMain.handle('play-media', async (event, { url, platform }) => {
                 command = `py .\\ytaudiostream.py --url "${url}"`;
                 break;
             case 'qobuz':
-                command = `custom_rip -q 1 -ndb streamurl "${url}"`;
+                command = `custom_rip -q 4 -ndb streamurl "${url}"`;
                 break;
             case 'tidal':
                 if (url === 'WIP') {
                     reject(new Error('Work In Progress'));
                     break;
                 }
-                command = `py .\\tidalapi.py --get-stream "${url}" --user-id "${process.env.TIDAL_USER_ID}" --user-token "${process.env.TIDAL_TOKEN}"`;
+                console.log(settings.tidal_access_token)
+                command = `custom_rip -q 1 -ndb streamurl "${url}"`;;
                 break;
             default:
                 if (url !== "null"){
@@ -286,6 +308,24 @@ function createWindow() {
     win.loadFile('index.html');
 
     setupSettingsHandlers(ipcMain);
+    ipcMain.on("clear-database", (event, { failedDownloads, downloads }) => {
+        // Check and delete the databases based on the user’s selection
+        if (failedDownloads) {
+            fs.unlink(failedDownloadsDatabasePath, (err) => {
+                if (err) dialog.showErrorBox("Error", `Failed to delete Failed Downloads Database: ${err.message}`);
+            });
+        }
+
+        if (downloads) {
+            fs.unlink(downloadsDatabasePath, (err) => {
+                if (err) dialog.showErrorBox("Error", `Failed to delete Downloads Database: ${err.message}`);
+            });
+        }
+
+        // Optional: Send feedback to renderer
+        event.sender.send("database-clear-status", "Selected databases have been deleted.");
+    });
+
 
     ipcMain.on('start-yt-music-download', (event, data) => {
         fs.readFile(settingsFilePath, 'utf8', (err, settingsData) => {
@@ -353,11 +393,6 @@ function createWindow() {
 
     ipcMain.on('start-deezer-batch-download', (event, data) => {
         customRip.handleDeezerBatchDownload(event, data);
-    });
-    ipcMain.on('perform-search', (event, { platform, query, type }) => {
-        // Your search logic here
-        const results = performPlatformSearch(platform, query, type); // Assume this function gets search results
-        event.reply('search-results', { results, platform });
     });
 
 }
