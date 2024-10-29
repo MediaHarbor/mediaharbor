@@ -40,7 +40,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on(channel, (event, ...args) => func(...args));
     },
 
-    // URL processing
     deleteDownload: (id) => ipcRenderer.invoke('deleteDownload', id),
     showItemInFolder: (location) => ipcRenderer.invoke('showItemInFolder', location),
     clearDownloadsDatabase: () => ipcRenderer.invoke('clearDownloadsDatabase'),
@@ -48,8 +47,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     folderLocation: () => ipcRenderer.invoke('dialog:openFolder'),
     fileSelectLocation: () => ipcRenderer.invoke('dialog:openFile'),
     openWvdLocation: () => ipcRenderer.invoke('dialog:openwvdFile'),
-    performSearch: (searchData) => {
-        console.log('Preload: Sending search data:', searchData);
-        return ipcRenderer.send('search-on-browser', searchData);
-    }
 });
+contextBridge.exposeInMainWorld(
+    'api', {
+        // Search methods
+        performSearch: (searchData) => {
+            return ipcRenderer.invoke('perform-search', searchData);
+        },
+
+        // Listen to events
+        onSearchResults: (callback) => {
+            ipcRenderer.on('search-results', (event, ...args) => callback(...args));
+        },
+
+        playMedia: (args) => {
+            // Return the promise directly
+            return ipcRenderer.invoke('play-media', args);
+        },
+
+        onStreamReady: (callback) => {
+            ipcRenderer.removeAllListeners('stream-ready');
+            ipcRenderer.on('stream-ready', (event, data) => callback(data));
+        },
+
+        onError: (callback) => {
+            ipcRenderer.on('error', (event, ...args) => callback(...args));
+        }
+    }
+);
