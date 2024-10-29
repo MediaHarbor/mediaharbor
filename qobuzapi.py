@@ -42,6 +42,7 @@ if __name__ == "__main__":
     parser.add_argument('--search-track', help='Search for a track by release name')
     parser.add_argument('--search-artist', help='Search for an artist')
     parser.add_argument('--search-album', help='Search for an album by label')
+    parser.add_argument('--search-playlist', help='Search for an playlist by query')
     parser.add_argument('--get-details', help='Get track details by track ID')
     parser.add_argument('--get-stream', help='Get track stream by track ID')
     parser.add_argument('--format-id', type=int, default=27, help='Audio format ID for track stream (default: 27)')
@@ -55,6 +56,9 @@ if __name__ == "__main__":
         print(json.dumps(results, indent=4))
     elif args.search_album:
         results = search_qobuz(args.search_album, "album")
+        print(json.dumps(results, indent=4))
+    elif args.search_playlist:
+        results = search_qobuz(args.search_playlist, "playlist")
         print(json.dumps(results, indent=4))
     elif args.get_details:
         details = get_track_details(args.get_details)
