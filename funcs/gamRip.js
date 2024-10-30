@@ -275,6 +275,284 @@ class gamRip {
             }
         });
     }
+    handleSpotifyBatchDownload(event, data) {
+        fs.readFile(this.settingsFilePath, 'utf8', (err, settingsData) => {
+            if (err) {
+                event.reply('download-error', 'Could not read settings file');
+                return;
+            }
+
+            try {
+                const settings = JSON.parse(settingsData);
+                const configPath = path.join(app.getPath('userData'), 'spotify_config.json');
+                const { filePath, quality } = data;
+                const votifyArgs = ['--config-path', configPath, '-a', quality || 'vorbis-low', '-r', filePath];
+                const downloadOrder = getNextDownloadOrder();
+                let totalTracks = 0;
+                let completedTracks = 0;
+                let trackProgressMap = {};
+                let overallProgress = 0;
+
+                console.log("Starting Spotify Batch Download with args:", votifyArgs);
+
+                const throttledUpdate = this.throttle((data) => {
+                    event.reply('download-update', data);
+                }, 250);
+
+                event.reply('download-info', {
+                    title: `Batch Download #${downloadOrder}`,
+                    downloadArtistOrUploader: 'Spotify',
+                    order: downloadOrder,
+                    isBatch: true
+                });
+
+                const votifyProcess = spawn('custom_votify', votifyArgs, {
+                    encoding: 'utf8',
+                    env: {
+                        ...process.env,
+                        PYTHONIOENCODING: 'utf-8',
+                        LANG: 'en_US.UTF-8',
+                        LC_ALL: 'en_US.UTF-8'
+                    }
+                });
+
+                votifyProcess.on('error', (err) => {
+                    console.error("Process error:", err);
+                    event.reply('download-error', `Process error: ${err.message}`);
+                });
+
+                votifyProcess.stdout.on('data', (data) => {
+                    console.log("Received data:", data.toString('utf8'));
+                    const lines = data.toString('utf8').split('\n');
+
+                    lines.forEach(line => {
+                        console.log("Processing line:", line);
+
+                        const loadingMatch = line.match(/Found (\d+) tracks/);
+                        if (loadingMatch) {
+                            totalTracks = parseInt(loadingMatch[1]);
+                            console.log("Total tracks found:", totalTracks);
+                        }
+
+                        const trackMatch = line.match(/\[(\d+)\] (.+?) - (.+?) \[(.+?)\] \((\d+\.\d+)%\)/);
+                        if (trackMatch) {
+                            const trackId = trackMatch[1];
+                            const artist = trackMatch[2];
+                            const title = trackMatch[3];
+                            const progress = parseFloat(trackMatch[5]);
+
+                            trackProgressMap[trackId] = {
+                                trackTitle: title,
+                                artist: artist,
+                                progress: progress
+                            };
+
+                            const totalProgress = Object.values(trackProgressMap)
+                                .reduce((sum, track) => sum + track.progress, 0);
+                            overallProgress = (totalProgress / (totalTracks * 100)) * 100;
+
+                            throttledUpdate({
+                                tracksProgress: Object.values(trackProgressMap),
+                                order: downloadOrder,
+                                completedTracks,
+                                totalTracks,
+                                overallProgress: Math.min(overallProgress, 100),
+                                isBatch: true
+                            });
+                        }
+
+                        if (line.includes('Download completed:')) {
+                            completedTracks++;
+                            const completedTrackMatch = line.match(/Download completed: \[(\d+)\]/);
+                            if (completedTrackMatch) {
+                                const completedTrackId = completedTrackMatch[1];
+                                delete trackProgressMap[completedTrackId];
+                            }
+                        }
+                    });
+                });
+
+                votifyProcess.stderr.on('data', (errorData) => {
+                    const errorOutput = errorData.toString();
+                    console.error("Process stderr:", errorOutput);
+                    if (!errorOutput.includes('[INFO')) {
+                        event.reply('download-error', `Error: ${errorOutput}`);
+                    }
+                });
+
+                votifyProcess.on('exit', (code) => {
+                    console.log(`Process exited with code: ${code}`);
+                    if (code === 0) {
+                        const downloadLocation = settings.downloadLocation || app.getPath('downloads');
+
+                        const downloadInfo = {
+                            downloadName: `Batch Download #${downloadOrder}`,
+                            downloadArtistOrUploader: 'Spotify',
+                            downloadLocation: downloadLocation,
+                            service: 'spotify'
+                        };
+                        this.saveDownloadToDatabase(downloadInfo);
+
+                        event.reply('download-complete', {
+                            order: downloadOrder,
+                            completedTracks,
+                            totalTracks,
+                            overallProgress: 100
+                        });
+                    } else {
+                        event.reply('download-error', `Process exited with code ${code}`);
+                    }
+                });
+            } catch (parseError) {
+                console.error("Settings parse error:", parseError);
+                event.reply('download-error', 'Settings parse error');
+            }
+        });
+    }
+
+
+    handleAppleMusicBatchDownload(event, data) {
+        const { filePath, quality } = data;
+        const settings = JSON.parse(fs.readFileSync(this.settingsFilePath, 'utf8'));
+        const cookiesPath = settings.apple_cookies_path || path.join(process.env.USERPROFILE, 'Downloads', 'apple.com_cookies.txt');
+
+        const gamdlArgs = [
+            '-c', cookiesPath,
+            '--codec-song', quality || 'aac-legacy',
+            '-r',
+            filePath
+        ];
+
+        const downloadOrder = getNextDownloadOrder();
+        let totalUrls = 0;
+        let completedTracks = 0;
+        let trackProgressMap = {};
+        let currentTrackInfo = {};
+        let overallProgress = 0;
+
+        // Throttle update frequency to prevent flickering
+        const throttledUpdate = this.throttle((data) => {
+            event.reply('download-update', data);
+        }, 250); // Update every 250ms at most
+
+        event.reply('download-info', {
+            title: `Batch Download #${downloadOrder}`,
+            downloadArtistOrUploader: 'Apple Music',
+            order: downloadOrder,
+            isBatch: true
+        });
+
+        const gamdlProcess = spawn('custom_gamdl', gamdlArgs, {
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                PYTHONIOENCODING: 'utf-8',
+                LANG: 'en_US.UTF-8',
+                LC_ALL: 'en_US.UTF-8'
+            }
+        });
+
+        let buffer = '';
+
+        gamdlProcess.stdout.on('data', (data) => {
+            buffer += data.toString('utf8');
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            lines.forEach(line => {
+                console.log('Line:', line);
+
+                const urlMatch = line.match(/\(URL (\d+)\/(\d+)\)/);
+                if (urlMatch) {
+                    totalUrls = parseInt(urlMatch[2]);
+                }
+
+
+                if (line.startsWith('Title:')) {
+                    currentTrackInfo.title = line.split('Title:')[1].trim();
+                    currentTrackInfo.id = currentTrackInfo.title.replace(/[^a-zA-Z0-9]/g, '');
+                } else if (line.startsWith('Album:')) {
+                    currentTrackInfo.album = line.split('Album:')[1].trim();
+                }
+
+                const downloadMatch = line.match(/Downloading: (\d+\.?\d*)%/);
+                if (downloadMatch && currentTrackInfo.id) {
+                    const progress = parseFloat(downloadMatch[1]);
+
+                    trackProgressMap[currentTrackInfo.id] = {
+                        trackTitle: currentTrackInfo.title,
+                        artist: currentTrackInfo.artist,
+                        album: currentTrackInfo.album,
+                        progress: progress
+                    };
+
+                    // Currently not works
+                    const totalProgress = Object.values(trackProgressMap)
+                        .reduce((sum, track) => sum + track.progress, 0);
+                    overallProgress = (totalProgress / (totalUrls * 100)) * 100;
+
+                    throttledUpdate({
+                        tracksProgress: Object.values(trackProgressMap),
+                        order: downloadOrder,
+                        completedTracks,
+                        totalTracks: totalUrls,
+                        overallProgress: Math.min(overallProgress, 100),
+                        isBatch: true
+                    });
+                }
+
+                if (line.includes('100% of') && currentTrackInfo.id) {
+                    completedTracks++;
+                    delete trackProgressMap[currentTrackInfo.id];
+                    currentTrackInfo = {};
+                }
+            });
+        });
+
+        gamdlProcess.stderr.on('data', (errorData) => {
+            const errorOutput = errorData.toString();
+            if (!errorOutput.includes('[INFO')) {
+                event.reply('download-error', `Error: ${errorOutput}`);
+            }
+        });
+
+        gamdlProcess.on('exit', (code) => {
+            if (code === 0) {
+                fs.readFile(this.settingsFilePath, 'utf8', (err, settingsData) => {
+                    const settings = err ? this.getDefaultSettings() : JSON.parse(settingsData);
+                    const downloadLocation = settings.downloadLocation || this.app.getPath('downloads');
+
+                    const downloadInfo = {
+                        downloadName: `Batch Download #${downloadOrder}`,
+                        downloadArtistOrUploader: 'Apple Music',
+                        downloadLocation: downloadLocation,
+                        service: 'applemusic'
+                    };
+                    this.saveDownloadToDatabase(downloadInfo);
+                });
+                event.reply('download-complete', {
+                    order: downloadOrder,
+                    completedTracks,
+                    totalTracks: totalUrls,
+                    overallProgress: 100
+                });
+            } else {
+                event.reply('download-error', `Process exited with code ${code}`);
+            }
+        });
+    }
+
+    // Helper method to throttle function calls
+    throttle(func, limit) {
+        let inThrottle;
+        return function(...args) {
+            if (!inThrottle) {
+                func.apply(this, args);
+                inThrottle = true;
+                setTimeout(() => inThrottle = false, limit);
+            }
+        };
+    }
 
     getDefaultSettings() {
         return {

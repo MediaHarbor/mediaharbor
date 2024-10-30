@@ -30,7 +30,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
             'start-deezer-batch-download',
             'start-apple-download',
             'start-spotify-download',
-            'clear-database'
+            'clear-database',
+            'start-apple-batch-download',
+            'start-spotify-batch-download'
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);
