@@ -361,6 +361,12 @@ function createWindow() {
     ipcMain.on('start-apple-download', (event, command) => {
         gamRip.handleApple(event, command);
     })
+    ipcMain.on('start-apple-batch-download', (event, command) => {
+        gamRip.handleAppleMusicBatchDownload(event, command);
+    })
+    ipcMain.on('start-spotify-batch-download', (event, command) => {
+        gamRip.handleSpotifyBatchDownload(event, command);
+    })
 
     const customRip = new CustomRip(
         settingsFilePath,

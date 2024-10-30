@@ -1522,6 +1522,7 @@ function initializeMusicTab() {
     document.getElementById('qobuzDownloadBatch_btn').addEventListener('click', startQobuzDownloadBatch);
     document.getElementById('appleMusic-download-button').addEventListener("click", handleAppleDownload);
     document.getElementById('spotify-download-button').addEventListener('click', handleSpotifyDownload);
+
     renderDownloads();
 
 }
@@ -1609,7 +1610,48 @@ async function startQobuzDownloadBatch() {
         displayErrorNotification('Error starting Qobuz batch download: ' + error.message);
     }
 }
+async function startAppleDownloadBatch() {
+    try {
+        const filePath = await openFileLocation();
 
+        if (!filePath || typeof filePath !== 'string') {
+            throw new Error('Invalid file path selected.');
+        }
+
+        if (!filePath.endsWith('.txt')) {
+            throw new Error('Invalid file type. Expected a .txt file.');
+        }
+
+        const qualityDropdown = document.getElementById('appleMusic-quality');
+        let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "1";
+
+        window.electronAPI.send('start-apple-batch-download', { filePath, quality });
+    } catch (error) {
+        console.error('Error starting Apple Music batch download:', error);
+        displayErrorNotification('Error starting Apple Music batch download: ' + error.message);
+    }
+}
+async function startSpotifyDownloadBatch() {
+    try {
+        const filePath = await openFileLocation();
+
+        if (!filePath || typeof filePath !== 'string') {
+            throw new Error('Invalid file path selected.');
+        }
+
+        if (!filePath.endsWith('.txt')) {
+            throw new Error('Invalid file type. Expected a .txt file.');
+        }
+
+        const qualityDropdown = document.getElementById('spotify-quality');
+        let quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || "1";
+
+        window.electronAPI.send('start-spotify-batch-download', { filePath, quality });
+    } catch (error) {
+        console.error('Error starting Spotify batch download:', error);
+        displayErrorNotification('Error starting Spotify batch download: ' + error.message);
+    }
+}
 function startTidalDownloadBatch() {
     try {
         const filePath = openFileLocation();
@@ -1639,6 +1681,7 @@ function startDeezerDownloadBatch() {
         displayErrorNotification('Error starting Deezer batch download: ' + error.message);
     }
 }
+
 
 function handleQobuzDownload() {
     const url = document.getElementById('qobuz-url').value;
@@ -1806,7 +1849,6 @@ function renderDownloads() {
         `;
     });
 
-    // Add event listeners for batch download buttons
     document.querySelectorAll('.batch-download-btn').forEach(button => {
         button.addEventListener('click', (event) => {
             const order = parseInt(event.target.dataset.order);
