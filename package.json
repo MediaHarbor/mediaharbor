@@ -3,14 +3,13 @@
   "version": "1.0.0",
   "main": "main.js",
   "scripts": {
-    "build-css": "unocss index.html -o dist/output.css",
     "start": "electron .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "author": "CrossyAtom46",
+  "license": "GPL-3.0-or-later",
+  "description": "Cross Platform GUI for yt-dlp and more...",
   "devDependencies": {
     "@unocss/preset-icons": "^0.63.4",
     "electron": "^32.1.2"
