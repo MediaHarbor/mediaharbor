@@ -384,6 +384,12 @@ button:hover {
     fill: currentColor;
     vertical-align: middle;
 }
+.help-container svg {
+    width: 25px;
+    height: 25px;
+    fill: currentColor;
+    vertical-align: middle;
+}
 .tab-button:hover,
 .tab-button.active {
     color: #4CAF50;
