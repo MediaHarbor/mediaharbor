@@ -327,10 +327,10 @@ function createWindow() {
     });
 
 
-    ipcMain.on('start-yt-music-download', (event, data) => {
+    ipcMain.on('start-yt-music-download', (event, data, playlist) => {
         fs.readFile(settingsFilePath, 'utf8', (err, settingsData) => {
             const settings = err ? getDefaultSettings() : JSON.parse(settingsData);
-            handleYtDlpMusicDownload(event, data, settings);
+            handleYtDlpMusicDownload(event, data, settings, playlist);
         });
     });
 

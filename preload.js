@@ -32,7 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
             'start-spotify-download',
             'clear-database',
             'start-apple-batch-download',
-            'start-spotify-batch-download'
+            'start-spotify-batch-download',
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);

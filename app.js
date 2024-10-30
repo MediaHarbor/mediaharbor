@@ -1384,9 +1384,10 @@ function initializeVideoTab() {
 // Video Tab
 function handleYoutubeVideoDownload() {
     const url = document.getElementById('youtube-url').value;
+    const isPlaylist = document.getElementById('youtube-video-playlist').checked;
     const qualityDropdown = document.getElementById('youtube-quality');
     const quality = qualityDropdown.querySelector('.dropdown-btn').dataset.value || 'bestvideo+bestaudio/best';
-    window.electronAPI.send('start-yt-video-download', { url, quality });
+    window.electronAPI.send('start-yt-video-download', { url, quality, isPlaylist });
 }
 
 function handleGenericDownload() {
@@ -1563,8 +1564,8 @@ function removeErrorNotification(element) {
 
 function handleYoutubeDownload() {
     const url = document.getElementById('youtube-url').value;
+    const isPlaylist = document.getElementById('youtube-playlist').checked;
     const qualityDropdown = document.getElementById('youtube-quality');
-    const qualityDropdownBtn = qualityDropdown.querySelector('.dropdown-btn');
     const qualityLink = qualityDropdown.querySelector('.dropdown-content a[data-value]');
     const quality = qualityLink ? qualityLink.getAttribute('data-value') : null;
 
@@ -1572,7 +1573,7 @@ function handleYoutubeDownload() {
         if (!url) {
             throw new Error('YouTube URL is required.');
         }
-        window.electronAPI.send('start-yt-music-download', { url, quality });
+        window.electronAPI.send('start-yt-music-download', { url, quality, isPlaylist });
 
         // Initial placeholder for YouTube download
         const downloadCount = state.downloads.length + 1;

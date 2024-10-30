@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs");
 const os = require("os");
 const { spawn } = require("child_process");
 const { app } = require("electron");
@@ -158,7 +159,7 @@ function buildYtDlpArgs(url, quality, settings, isGeneric = false) {
 
 async function handleYtDlpMusicDownload(event, data, settings) {
 
-    const { url, quality } = data;
+    const { url, quality, isPlaylist  } = data;
     const ytDlpCommand = 'yt-dlp';
     const downloadId = getNextDownloadOrder();
 
@@ -206,15 +207,224 @@ async function handleYtDlpMusicDownload(event, data, settings) {
             outputLines = [];
         }
     });
+    if (isPlaylist) {
+        await handlePlaylistDownload(event, url, quality, settings, downloadId);
+    } else {
+        videoInfoProcess.on('exit', () => {
+            if (videoInfo.title) {
+                startMusicDownload(event, url, quality, settings, videoInfo, downloadId);
+            } else {
+                event.reply('download-error', `Failed to fetch video info for ${url}`);
+                activeDownloads.delete(downloadId);
+            }
+        });
+    }
 
-    videoInfoProcess.on('exit', () => {
-        if (videoInfo.title) {
-            startMusicDownload(event, url, quality, settings, videoInfo, downloadId);
-        } else {
-            event.reply('download-error', `Failed to fetch video info for ${url}`);
-            activeDownloads.delete(downloadId);
+}
+async function handlePlaylistDownload(event, url, quality, settings, downloadId) {
+    const ytDlpCommand = 'yt-dlp';
+
+    // Initialize download state first
+    activeDownloads.set(downloadId, {
+        infoFetched: false,
+        totalFiles: 0,
+        currentFile: 0,
+        currentFileProgress: 0  // Add this to track individual file progress
+    });
+
+    // First, get playlist info with thumbnail and total videos
+    const playlistInfoArgs = [
+        '--flat-playlist',
+        '--print', '%(playlist)s',
+        '--print', '%(playlist_uploader)s',
+        '--print', '%(playlist_thumbnail)s',
+        '--print', '%(playlist_count)s',
+        '--no-download',
+        url
+    ];
+
+    const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs);
+    let playlistInfo = { title: '', uploader: '', thumbnail: '', totalVideos: 0 };
+    let outputLines = [];
+
+    playlistInfoProcess.stdout.on('data', (data) => {
+        const output = data.toString().split('\n').filter(line => line.trim());
+        outputLines = outputLines.concat(output);
+
+        const downloadState = activeDownloads.get(downloadId);
+        if (outputLines.length >= 4 && downloadState && !downloadState.infoFetched) {
+            playlistInfo.title = outputLines[0].trim();
+            playlistInfo.uploader = outputLines[1].trim();
+            playlistInfo.thumbnail = outputLines[2].trim();
+            playlistInfo.totalVideos = parseInt(outputLines[3].trim()) || 0;
+
+            if (!playlistInfo.thumbnail.startsWith('http')) {
+                playlistInfo.thumbnail = 'https:' + playlistInfo.thumbnail;
+            }
+
+            downloadState.infoFetched = true;
+            downloadState.totalFiles = playlistInfo.totalVideos;
+            downloadState.currentFile = 0;
+            downloadState.currentFileProgress = 0;
+
+            event.reply('youtube-music-info', {
+                title: playlistInfo.title,
+                uploader: playlistInfo.uploader,
+                thumbnail: playlistInfo.thumbnail,
+                order: downloadId
+            });
         }
     });
+
+    // Error handler for playlist info process
+    playlistInfoProcess.on('error', (error) => {
+        console.error('Playlist info process error:', error);
+        event.reply('download-error', `Failed to fetch playlist info: ${error.message}`);
+        activeDownloads.delete(downloadId);
+    });
+
+    await new Promise((resolve) => playlistInfoProcess.on('exit', resolve));
+
+    // Check if the download was cancelled during info fetch
+    if (!activeDownloads.has(downloadId)) {
+        return;
+    }
+
+    // Setup download directory
+    const playlistDir = path.join(settings.downloadLocation, sanitizeFileName(playlistInfo.title));
+    if (!fs.existsSync(playlistDir)) {
+        fs.mkdirSync(playlistDir, { recursive: true });
+    }
+
+    const playlistSettings = {
+        ...settings,
+        downloadLocation: playlistDir,
+        output_template: '%(playlist_index)s - %(title)s.%(ext)s',
+        no_playlist: false
+    };
+
+    const downloadArgs = buildYtDlpMusicArgs(url, quality, playlistSettings);
+    const noPlaylistIndex = downloadArgs.indexOf('--no-playlist');
+    if (noPlaylistIndex !== -1) {
+        downloadArgs.splice(noPlaylistIndex, 1);
+    }
+    downloadArgs.push('--yes-playlist');
+
+    const ytDlp = spawn(ytDlpCommand, downloadArgs);
+    let lastProgressUpdate = Date.now();
+
+    ytDlp.stdout.on('data', (data) => {
+        const output = data.toString();
+        console.log(output);
+        lastProgressUpdate = Date.now();
+
+        const downloadState = activeDownloads.get(downloadId);
+        if (!downloadState) return;
+
+        // Update current file number when starting a new file
+        const fileMatch = output.match(/\[download\] Downloading item (\d+) of (\d+)/);
+        if (fileMatch) {
+            const currentFile = parseInt(fileMatch[1]);
+            const totalFiles = parseInt(fileMatch[2]);
+            downloadState.currentFile = currentFile;
+            downloadState.totalFiles = totalFiles;
+            downloadState.currentFileProgress = 0; // Reset progress for new file
+        }
+
+        // Update progress percentage for current file
+        const progressMatch = output.match(/\[download\]\s+(\d+\.?\d*)%/);
+        if (progressMatch && downloadState) {
+            downloadState.currentFileProgress = parseFloat(progressMatch[1]);
+
+            // Calculate total progress
+            const totalProgress = calculateTotalProgress(downloadState);
+
+            event.reply('download-update', {
+                progress: totalProgress,
+                title: playlistInfo.title,
+                uploader: playlistInfo.uploader,
+                thumbnail: playlistInfo.thumbnail,
+                order: downloadId
+            });
+        }
+
+        // Handle audio extraction progress
+        if (output.includes('[ExtractAudio] Destination:')) {
+            if (downloadState) {
+                downloadState.currentFileProgress = 100;
+                const totalProgress = calculateTotalProgress(downloadState);
+
+                event.reply('download-update', {
+                    progress: totalProgress,
+                    title: playlistInfo.title,
+                    uploader: playlistInfo.uploader,
+                    thumbnail: playlistInfo.thumbnail,
+                    order: downloadId
+                });
+            }
+        }
+    });
+
+    // Helper function to calculate total progress
+    function calculateTotalProgress(downloadState) {
+        const { currentFile, totalFiles, currentFileProgress } = downloadState;
+        const filesCompleted = (currentFile - 1) * 100;
+        const currentProgress = currentFileProgress;
+        return (filesCompleted + currentProgress) / totalFiles;
+    }
+
+    ytDlp.stderr.on('data', (data) => {
+        const error = data.toString();
+        console.error(`Error: ${error}`);
+        if (!error.includes('YouTube Music is not directly supported')) {
+            event.reply('download-error', error);
+        }
+        lastProgressUpdate = Date.now();
+    });
+
+    const stallCheckInterval = setInterval(() => {
+        if (Date.now() - lastProgressUpdate > 30000) {
+            clearInterval(stallCheckInterval);
+            ytDlp.kill();
+            event.reply('download-error', `Download stalled for ${playlistInfo.title}`);
+            activeDownloads.delete(downloadId);
+        }
+    }, 5000);
+
+    ytDlp.on('exit', async (code) => {
+        clearInterval(stallCheckInterval);
+
+        if (code === 0) {
+            const files = fs.readdirSync(playlistDir)
+                .filter(file => file.endsWith('.mp3'))
+                .sort((a, b) => {
+                    const numA = parseInt(a.split(' ')[0]);
+                    const numB = parseInt(b.split(' ')[0]);
+                    return numA - numB;
+                });
+
+            const m3uContent = '#EXTM3U\n' + files.map(file => {
+                return `#EXTINF:-1,${file.substring(file.indexOf(' - ') + 3, file.lastIndexOf('.'))}\n${file}`;
+            }).join('\n');
+
+            fs.writeFileSync(path.join(playlistDir, `${sanitizeFileName(playlistInfo.title)}.m3u`), m3uContent);
+
+            const downloadInfo = {
+                downloadName: playlistInfo.title,
+                downloadArtistOrUploader: playlistInfo.uploader,
+                downloadLocation: playlistDir,
+                downloadThumbnail: playlistInfo.thumbnail
+            };
+            saveDownloadToDatabase(downloadInfo);
+            event.reply('download-complete', { order: downloadId });
+        } else {
+            event.reply('download-error', `Playlist download failed with code ${code}`);
+        }
+        activeDownloads.delete(downloadId);
+    });
+}
+function sanitizeFileName(filename) {
+    return filename.replace(/[<>:"/\\|?*]/g, '_');
 }
 
 function startMusicDownload(event, url, quality, settings, videoInfo, downloadId) {
@@ -298,10 +508,10 @@ function startMusicDownload(event, url, quality, settings, videoInfo, downloadId
 }
 
 async function handleYtDlpDownload(event, data, settings, isGeneric = false) {
-    const { url, quality } = data;
+    const { url, quality, isPlaylist } = data;
     const ytDlpCommand = 'yt-dlp';
     const downloadId = getNextDownloadOrder();
-
+    if (!isPlaylist){
     // Store initial state in activeDownloads
     activeDownloads.set(downloadId, {
         url,
@@ -359,6 +569,10 @@ async function handleYtDlpDownload(event, data, settings, isGeneric = false) {
         });
     } else {
         startDownload(event, url, quality, settings, null, downloadId, isGeneric);
+    }
+}
+    else {
+        await handleVideoPlaylistDownload(event, url, quality, settings, downloadId);
     }
 }
 
@@ -430,6 +644,128 @@ async function startDownload(event, url, quality, settings, videoInfo = null, do
         activeDownloads.delete(downloadId);
     });
 }
+async function handleVideoPlaylistDownload(event, url, quality, settings, downloadId) {
+    const ytDlpCommand = 'yt-dlp';
 
+    activeDownloads.set(downloadId, {
+        url,
+        type: 'video_playlist',
+        infoFetched: false
+    });
+
+    const playlistInfoArgs = [
+        '--flat-playlist',
+        '--print', '%(playlist)s',
+        '--print', '%(playlist_uploader)s',
+        '--print', '%(playlist_thumbnail)s',
+        '--print', '%(playlist_count)s',
+        '--no-download',
+        url
+    ];
+
+    const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs);
+    let playlistInfo = { title: '', uploader: '', thumbnail: '', totalVideos: 0 };
+    let outputLines = [];
+
+    playlistInfoProcess.stdout.on('data', (data) => {
+        const output = data.toString().split('\n').filter(line => line.trim());
+        outputLines = outputLines.concat(output);
+
+        if (outputLines.length >= 4 && !activeDownloads.get(downloadId)?.infoFetched) {
+            playlistInfo.title = outputLines[0].trim();
+            playlistInfo.uploader = outputLines[1].trim();
+            playlistInfo.thumbnail = outputLines[2].trim();
+            playlistInfo.totalVideos = parseInt(outputLines[3].trim()) || 0;
+
+            activeDownloads.get(downloadId).infoFetched = true;
+
+            event.reply('video-playlist-info', {
+                title: playlistInfo.title,
+                uploader: playlistInfo.uploader,
+                thumbnail: playlistInfo.thumbnail,
+                order: downloadId
+            });
+        }
+    });
+
+    playlistInfoProcess.on('exit', () => {
+        startVideoPlaylistDownload(event, url, quality, settings, playlistInfo, downloadId);
+    });
+}
+
+async function startVideoPlaylistDownload(event, url, quality, settings, playlistInfo, downloadId) {
+    const ytDlpCommand = 'yt-dlp';
+
+    // Create playlist directory
+    const playlistDir = path.join(settings.downloadLocation || app.getPath('downloads'),
+        sanitizeFileName(playlistInfo.title));
+    if (!fs.existsSync(playlistDir)) {
+        fs.mkdirSync(playlistDir, { recursive: true });
+    }
+
+    // Update settings with new download location and output template
+    const playlistSettings = {
+        ...settings,
+        downloadLocation: playlistDir,
+        // Force playlist index to start from 1
+        output_template: '%(autonumber)s - %(title)s.%(ext)s'
+    };
+
+    const args = buildYtDlpArgs(url, quality, { ...playlistSettings, no_playlist: false });
+    args.push('--yes-playlist');
+    // Add arguments to force playlist index to start from 1
+    args.push('--playlist-start', '1');
+    args.push('--autonumber-start', '1');
+
+    const ytDlp = spawn(ytDlpCommand, args);
+
+    ytDlp.stdout.on('data', (data) => {
+        const output = data.toString();
+        console.log(output);
+
+        const progressMatch = output.match(/(\d+\.\d+)%/);
+        if (progressMatch) {
+            const progress = parseFloat(progressMatch[1]);
+            event.reply('download-update', {
+                progress,
+                title: playlistInfo.title,
+                uploader: playlistInfo.uploader,
+                thumbnail: playlistInfo.thumbnail,
+                order: downloadId
+            });
+        }
+    });
+
+    ytDlp.stderr.on('data', (errorData) => {
+        const errorOutput = errorData.toString();
+        console.error(`Error: ${errorOutput}`);
+        event.reply('download-error', `Error: ${errorOutput}`);
+    });
+
+    ytDlp.on('exit', (code) => {
+        if (code === 0) {
+            // Create M3U playlist file with proper formatting
+            const files = fs.readdirSync(playlistDir)
+                .filter(file => file.endsWith('.mp4')) // Change to .mp4 for video files
+                .sort((a, b) => {
+                    const numA = parseInt(a.split(' ')[0]);
+                    const numB = parseInt(b.split(' ')[0]);
+                    return numA - numB;
+                });
+
+            const m3uContent = '#EXTM3U\n' + files.map(file => {
+                const title = file.substring(file.indexOf(' - ') + 3, file.lastIndexOf('.'));
+                return `#EXTINF:-1,${playlistInfo.uploader} - ${title}\n${file}`; // Add uploader to title
+            }).join('\n');
+
+            fs.writeFileSync(
+                path.join(playlistDir, `${sanitizeFileName(playlistInfo.title)}.m3u8`),
+                m3uContent,
+                { encoding: 'utf8' }
+            );
+            // ... rest of the code
+        }
+    });
+}
 
 module.exports = {handleYtDlpDownload, handleYtDlpMusicDownload};
