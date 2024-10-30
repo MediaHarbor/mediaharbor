@@ -1830,24 +1830,45 @@ function renderDownloads() {
             downloadDiv.id = `download-${download.order}`;
             downloadDiv.classList.add('download-entry');
             downloadContainer.prepend(downloadDiv);
+
+            // Initial rendering for static and dynamic content
+            const batchButton = download.isBatch ?
+                `<button class="batch-download-btn" data-order="${download.order}">View Progress</button>` : '';
+
+            downloadDiv.innerHTML = `
+                <img src="${download.thumbnail || './assets/placeholder.png'}" class="thumbnail" alt="${download.title || 'Unknown Title'}" />
+                <div class="download-info">
+                    <h3 class="title">${download.title || 'Unknown Title'}</h3>
+                    <p class="uploader">${download.uploader || download.artist || 'Unknown Artist'}</p>
+                    ${download.album ? `<p class="album">${download.album}</p>` : ''}
+                    <p>Download #${download.order}</p>
+                    ${batchButton}
+                    <div class="progress-bar"><div class="progress" style="width: ${download.progress}%;"></div></div>
+                    <p class="progress-text">${download.progress.toFixed(1)}%</p>
+                </div>
+            `;
+        } else {
+            // Selectively update only changed dynamic content
+            const title = downloadDiv.querySelector('.title');
+            const uploader = downloadDiv.querySelector('.uploader');
+            const album = downloadDiv.querySelector('.album');
+            const thumbnail = downloadDiv.querySelector('.thumbnail');
+            const progressBar = downloadDiv.querySelector('.progress');
+            const progressText = downloadDiv.querySelector('.progress-text');
+
+            if (title && title.textContent !== download.title) title.textContent = download.title;
+            if (uploader && uploader.textContent !== (download.uploader || download.artist)) {
+                uploader.textContent = download.uploader || download.artist;
+            }
+            if (album && album.textContent !== download.album) {
+                album.textContent = download.album;
+            }
+            if (thumbnail && thumbnail.src !== download.thumbnail) {
+                thumbnail.src = download.thumbnail || './assets/placeholder.png';
+            }
+            if (progressBar) progressBar.style.width = `${download.progress}%`;
+            if (progressText) progressText.textContent = `${download.progress.toFixed(1)}%`;
         }
-
-        // Only show the overall progress for batch downloads in main view
-        const batchButton = download.isBatch ?
-            `<button class="batch-download-btn" data-order="${download.order}">View Progress</button>` : '';
-
-        downloadDiv.innerHTML = `
-            <img src="${download.thumbnail || './assets/placeholder.png'}" class="thumbnail" alt="${download.title || 'Unknown Title'}" />
-            <div class="download-info">
-                <h3>${download.title || 'Unknown Title'}</h3>
-                <p class="uploader">${download.uploader || download.artist || 'Unknown Artist'}</p>
-                ${download.album ? `<p class="album">${download.album}</p>` : ''}
-                <p>Download #${download.order}</p>
-                ${batchButton}
-                <div class="progress-bar"><div class="progress" style="width: ${download.progress}%;"></div></div>
-                <p class="progress-text">${download.progress.toFixed(1)}%</p>
-            </div>
-        `;
     });
 
     document.querySelectorAll('.batch-download-btn').forEach(button => {
