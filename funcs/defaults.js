@@ -3,6 +3,7 @@ const {app} = require("electron");
 
 function getDefaultSettings() {
     return {
+        firstTime: true,
         theme: 'auto',
         downloadsDatabasePath: path.join(app.getPath('home'), 'MH', 'database.db'),
         downloadLocation: app.getPath('downloads'),
