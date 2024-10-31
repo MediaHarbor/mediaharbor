@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<head>
+    <style>
+        .st1 {
+            fill: #a035fc;
+        }
+        .uuid-05bd5b1d-e43f-4ffd-8b8d-2a01f8bc0f4c {
+            fill: #2a2a2a;
+        }
+
+        .uuid-005cb519-6a5d-4f39-95d2-ae1f52d90fc1 {
+            fill: #fff;
+        }
+
+        .platform-icon {
+            font-size: 24px;
+            margin-right: 15px;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(-100%); opacity: 0; }
+        }
+
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #1e2024 0%, #23272b 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            width: 800px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .page {
+            display: none;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+
+        .logo {
+            width: 180px;
+            height: 180px;
+            margin: 0 auto 30px;
+            display: block;
+            animation: float 3s ease-in-out infinite;
+        }
+        .icon-large {
+            width: 32px;
+            height: 32px;
+            font-size: 32px; /* Ensures the icon scales properly */
+        }
+
+
+        .service-card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .service-card:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(5px);
+        }
+
+        .service-card.selected {
+            background: rgba(66, 153, 225, 0.2);
+            border-left: 4px solid #4299e1;
+        }
+
+        .progress-container {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #4299e1;
+            width: max-content;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            font-size: 14px;
+            color: #a0aec0;
+            margin-top: 8px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #a0aec0;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            color: white;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 0 0 2px rgba(66, 153, 225, 0.5);
+        }
+
+        .button-group {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 30px;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        button.next {
+            background: #4299e1;
+            color: white;
+        }
+
+        button.next:hover {
+            background: #3182ce;
+            transform: translateY(-2px);
+        }
+
+        button.back {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        button.back:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .success-message {
+            background: rgba(72, 187, 120, 0.2);
+            color: #48bb78;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .platform-icon {
+            font-size: 24px;
+            margin-right: 15px;
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/simple-icons-font@v13/font/simple-icons.min.css" type="text/css">
+    <title>First Time Config</title>
+</head>
+<body>
+<div class="container">
+    <div id="page1" class="page active">
+        <img src="assets/MediaHarbor_Logo.svg" alt="Logo" class="logo">
+        <h1 style="text-align: center; margin-bottom: 20px;">Welcome to MediaHarbor</h1>
+        <p style="text-align: center; color: #a0aec0; margin-bottom: 40px;">
+            Let's get you set up with your favorite music services
+        </p>
+        <div class="button-group">
+            <button class="back" style="visibility: hidden">Back</button>
+            <button class="next" onclick="navigate(1)">Let's Start</button>
+        </div>
+    </div>
+
+    <div id="page2" class="page">
+        <h2>Choose Your Services</h2>
+
+        <div class="service-card selected" data-service="youtube">
+            <span class="platform-icon si si-youtube si--color icon-large"></span>
+            <div>
+                <h3>YouTube</h3>
+                <p style="color: #a0aec0; margin: 0;">Required for core functionality</p>
+            </div>
+        </div>
+
+        <div class="service-card selected" data-service="youtubeMusic">
+            <span class="platform-icon si si-youtubemusic si--color icon-large"></span>
+            <div>
+                <h3>YouTube Music</h3>
+                <p style="color: #a0aec0; margin: 0;">Recommended</p>
+            </div>
+        </div>
+
+        <div class="service-card" data-service="qobuz">
+            <span class="platform-icon icon-large"><svg id="uuid-4a305beb-0da7-4bf5-8e12-7654f31e0f3b" data-name="katman_1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1022.68 1024">
+            <path class="uuid-05bd5b1d-e43f-4ffd-8b8d-2a01f8bc0f4c" d="M914.69,810.74c63.11-84.63,100.92-189.24,100.92-302.92C1015.61,227.37,788.27,0,507.79,0,227.34,0,0,227.34,0,507.79s227.34,507.82,507.82,507.82c113.26,0,217.5-37.54,301.97-100.23l-1.51,1.81,103.55,106.81,110.86-106.81-107.99-106.45Z"/>
+            <g>
+                <circle class="uuid-005cb519-6a5d-4f39-95d2-ae1f52d90fc1" cx="511.41" cy="512" r="469.16"/>
+                <path class="uuid-05bd5b1d-e43f-4ffd-8b8d-2a01f8bc0f4c" d="M511.41,134.19c-208.68,0-377.85,169.16-377.85,377.85s169.16,377.85,377.85,377.85,377.85-169.16,377.85-377.85-169.2-377.85-377.85-377.85ZM511.41,660.63c-82.1,0-148.63-66.53-148.63-148.63s66.53-148.63,148.63-148.63,148.63,66.53,148.63,148.63-66.57,148.63-148.63,148.63Z"/>
+                <circle class="uuid-05bd5b1d-e43f-4ffd-8b8d-2a01f8bc0f4c" cx="511.41" cy="512" r="32.25"/>
+                <path class="uuid-005cb519-6a5d-4f39-95d2-ae1f52d90fc1" d="M975.17,922.29l-253.07-253.63c-7.47-9.9-19.28-16.32-32.61-16.32-22.57,0-40.87,18.3-40.87,40.87,0,10.99,4.38,20.96,11.45,28.33h0c.46.49.99.99,1.48,1.45l257.91,252.15,55.71-52.85Z"/>
+            </g>
+        </svg></span>
+            <h3>Qobuz</h3>
+        </div>
+
+        <div class="service-card" data-service="tidal">
+            <span class="platform-icon si si-tidal si--white icon-large"></span>
+            <h3>Tidal</h3>
+        </div>
+
+        <div class="service-card" data-service="spotify">
+            <span class="platform-icon si si-spotify si--color icon-large"></span>
+            <h3>Spotify</h3>
+        </div>
+
+        <div class="service-card" data-service="deezer">
+            <span class="platform-icon icon-large"><svg viewBox="0 0 277.668 277.67001"  xml:space="preserve"  xmlns="http://www.w3.org/2000/svg">
+       <path
+               class="st1"
+               d="m 232.881,42.363 c 2.569,-14.89 6.339,-24.253 10.515,-24.271 h 0.008 c 7.787,0.027 14.099,32.499 14.099,72.59 0,40.092 -6.321,72.59 -14.116,72.59 -3.196,0 -6.145,-5.518 -8.519,-14.765 -3.752,33.85 -11.538,57.119 -20.552,57.119 -6.974,0 -13.233,-13.978 -17.435,-36.022 -2.869,41.924 -10.09,71.669 -18.53,71.669 -5.297,0 -10.126,-11.787 -13.701,-30.979 -4.299,39.617 -14.231,67.376 -25.813,67.376 -11.582,0 -21.532,-27.75 -25.813,-67.376 -3.549,19.192 -8.378,30.979 -13.701,30.979 -8.44,0 -15.643,-29.745 -18.53,-71.669 -4.202,22.044 -10.443,36.022 -17.435,36.022 -9.004,0 -16.8,-23.261 -20.551,-57.119 -2.357,9.274 -5.323,14.765 -8.519,14.765 -7.795,0 -14.116,-32.498 -14.116,-72.59 0,-40.091 6.321,-72.59 14.116,-72.59 4.184,0 7.928,9.39 10.523,24.271 C 48.968,16.688 55.721,0 63.357,0 c 9.066,0 16.923,23.6 20.64,57.87 3.637,-24.942 9.155,-40.842 15.334,-40.842 8.66,0 16.022,31.273 18.75,74.897 5.129,-22.366 12.554,-36.398 20.773,-36.398 8.218,0 15.643,14.04 20.763,36.398 2.737,-43.624 10.09,-74.897 18.751,-74.897 6.17,0 11.679,15.901 15.334,40.842 C 197.411,23.6 205.268,0 214.334,0 c 7.61,0 14.389,16.697 18.547,42.363 z M 0,83.542 C 0,65.62 3.584,51.088 8.007,51.088 c 4.423,0 8.007,14.532 8.007,32.454 0,17.921 -3.584,32.454 -8.007,32.454 C 3.584,115.996 0,101.463 0,83.542 Z m 261.654,0 c 0,-17.922 3.584,-32.454 8.007,-32.454 4.422,0 8.007,14.532 8.007,32.454 0,17.921 -3.585,32.454 -8.007,32.454 -4.423,0 -8.007,-14.533 -8.007,-32.454 z"
+       />
+    </svg></span>
+            <h3>Deezer</h3>
+        </div>
+
+        <div class="service-card" data-service="appleMusic">
+            <span class="platform-icon si si-applemusic si--color icon-large"></span>
+            <h3>Apple Music</h3>
+        </div>
+
+        <div id="cli-output" style="display: none; margin-top: 20px; background: rgba(0, 0, 0, 0.3); padding: 15px; border-radius: 10px; font-family: monospace; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">
+        </div>
+        <div class="progress-container" id="installProgress">
+            <div class="progress-bar">
+                <div class="progress-fill"></div>
+            </div>
+            <div class="progress-text">Installing packages...</div>
+        </div>
+
+        <div class="button-group">
+            <button class="back" onclick="navigate(-1)">Back</button>
+            <button class="next" onclick="handleServicesNext()">Next</button>
+        </div>
+    </div>
+
+    <div id="page5" class="page">
+        <h2>Tidal Authentication</h2>
+
+        <p style="color: #a0aec0; margin-bottom: 20px;">
+            You'll be redirected to Tidal to complete the authentication process.
+        </p>
+
+        <div id="tidalStatus" class="success-message" style="display: none;">
+            ✅ Browser window opened for Tidal authentication
+        </div>
+
+        <div class="button-group">
+            <button class="back" onclick="navigate(-1)">Back</button>
+            <button class="next" onclick="handleTidalAuth()">Open Tidal Login</button>
+        </div>
+    </div>
+
+    <div id="page6" class="page">
+        <h2>Setup Complete! 🎉</h2>
+
+        <div class="success-message">
+            ✅ All selected services have been installed <br>
+            ✅ Don't forget to adjust your settings.
+        </div>
+
+        <button class="next" onclick="finishSetup()"
+                style="width: 100%; margin-top: 20px;">
+            Start Using The App
+        </button>
+    </div>
+</div>
+
+<script>
+
+    function navigate(direction) {
+        const currentPage = document.querySelector('.page.active');
+        const pages = document.querySelectorAll('.page');
+        const currentIndex = Array.from(pages).indexOf(currentPage);
+        const nextIndex = currentIndex + direction;
+
+        if (nextIndex >= 0 && nextIndex < pages.length) {
+            currentPage.classList.add('slide-out');
+            setTimeout(() => {
+                currentPage.classList.remove('active', 'slide-out');
+                pages[nextIndex].classList.add('active');
+            }, 500);
+        }
+    }
+
+
+    let selectedServices = {
+        youtube: true,
+        youtubeMusic: true,
+        qobuz: false,
+        tidal: false,
+        spotify: false,
+        deezer: false,
+        appleMusic: false
+    };
+
+    // Initialize service selection
+    document.querySelectorAll('.service-card[data-service]').forEach(card => {
+        card.addEventListener('click', () => {
+            if (card.dataset.service === 'youtube') return; // Cannot disable YouTube
+            card.classList.toggle('selected');
+            selectedServices[card.dataset.service] = card.classList.contains('selected');
+        });
+    });
+
+
+
+    function navigateToPage(pageNumber) {
+        const current = document.querySelector('.page.active');
+        const target = document.getElementById(`page${pageNumber}`);
+
+        current.classList.add('slide-out');
+        setTimeout(() => {
+            current.classList.remove('active', 'slide-out');
+            target.classList.add('active');
+        }, 500);
+    }
+
+
+
+    window.electronAPI.receive('python-output', (data) => {
+        const cliOutput = document.getElementById('cli-output');
+        cliOutput.style.display = 'block';
+
+        if (data.type === 'output' || data.type === 'error') {
+            cliOutput.textContent += data.data;
+            cliOutput.scrollTop = cliOutput.scrollHeight;
+        } else if (data.type === 'complete') {
+            if (data.code === 0) {
+                // Installation successful, proceed with navigation
+                if (selectedServices.qobuz) {
+                    navigate(1);
+                } else if (selectedServices.deezer) {
+                    navigateToPage(4);
+                } else if (selectedServices.tidal) {
+                    navigateToPage(5);
+                } else {
+                    navigateToPage(6);
+                }
+            } else {
+                // Installation failed
+                cliOutput.textContent += '\nInstallation failed with code ' + data.code;
+            }
+        }
+    });
+
+    function handleServicesNext() {
+        let servicesList = [];
+
+        // Always include yt-dlp
+        servicesList.push('yt-dlp');
+
+        // Add other services based on selection
+        if (selectedServices.youtubeMusic) servicesList.push('ytmusicapi');
+        if (selectedServices.qobuz) servicesList.push('https://github.com/MediaHarbor/custom_streamrip.git');
+        if (selectedServices.tidal) servicesList.push('https://github.com/MediaHarbor/custom_streamrip.git');
+        if (selectedServices.deezer) servicesList.push('https://github.com/MediaHarbor/custom_streamrip.git');
+        if (selectedServices.spotify) servicesList.push('https://github.com/MediaHarbor/custom_votify.git');
+        if (selectedServices.appleMusic) servicesList.push('https://github.com/MediaHarbor/custom_gamdl.git');
+
+        // Save selected services to localStorage
+        localStorage.setItem('selectedServices', JSON.stringify(servicesList));
+
+        // Show progress container
+        document.getElementById('installProgress').style.display = 'block';
+
+        // Send to main process via IPC
+        window.electronAPI.send('install-services', servicesList);
+    }
+    // Settings management functions
+    async function getAndMergeSettings() {
+        // Get default settings first
+        const defaultSettings = await window.api.getDefaultSettings();
+
+        // Prepare current form settings
+        const formSettings = {
+            firstTime: false,
+        };
+
+        // Get Qobuz settings if configured
+        const qobuzConfig = JSON.parse(localStorage.getItem('qobuzConfig'));
+        if (qobuzConfig) {
+            formSettings.qobuz_email_or_userid = qobuzConfig.identifier;
+            formSettings.qobuz_password_or_token = qobuzConfig.password;
+        }
+
+        // Get Deezer settings if configured
+        const deezerARL = localStorage.getItem('deezerARL');
+        if (deezerARL) {
+            formSettings.deezer_arl = deezerARL;
+        }
+
+        // Merge default settings with form settings
+        // Form settings take precedence over default settings
+        return {
+            ...defaultSettings,
+            ...formSettings
+        };
+    }
+
+    async function saveSettings(settings) {
+        try {
+            await window.electronAPI.send('save-settings', settings);
+        } catch (error) {
+            console.error('Error saving settings:', error);
+        }
+    }
+
+    // Modified finishSetup function
+    async function finishSetup() {
+        try {
+            // Get and merge all settings
+            const mergedSettings = await getAndMergeSettings();
+
+            // Save the merged settings
+            await saveSettings(mergedSettings);
+
+            // Send setup complete signal
+            window.electronAPI.send('setup-complete');
+
+            // Request app refresh
+            window.api.refreshApp();
+        } catch (error) {
+            console.error('Error during setup completion:', error);
+            // You might want to show an error message to the user here
+        }
+    }
+
+    async function handleTidalAuth() {
+        document.getElementById('tidalStatus').style.display = 'block';
+
+        try {
+            await window.electronAPI.send('spawn-tidal-config');
+            // Wait for a moment to ensure the command completes
+            setTimeout(() => {
+                navigateToPage(6);
+            }, 2000);
+        } catch (error) {
+            console.error('Error configuring Tidal:', error);
+            document.getElementById('tidalStatus').textContent = '❌ Tidal configuration failed';
+        }
+    }
+
+</script>
+</body>
+</html>
