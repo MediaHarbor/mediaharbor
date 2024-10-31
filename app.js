@@ -23,6 +23,7 @@ function applyTheme(theme) {
         applyDarkModeScrollbars(false);
     }
 }
+
 function applyDarkModeScrollbars(isDarkMode) {
     let styleElement = document.getElementById('scrollbar-styles');
 
@@ -1091,6 +1092,7 @@ function getCardData(result, platform, type = 'track') {
                         copyUrl: result['Channel URL'],
                     }
             }
+            break;
         case 'youtubeMusic':
             switch (type){
                 case "album":
@@ -1883,7 +1885,7 @@ function renderDownloads() {
 }
 
 window.electronAPI.receive('download-update', (data) => {
-    const { tracksProgress, order, isBatch } = data;
+    const { tracksProgress, order } = data;
 
     const downloadIndex = state.downloads.findIndex(d => d.order === order);
     if (downloadIndex !== -1) {
