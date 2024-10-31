@@ -1,8 +1,9 @@
 const { app, BrowserWindow, ipcMain,dialog } = require('electron');
 const { shell } = require('electron');
 const { exec } = require('child_process');
-const { execFile } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
+const UpdateChecker = require('./funcs/updatechecker')
 const fs = require('fs');
 const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
 const { saveDownloadToDatabase, loadDownloadsFromDatabase, deleteFromDatabase, deleteDataBase} = require('./funcs/db');
@@ -10,11 +11,12 @@ const {getDefaultSettings} = require('./funcs/defaults.js');
 const {handleYtDlpDownload, handleYtDlpMusicDownload} = require('./funcs/yt_dlp_downloaders')
 const GamRip = require('./funcs/gamRip');
 const CustomRip = require('./funcs/customRip');
-const { setupSettingsHandlers } = require('./funcs/settings');
-
+const { setupSettingsHandlers} = require('./funcs/settings');
 let settings = loadTheSettings(); // initialize with defaults
+const firstTime = settings.firstTime;
 const downloadsDatabasePath = settings.downloads_database;
 const failedDownloadsDatabasePath = settings.failed_downloads_database
+
 function loadTheSettings() {
     try {
         const settingsData = fs.readFileSync(settingsFilePath, 'utf8');
@@ -24,6 +26,9 @@ function loadTheSettings() {
         return getDefaultSettings();
     }
 }
+ipcMain.handle('get-default-settings', async () => {
+    return getDefaultSettings();
+});
 try {
     const settingsData = fs.readFileSync(settingsFilePath, 'utf8');
     settings = JSON.parse(settingsData);
@@ -31,8 +36,13 @@ try {
     console.warn('Failed to load settings, using defaults:', error);
 }
 
+// Add refresh app handler
+ipcMain.on('refresh-app', () => {
+    app.relaunch();
+    app.exit(0);
+});
 
-ipcMain.handle('load-downloads', (event) => {
+ipcMain.handle('load-downloads', () => {
     return new Promise((resolve, reject) => {
         loadDownloadsFromDatabase((rows) => {
             if (rows) {
@@ -43,6 +53,7 @@ ipcMain.handle('load-downloads', (event) => {
         });
     });
 });
+
 
 ipcMain.handle('deleteDownload', async (event, id) => {
     deleteFromDatabase(event, id)
@@ -169,7 +180,7 @@ ipcMain.handle('perform-search', async (event, { platform, query, type }) => {
                 return;
         }
 
-        exec(command, (error, stdout, stderr) => {
+        exec(command, (error, stdout) => {
             if (error) {
                 reject(error);
                 return;
@@ -216,7 +227,7 @@ ipcMain.handle('play-media', async (event, { url, platform }) => {
                     break;
                 }
                 console.log(settings.tidal_access_token)
-                command = `custom_rip -q 1 -ndb streamurl "${url}"`;;
+                command = `custom_rip -q 1 -ndb streamurl "${url}"`;
                 break;
             default:
                 if (url !== "null"){
@@ -230,7 +241,7 @@ ipcMain.handle('play-media', async (event, { url, platform }) => {
                 reject(new Error('No Stream Found'));
         }
 
-        exec(command, options, (error, stdout, stderr) => {
+        exec(command, options, (error, stdout) => {
             if (error) {
                 console.error('Execution error:', error);
                 reject(error);
@@ -306,7 +317,6 @@ function createWindow() {
         }
     });
     win.loadFile('index.html');
-
     setupSettingsHandlers(ipcMain);
     ipcMain.on("clear-database", (event, { failedDownloads, downloads }) => {
         // Check and delete the databases based on the user’s selection
@@ -403,8 +413,98 @@ function createWindow() {
 
 }
 
-app.whenReady().then(createWindow);
 
+function createFirstStartWindow() {
+    const firstStartWindow = new BrowserWindow({
+        width: 780,
+        height: 500,
+        modal: false,
+        frame: true,
+        resizable: true,
+        autoHideMenuBar: true,
+        webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            preload: path.join(__dirname, 'preload.js'),
+        },
+    });
+
+    ipcMain.on('spawn-tidal-config', async () => {
+        console.log('wayaw');
+
+        const authProcess = spawn('custom_rip', ["url", "https://tidal.com/track/1"]);
+        authProcess.stdout.on('data', (data) => {
+            const output = data.toString('utf-8');
+            console.log(output);
+        });
+
+        authProcess.stderr.on('data', (data) => {
+            console.error(`Error: ${data}`);
+        });
+
+        authProcess.on('close', (code) => {
+            console.log(`Process exited with code ${code}`);
+        });
+    });
+
+    ipcMain.on('install-services', (event, services) => {
+        const pythonProcess = spawn('python', ['start.py', ...services]);
+
+        pythonProcess.stdout.on('data', (data) => {
+            // Send the output back to renderer
+            event.sender.send('python-output', {
+                type: 'output',
+                data: data.toString()
+            });
+        });
+        setupSettingsHandlers(ipcMain);
+        pythonProcess.stderr.on('data', (data) => {
+            // Send error output back to renderer
+            event.sender.send('python-output', {
+                type: 'error',
+                data: data.toString()
+            });
+        });
+
+        pythonProcess.on('close', (code) => {
+            // Send completion status back to renderer
+            event.sender.send('python-output', {
+                type: 'complete',
+                code: code
+            });
+        });
+    });
+    firstStartWindow.loadFile('firststart.html');
+
+    // Save settings when window is closed OR when setup is complete
+    ipcMain.once('setup-complete', () => {
+        settings.firstTime = false;
+        fs.writeFileSync('./mh-settings.json', JSON.stringify(settings, null, 2));
+        firstStartWindow.close();
+    });
+}
+async function checkForUpdates() {
+    try {
+        const updateChecker = new UpdateChecker(
+            'MediaHarbor',
+            'mediaharbor',
+            app.getVersion()
+        );
+
+        await updateChecker.checkForUpdates();
+    } catch (error) {
+        console.error('Update check failed:', error);
+    }
+}
+
+app.whenReady().then(async () => {
+    await checkForUpdates();
+    if (settings.firstTime) {
+        createFirstStartWindow();
+    } else {
+        createWindow();
+    }
+});
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         app.quit();
@@ -416,4 +516,3 @@ app.on('activate', () => {
         createWindow();
     }
 });
-

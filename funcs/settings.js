@@ -132,7 +132,6 @@ async function saveSettings(event, settings) {
                 requests_per_minute: parseInt(settings.requests_per_minute)
             };
 
-            // Other config sections remain the same...
             config.qobuz = {
                 quality: settings.qobuz_quality,
                 download_booklets: settings.qobuz_download_booklets,

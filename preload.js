@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
             'clear-database',
             'start-apple-batch-download',
             'start-spotify-batch-download',
+            'install-services',
+            'spawn-tidal-config'
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);
@@ -42,7 +44,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     receive: (channel, func) => {
         ipcRenderer.on(channel, (event, ...args) => func(...args));
     },
-
+    showFirstStart: (callback) => ipcRenderer.on('show-first-start', callback),
+    completeFirstRun: () => ipcRenderer.send('first-run-complete'),
     deleteDownload: (id) => ipcRenderer.invoke('deleteDownload', id),
     showItemInFolder: (location) => ipcRenderer.invoke('showItemInFolder', location),
     clearDownloadsDatabase: () => ipcRenderer.invoke('clearDownloadsDatabase'),
@@ -53,11 +56,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
 });
 contextBridge.exposeInMainWorld(
     'api', {
+        // First launch
+        refreshApp: () => {return ipcRenderer.send('refresh-app')},
+        getDefaultSettings: () => ipcRenderer.invoke('get-default-settings'),
+
         // Search methods
         performSearch: (searchData) => {
             return ipcRenderer.invoke('perform-search', searchData);
         },
-
         // Listen to events
         onSearchResults: (callback) => {
             ipcRenderer.on('search-results', (event, ...args) => callback(...args));
