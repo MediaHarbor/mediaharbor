@@ -19,16 +19,29 @@ class SpotifyAPI:
 
     def load_credentials(self):
         try:
-            with open('apis.json', 'r') as f:
-                credentials = json.load(f)
-            self.client_id = credentials.get('SPOTIFY_CLIENT_ID')
-            self.client_secret = credentials.get('SPOTIFY_CLIENT_SECRET')
-        except FileNotFoundError:
-            self.client_id = os.environ.get('SPOTIFY_CLIENT_ID')
-            self.client_secret = os.environ.get('SPOTIFY_CLIENT_SECRET')
+            # First check if apis.json exists in the current directory
+            if os.path.exists('apis.json'):
+                config_path = 'apis.json'
+            else:
+                # Try to find it in the script's directory
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                config_path = os.path.join(script_dir, 'apis.json')
 
-        if not self.client_id or not self.client_secret:
-            raise ValueError("Client ID and Client Secret must be provided in apis.json or as environment variables.")
+                if not os.path.exists(config_path):
+                    raise FileNotFoundError("apis.json not found")
+
+            with open(config_path, 'r') as f:
+                credentials = json.load(f)
+
+            if 'SPOTIFY_CLIENT_ID' not in credentials or 'SPOTIFY_CLIENT_SECRET' not in credentials:
+                raise KeyError("SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET not found in apis.json")
+
+            self.client_id = credentials['SPOTIFY_CLIENT_ID']
+            self.client_secret = credentials['SPOTIFY_CLIENT_SECRET']
+
+        except Exception as e:
+            print(json.dumps({'error': f"Failed to load credentials: {str(e)}"}, indent=2))
+            sys.exit(1)
 
     def authenticate(self):
         if self.access_token and self.token_expiry and datetime.datetime.now() < self.token_expiry:
@@ -117,8 +130,6 @@ class SpotifyAPI:
 
 def main():
     parser = argparse.ArgumentParser(description="Spotify API script")
-    parser.add_argument('--get-track', help='Track ID to get details for')
-    parser.add_argument('--get-album', help='Album ID to get details for')
     parser.add_argument('--search-track', help='Track name to search for')
     parser.add_argument('--search-album', help='Album name to search for')
     parser.add_argument('--search-playlist', help='Playlist name to search for')
@@ -128,46 +139,31 @@ def main():
 
     args = parser.parse_args()
 
-    spotify_api = SpotifyAPI()
-
     try:
-        if args.get_track:
-            track_details = spotify_api.get_track(track_id=args.get_track)
-            print(json.dumps(track_details, indent=4))
-
-        if args.get_album:
-            album_details = spotify_api.get_album(album_id=args.get_album)
-            print(json.dumps(album_details, indent=4))
+        spotify_api = SpotifyAPI()
 
         if args.search_track:
-            search_results = spotify_api.search_tracks(query=args.search_track)
-            print(json.dumps(search_results, indent=4))
+            results = spotify_api.search_tracks(query=args.search_track)
+            print(json.dumps(results, indent=2))
+        elif args.search_album:
+            results = spotify_api.search_albums(query=args.search_album)
+            print(json.dumps(results, indent=2))
+        elif args.search_playlist:
+            results = spotify_api.search_playlists(query=args.search_playlist)
+            print(json.dumps(results, indent=2))
+        elif args.search_episode:
+            results = spotify_api.search_episodes(query=args.search_episode)
+            print(json.dumps(results, indent=2))
+        elif args.search_artist:
+            results = spotify_api.search_artists(query=args.search_artist)
+            print(json.dumps(results, indent=2))
+        elif args.search_podcast:
+            results = spotify_api.search_podcasts(query=args.search_podcast)
+            print(json.dumps(results, indent=2))
 
-        if args.search_album:
-            search_results = spotify_api.search_albums(query=args.search_album)
-            print(json.dumps(search_results, indent=4))
-
-        if args.search_playlist:
-            search_results = spotify_api.search_playlists(query=args.search_playlist)
-            print(json.dumps(search_results, indent=4))
-
-        if args.search_episode:
-            search_results = spotify_api.search_episodes(query=args.search_episode)
-            print(json.dumps(search_results, indent=4))
-
-        if args.search_artist:
-            search_results = spotify_api.search_artists(query=args.search_artist)
-            print(json.dumps(search_results, indent=4))
-
-        if args.search_podcast:
-            search_results = spotify_api.search_podcasts(query=args.search_podcast)
-            print(json.dumps(search_results, indent=4))
-
-    except requests.exceptions.RequestException as e:
-        print(f"Error: {e}")
-        if hasattr(e, 'response') and e.response is not None:
-            print(f"Response status code: {e.response.status_code}")
-            print(f"Response content: {e.response.content}")
+    except Exception as e:
+        print(json.dumps({'error': str(e)}, indent=2))
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

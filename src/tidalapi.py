@@ -20,17 +20,29 @@ class TidalAPI:
 
     def load_credentials(self):
         try:
-            with open('apis.json', 'r') as f:
+            # First check if apis.json exists in the current directory
+            if os.path.exists('apis.json'):
+                config_path = 'apis.json'
+            else:
+                # Try to find it in the script's directory
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                config_path = os.path.join(script_dir, 'apis.json')
+
+                if not os.path.exists(config_path):
+                    raise FileNotFoundError("apis.json not found")
+
+            with open(config_path, 'r') as f:
                 credentials = json.load(f)
-            self.client_id = credentials.get('TIDAL_CLIENT_ID')
-            self.client_secret = credentials.get('TIDAL_CLIENT_SECRET')
-        except FileNotFoundError:
-            self.client_id = os.environ.get('TIDAL_CLIENT_ID')
-            self.client_secret = os.environ.get('TIDAL_CLIENT_SECRET')
 
-        if not self.client_id or not self.client_secret:
-            raise ValueError("Client ID and Client Secret must be provided in apis.json or as environment variables.")
+            if 'TIDAL_CLIENT_ID' not in credentials or 'TIDAL_CLIENT_SECRET' not in credentials:
+                raise KeyError("TIDAL_CLIENT_ID or TIDAL_CLIENT_SECRET not found in apis.json")
 
+            self.client_id = credentials['TIDAL_CLIENT_ID']
+            self.client_secret = credentials['TIDAL_CLIENT_SECRET']
+
+        except Exception as e:
+            print(json.dumps({'error': f"Failed to load credentials: {str(e)}"}, indent=2))
+            sys.exit(1)
     def authenticate(self):
         if self.access_token and self.token_expiry and datetime.datetime.now() < self.token_expiry:
             return

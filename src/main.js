@@ -17,6 +17,13 @@ const firstTime = settings.firstTime;
 const downloadsDatabasePath = settings.downloads_database;
 const failedDownloadsDatabasePath = settings.failed_downloads_database
 
+function getResourcePath(filename) {
+    if (app.isPackaged) {
+        return path.join(process.resourcesPath, 'app.asar.unpacked', 'src', filename);
+    }
+    return path.join(__dirname, filename);
+}
+
 function loadTheSettings() {
     try {
         const settingsData = fs.readFileSync(settingsFilePath, 'utf8');
@@ -56,7 +63,7 @@ ipcMain.handle('load-downloads', () => {
 
 
 ipcMain.handle('deleteDownload', async (event, id) => {
-    deleteFromDatabase(event, id)
+    await deleteFromDatabase(event, id)
 });
 
 ipcMain.handle('showItemInFolder', async (event, filePath) => {
@@ -158,30 +165,31 @@ ipcMain.handle('perform-search', async (event, { platform, query, type }) => {
 
         switch(platform) {
             case 'youtube':
-                command = `py .\\ytsearchapi.py -q "${query}" ${type ? `-t ${type}` : ''}`;
+                command = `py "${getResourcePath('ytsearchapi.py')}" -q "${query}" ${type ? `-t ${type}` : ''}`;
                 break;
             case 'youtubeMusic':
-                command = `py .\\ytmusicsearchapi.py -q "${query}" ${type ? `-t ${type}` : 'song'}`;
+                command = `py "${getResourcePath('ytmusicsearchapi.py')}" -q "${query}" ${type ? `-t ${type}` : 'song'}`;
                 break;
             case 'spotify':
-                command = `py .\\spotifyapi.py --search-${type || 'track'} "${query}"`;
+                command = `py "${getResourcePath('spotifyapi.py')}" --search-${type || 'track'} "${query}"`;
                 break;
             case 'tidal':
-                command = `py .\\tidalapi.py --search-${type || 'track'} "${query}"`;
+                command = `py "${getResourcePath('tidalapi.py')}" --search-${type || 'track'} "${query}"`;
                 break;
             case 'deezer':
-                command = `py .\\deezerapi.py --search-${type || 'track'} "${query}"`;
+                command = `py "${getResourcePath('deezerapi.py')}" --search-${type || 'track'} "${query}"`;
                 break;
             case 'qobuz':
-                command = `py .\\qobuzapi.py --search-${type || 'track'} "${query}"`;
+                command = `py "${getResourcePath('qobuzapi.py')}" --search-${type || 'track'} "${query}"`;
                 break;
             default:
                 reject(new Error('Invalid platform'));
                 return;
         }
 
-        exec(command, (error, stdout) => {
+        exec(command, { encoding: 'utf8' }, (error, stdout) => {
             if (error) {
+                console.error('Search execution error:', error);
                 reject(error);
                 return;
             }
@@ -190,6 +198,7 @@ ipcMain.handle('perform-search', async (event, { platform, query, type }) => {
                 const results = JSON.parse(stdout);
                 resolve({ results, platform });
             } catch (e) {
+                console.error('JSON parsing error:', e);
                 reject(new Error('Failed to parse results'));
             }
         });
@@ -213,10 +222,10 @@ ipcMain.handle('play-media', async (event, { url, platform }) => {
 
         switch(platform) {
             case 'youtube':
-                command = `py .\\ytvideostream.py --url "${url}"`;
+                command = `$py "${getResourcePath('ytvideostream.py')} --url "${url}"`;
                 break;
             case 'youtubeMusic':
-                command = `py .\\ytaudiostream.py --url "${url}"`;
+                command = `py "${getResourcePath('ytaudiostream.py')} --url "${url}"`;
                 break;
             case 'qobuz':
                 command = `custom_rip -q 4 -ndb streamurl "${url}"`;
@@ -316,7 +325,7 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js')
         }
     });
-    win.loadFile('index.html');
+    win.loadFile(`${__dirname}/index.html`);
     setupSettingsHandlers(ipcMain);
     ipcMain.on("clear-database", (event, { failedDownloads, downloads }) => {
         // Check and delete the databases based on the user’s selection
@@ -448,7 +457,7 @@ function createFirstStartWindow() {
     });
 
     ipcMain.on('install-services', (event, services) => {
-        const pythonProcess = spawn('python', ['start.py', ...services]);
+        const pythonProcess = spawn('python', [getResourcePath('start.py'), ...services]);
 
         pythonProcess.stdout.on('data', (data) => {
             // Send the output back to renderer
@@ -474,7 +483,7 @@ function createFirstStartWindow() {
             });
         });
     });
-    firstStartWindow.loadFile('firststart.html');
+    firstStartWindow.loadFile(`${__dirname}/firststart.html`);
 
     // Save settings when window is closed OR when setup is complete
     ipcMain.once('setup-complete', () => {
