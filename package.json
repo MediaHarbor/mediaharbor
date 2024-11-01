@@ -1,18 +1,64 @@
 {
   "name": "mediaharbor",
   "version": "1.0.0",
-  "main": "main.js",
+  "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
   },
   "keywords": [],
   "author": "CrossyAtom46",
   "license": "GPL-3.0-or-later",
-  "description": "Cross Platform GUI for yt-dlp and more...",
+  "description": "MediaHarbor",
+  "build": {
+    "appId": "AtomDev.MediaHarbor",
+    "productName": "MediaHarbor",
+    "asarUnpack": [
+      "src/*.py",
+      "src/apis.json"
+    ],
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "resources",
+      "output": "dist"
+    },
+    "win": {
+      "target": ["nsis", "portable", "appx"],
+      "icon": "resources/icon.png"
+    },
+    "appx": {
+      "applicationId": "AtomDev.MediaHarbor",
+      "backgroundColor": "#464646",
+      "identityName": "AtomDevMediaHarbor",
+      "publisher": "CN=B799C26F-32FE-4398-8D3A-A8667FA3C70A",
+      "publisherDisplayName": "AtomDev",
+      "languages": ["en-US"],
+      "displayName": "MediaHarbor",
+      "showNameOnTiles": false,
+      "artifactName": "MediaHarbor-${version}-${arch}.${ext}"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "resources/icon.png"
+    },
+    "linux": {
+      "target": ["deb"],
+      "maintainer": "AtomDev",
+      "icon": "resources/icons/",
+      "category": "Utility"
+    }
+  },
   "devDependencies": {
     "@unocss/preset-icons": "^0.63.4",
-    "electron": "^32.1.2"
+    "electron": "^32.1.2",
+    "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
