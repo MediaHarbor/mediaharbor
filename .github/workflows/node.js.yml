@@ -1,4 +1,4 @@
-name: Build and Release Source Code
+name: Create Release
 
 on:
   push:
@@ -7,28 +7,13 @@ on:
     branches: ["main"]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [18.x, 20.x, 22.x]
-
-    steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run build --if-present
-
   release:
     runs-on: ubuntu-latest
-    needs: build
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Get Latest Release Version
         id: get_version
@@ -49,16 +34,23 @@ jobs:
           fi
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
 
+      - name: Get Changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:'- %s')
+          else
+            CHANGELOG=$(git log --pretty=format:'- %s' ${PREV_TAG}..HEAD)
+          fi
+          echo "CHANGELOG<<EOF" >> $GITHUB_ENV
+          echo "$CHANGELOG" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
       - name: Create Git Tag
         run: |
           git tag ${{ env.TAG_NAME }}
           git push origin ${{ env.TAG_NAME }} || echo "Tag already exists, skipping push."
-
-      - name: Get Changelog
-        id: changelog
-        run: |
-          CHANGELOG=$(git log --pretty=format:'- %s' $(git describe --tags --abbrev=0)..HEAD)
-          echo "CHANGELOG=$CHANGELOG" >> $GITHUB_ENV
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2.0.8
