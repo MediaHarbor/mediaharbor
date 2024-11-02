@@ -17,11 +17,25 @@ const firstTime = settings.firstTime;
 const downloadsDatabasePath = settings.downloads_database;
 const failedDownloadsDatabasePath = settings.failed_downloads_database
 
-function getResourcePath(filename) {
-    if (app.isPackaged) {
-        return path.join(process.resourcesPath, 'app.asar.unpacked', 'src', filename);
+function getPythonCommand() {
+    switch (process.platform) {
+        case 'win32':
+            return 'py';
+        case 'darwin':
+        case 'linux':
+            // fall back to python if python3 not found
+            return new Promise((resolve) => {
+                exec('python3 --version', (error) => {
+                    if (error) {
+                        resolve('python');
+                    } else {
+                        resolve('python3');
+                    }
+                });
+            });
+        default:
+            return 'python';
     }
-    return path.join(__dirname, filename);
 }
 
 function loadTheSettings() {
@@ -33,6 +47,15 @@ function loadTheSettings() {
         return getDefaultSettings();
     }
 }
+
+function getResourcePath(filename) {
+    if (app.isPackaged) {
+        return path.join(process.resourcesPath, 'app.asar.unpacked', 'src', filename)
+            .replace(/\\/g, '/');
+    }
+    return path.join(__dirname, filename).replace(/\\/g, '/');
+}
+
 ipcMain.handle('get-default-settings', async () => {
     return getDefaultSettings();
 });
@@ -160,34 +183,44 @@ ipcMain.handle('dialog:openFolder', async (event) => {
     }
 });
 ipcMain.handle('perform-search', async (event, { platform, query, type }) => {
+    const pythonCommand = await getPythonCommand();
+
     return new Promise((resolve, reject) => {
         let command;
-
+        const scriptPath = getResourcePath(getPythonScript(platform));
         switch(platform) {
             case 'youtube':
-                command = `py "${getResourcePath('ytsearchapi.py')}" -q "${query}" ${type ? `-t ${type}` : ''}`;
+                command = `${pythonCommand} "${scriptPath}" -q "${query}" ${type ? `-t ${type}` : ''}`;
                 break;
             case 'youtubeMusic':
-                command = `py "${getResourcePath('ytmusicsearchapi.py')}" -q "${query}" ${type ? `-t ${type}` : 'song'}`;
+                command = `${pythonCommand} "${scriptPath}" -q "${query}" ${type ? `-t ${type}` : 'song'}`;
                 break;
             case 'spotify':
-                command = `py "${getResourcePath('spotifyapi.py')}" --search-${type || 'track'} "${query}"`;
+                command = `${pythonCommand} "${scriptPath}" --search-${type || 'track'} "${query}"`;
                 break;
             case 'tidal':
-                command = `py "${getResourcePath('tidalapi.py')}" --search-${type || 'track'} "${query}"`;
+                command = `${pythonCommand} "${scriptPath}" --search-${type || 'track'} "${query}"`;
                 break;
             case 'deezer':
-                command = `py "${getResourcePath('deezerapi.py')}" --search-${type || 'track'} "${query}"`;
+                command = `${pythonCommand} "${scriptPath}" --search-${type || 'track'} "${query}"`;
                 break;
             case 'qobuz':
-                command = `py "${getResourcePath('qobuzapi.py')}" --search-${type || 'track'} "${query}"`;
+                command = `${pythonCommand} "${scriptPath}" --search-${type || 'track'} "${query}"`;
                 break;
             default:
                 reject(new Error('Invalid platform'));
                 return;
         }
+        const options = {
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                PYTHONIOENCODING: 'utf-8',
+                PATH: process.env.PATH
+            }
+        };
 
-        exec(command, { encoding: 'utf8' }, (error, stdout) => {
+        exec(command, options, (error, stdout) => {
             if (error) {
                 console.error('Search execution error:', error);
                 reject(error);
@@ -206,6 +239,7 @@ ipcMain.handle('perform-search', async (event, { platform, query, type }) => {
 });
 
 ipcMain.handle('play-media', async (event, { url, platform }) => {
+    const pythonCommand = await getPythonCommand();
     return new Promise((resolve, reject) => {
         console.log('Input URL:', url);
         if (!url) {
@@ -215,17 +249,21 @@ ipcMain.handle('play-media', async (event, { url, platform }) => {
 
         const options = {
             encoding: 'utf8',
-            env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+            env: {
+                ...process.env,
+                PYTHONIOENCODING: 'utf-8',
+                PATH: process.env.PATH
+            }
         };
 
         let command;
-
+        const scriptPath = getResourcePath(getPythonStreamScript(platform));
         switch(platform) {
             case 'youtube':
-                command = `$py "${getResourcePath('ytvideostream.py')} --url "${url}"`;
+                command = `${pythonCommand} "${scriptPath}" --url "${url}"`;
                 break;
             case 'youtubeMusic':
-                command = `py "${getResourcePath('ytaudiostream.py')} --url "${url}"`;
+                command = `${pythonCommand} "${scriptPath}" --url "${url}"`;
                 break;
             case 'qobuz':
                 command = `custom_rip -q 4 -ndb streamurl "${url}"`;
@@ -439,12 +477,13 @@ function createFirstStartWindow() {
     });
 
     ipcMain.on('spawn-tidal-config', async () => {
-        console.log('wayaw');
+        const customRipCommand = process.platform === 'win32' ? 'custom_rip' : './custom_rip';
 
-        const authProcess = spawn('custom_rip', ["url", "https://tidal.com/track/1"]);
-        authProcess.stdout.on('data', (data) => {
-            const output = data.toString('utf-8');
-            console.log(output);
+        const authProcess = spawn(customRipCommand, ["url", "https://tidal.com/track/1"], {
+            env: {
+                ...process.env,
+                PATH: process.env.PATH
+            }
         });
 
         authProcess.stderr.on('data', (data) => {
@@ -456,9 +495,14 @@ function createFirstStartWindow() {
         });
     });
 
-    ipcMain.on('install-services', (event, services) => {
-        const pythonProcess = spawn('python', [getResourcePath('start.py'), ...services]);
-
+    ipcMain.on('install-services', async (event, services) => {
+        const pythonCommand = await getPythonCommand();
+        const pythonProcess = spawn(pythonCommand, [getResourcePath('start.py'), ...services], {
+            env: {
+                ...process.env,
+                PATH: process.env.PATH
+            }
+        });
         pythonProcess.stdout.on('data', (data) => {
             // Send the output back to renderer
             event.sender.send('python-output', {
@@ -525,3 +569,22 @@ app.on('activate', () => {
         createWindow();
     }
 });
+function getPythonScript(platform) {
+    const scriptMap = {
+        youtube: 'ytsearchapi.py',
+        youtubeMusic: 'ytmusicsearchapi.py',
+        spotify: 'spotifyapi.py',
+        tidal: 'tidalapi.py',
+        deezer: 'deezerapi.py',
+        qobuz: 'qobuzapi.py'
+    };
+    return scriptMap[platform] || '';
+}
+
+function getPythonStreamScript(platform) {
+    const scriptMap = {
+        youtube: 'ytvideostream.py',
+        youtubeMusic: 'ytaudiostream.py'
+    };
+    return scriptMap[platform] || '';
+}
