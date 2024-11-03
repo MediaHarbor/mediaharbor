@@ -3,40 +3,19 @@ const { shell } = require('electron');
 const { exec } = require('child_process');
 const { spawn } = require('child_process');
 const path = require('path');
-const UpdateChecker = require('./funcs/updatechecker')
 const fs = require('fs');
-const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
+const UpdateChecker = require('./funcs/updatechecker')
 const { saveDownloadToDatabase, loadDownloadsFromDatabase, deleteFromDatabase, deleteDataBase} = require('./funcs/db');
 const {getDefaultSettings} = require('./funcs/defaults.js');
 const {handleYtDlpDownload, handleYtDlpMusicDownload} = require('./funcs/yt_dlp_downloaders')
 const GamRip = require('./funcs/gamRip');
 const CustomRip = require('./funcs/customRip');
 const { setupSettingsHandlers} = require('./funcs/settings');
-let settings = loadTheSettings(); // initialize with defaults
-const firstTime = settings.firstTime;
+const {getPythonCommand} = require('./funcs/spawner');
+const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
+let settings = loadTheSettings();
 const downloadsDatabasePath = settings.downloads_database;
 const failedDownloadsDatabasePath = settings.failed_downloads_database
-
-function getPythonCommand() {
-    switch (process.platform) {
-        case 'win32':
-            return 'py';
-        case 'darwin':
-        case 'linux':
-            // fall back to python if python3 not found
-            return new Promise((resolve) => {
-                exec('python3 --version', (error) => {
-                    if (error) {
-                        resolve('python');
-                    } else {
-                        resolve('python3');
-                    }
-                });
-            });
-        default:
-            return 'python';
-    }
-}
 
 function loadTheSettings() {
     try {
@@ -102,7 +81,7 @@ ipcMain.handle('showItemInFolder', async (event, filePath) => {
                 if (process.platform === 'win32') {
                     require('child_process').exec(`explorer "${normalizedPath}"`);
                 } else {
-                    shell.openPath(normalizedPath);
+                    await shell.openPath(normalizedPath);
                 }
             } else {
 
@@ -228,7 +207,7 @@ ipcMain.handle('perform-search', async (event, { platform, query, type }) => {
             }
 
             try {
-                const results = JSON.parse(stdout);
+                const results = JSON.parse(stdout.toString());
                 resolve({ results, platform });
             } catch (e) {
                 console.error('JSON parsing error:', e);
@@ -412,17 +391,17 @@ function createWindow() {
     );
 
     ipcMain.on('start-spotify-download', (event, command) => {
-        gamRip.handleSpotify(event, command);
+        gamRip.handleDownload(event, command, 'spotify')
     })
 
     ipcMain.on('start-apple-download', (event, command) => {
-        gamRip.handleApple(event, command);
+        gamRip.handleDownload(event, command, 'applemusic')
     })
     ipcMain.on('start-apple-batch-download', (event, command) => {
-        gamRip.handleAppleMusicBatchDownload(event, command);
+        gamRipInstance.handleBatchDownload(event, data, 'applemusic');
     })
     ipcMain.on('start-spotify-batch-download', (event, command) => {
-        gamRip.handleSpotifyBatchDownload(event, command);
+        gamRipInstance.handleBatchDownload(event, data, 'spotify');
     })
 
     const customRip = new CustomRip(
@@ -436,26 +415,26 @@ function createWindow() {
     });
 
     ipcMain.on('start-qobuz-download', (event, data) => {
-        customRip.handleQobuzDownload(event, data);
+        customRip.handleDownload(event, data, 'qobuz');
     });
 
     ipcMain.on('start-deezer-download', (event, data) => {
-        customRip.handleDeezerDownload(event, data);
+        customRip.handleDownload(event, data, 'deezer');
     });
 
     ipcMain.on('start-tidal-download', (event, data) => {
-        customRip.handleTidalDownload(event, data);
+        customRip.handleDownload(event, data, 'tidal');
     });
     ipcMain.on('start-qobuz-batch-download', (event, data) => {
-        customRip.handleQobuzBatchDownload(event, data);
+        customRip.handleBatchDownload(event, data, 'qobuz');
     });
 
     ipcMain.on('start-tidal-batch-download', (event, data) => {
-        customRip.handleTidalBatchDownload(event, data);
+        customRip.handleBatchDownload(event, data, 'tidal');
     });
 
     ipcMain.on('start-deezer-batch-download', (event, data) => {
-        customRip.handleDeezerBatchDownload(event, data);
+        customRip.handleBatchDownload(event, data, 'deezer');
     });
 
 }
