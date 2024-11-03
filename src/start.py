@@ -3,18 +3,45 @@ import shutil
 import sys
 import os
 import platform
+
 try:
     from rich.console import Console
     from rich.text import Text
     from rich.theme import Theme
     from rich import print as rich_print
 except ImportError:
-    subprocess.run([sys.executable, "-m", "pip", "install", "rich"])
+    # Try using pip, possibly with --break-system-packages
+    def is_externally_managed():
+        """Check if Python environment is externally managed"""
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--dry-run", "dummy-package"],
+                capture_output=True,
+                text=True
+            )
+            return "externally-managed-environment" in result.stderr
+        except subprocess.CalledProcessError:
+            return False
+
+    try:
+        # Check if the environment is externally managed
+        if is_externally_managed():
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--break-system-packages", "rich"],
+                check=True
+            )
+        else:
+            subprocess.run([sys.executable, "-m", "pip", "install", "rich"], check=True)
+    except subprocess.CalledProcessError:
+        print("Failed to install 'rich' package. Please install it manually.")
+        sys.exit(1)
     from rich.console import Console
     from rich.text import Text
     from rich.theme import Theme
     from rich import print as rich_print
+
 console = Console()
+
 def print_logo():
     logo = """
                       {{{{{{{{{{{{{{{{
@@ -54,6 +81,7 @@ def print_logo():
     for idx, line in enumerate(lines):
         color = rainbow_colors[idx % len(rainbow_colors)]
         rich_print(f"{color}{line}[/]")
+
 def is_tool_installed(name):
     """Check if a program is installed and accessible from PATH"""
     return shutil.which(name) is not None
@@ -61,11 +89,11 @@ def is_tool_installed(name):
 def install_git_silent():
     """Install Git silently based on the operating system"""
     system = platform.system().lower()
-    
+
     if is_tool_installed("git"):
         print("Git is already installed")
         return True
-    
+
     try:
         if system == "linux":
             # Detect package manager
@@ -81,14 +109,14 @@ def install_git_silent():
             else:
                 print("Unsupported Linux distribution")
                 return False
-                
+
         elif system == "darwin":
             if not is_tool_installed("brew"):
                 # Install Homebrew first
                 brew_install = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
                 subprocess.run(brew_install, shell=True, check=True)
             subprocess.run(["brew", "install", "git"], check=True)
-            
+
         elif system == "windows":
             try:
                 # Use winget if available (Windows 10 and later)
@@ -96,7 +124,7 @@ def install_git_silent():
                     subprocess.run(["winget", "install", "--id", "Git.Git", "-e", "--silent"], check=True)
                 else:
                     # Alternative: Download and install using PowerShell
-                    ps_command = """
+                    ps_command = r"""
                     $url = "https://github.com/git-for-windows/git/releases/latest/download/Git-64-bit.exe"
                     $output = "$env:TEMP\GitInstaller.exe"
                     Invoke-WebRequest -Uri $url -OutFile $output
@@ -107,7 +135,7 @@ def install_git_silent():
             except subprocess.CalledProcessError:
                 print("Failed to install Git. Please install manually from https://git-scm.com/")
                 return False
-        
+
         # Verify installation
         if is_tool_installed("git"):
             print("Git was successfully installed")
@@ -115,44 +143,84 @@ def install_git_silent():
         else:
             print("Git installation failed")
             return False
-            
+
     except subprocess.CalledProcessError as e:
         print(f"An error occurred during installation: {e}")
         return False
 
+def is_externally_managed():
+    """Check if Python environment is externally managed"""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--dry-run", "dummy-package"],
+            capture_output=True,
+            text=True
+        )
+        return "externally-managed-environment" in result.stderr
+    except subprocess.CalledProcessError:
+        return False
+
+def install_package(package_name, break_system_packages=False):
+    """Install a package using pip, possibly with --break-system-packages"""
+    try:
+        if break_system_packages:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--break-system-packages", package_name],
+                check=True
+            )
+        else:
+            subprocess.run([sys.executable, "-m", "pip", "install", package_name], check=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        console.print(f"[bold red]Failed to install {package_name}: {e}[/bold red]")
+        return False
+
 def install_tools():
+    break_system_packages = is_externally_managed()
+
+    if break_system_packages:
+        console.print("[yellow]Detected externally managed environment. Using pip with --break-system-packages for installations...[/yellow]")
+
     if not is_tool_installed("yt-dlp"):
         console.print("[bold yellow]yt-dlp not found. Installing...[/bold yellow]")
-        subprocess.run([sys.executable, "-m", "pip", "install", "yt-dlp"])
+        install_package("yt-dlp", break_system_packages=break_system_packages)
 
     if not is_tool_installed("git"):
         console.print("[bold yellow]git not found. Installing...[/bold yellow]")
-        if sys.platform.startswith("linux"):
-            subprocess.run(["sudo", "apt-get", "install", "git", "-y"])
-        elif sys.platform == "darwin":
-            subprocess.run(["brew", "install", "git"])
-        elif os.name == "nt":
-            console.print("[bold red]Please install git manually from https://git-scm.com/[/bold red]")
+        install_git_silent()
 
-    console.print("[bold green]git and yt-dlp are installed.[/bold green]")
+    console.print("[bold green]Installation completed.[/bold green]")
+    return True
+
 def install_python_packages(packages):
+    break_system_packages = is_externally_managed()
     processed_packages = set()
 
     for package in packages:
-        if package.startswith("https://"):
-            package = f"git+{package}"
-
         if package not in processed_packages:
             processed_packages.add(package)
             console.print(f"[bold yellow]Checking for {package}...[/bold yellow]")
-            result = subprocess.run([sys.executable, "-m", "pip", "show", package], capture_output=True, text=True)
+
+            # Check if the package is a Git repository URL
+            if package.startswith("https://") and package.endswith(".git"):
+                # Format for pip to recognize as a git repository
+                package = f"git+{package}"
+
+            # Check if the package is already installed
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "show", package],
+                capture_output=True,
+                text=True
+            )
             if "Version" not in result.stdout:
-                console.print(f"[bold yellow]{package} not found. Installing...[/bold yellow]")
-                subprocess.run([sys.executable, "-m", "pip", "install", package])
+                install_package(package, break_system_packages=break_system_packages)
+
 if __name__ == "__main__":
     print_logo()
 
-    install_tools()
+    if not install_tools():
+        console.print("[bold red]Failed to install required tools. Please check the errors above.[/bold red]")
+        sys.exit(1)
 
     additional_packages = sys.argv[1:]
 
@@ -163,4 +231,4 @@ if __name__ == "__main__":
         console.print("[bold yellow]No additional packages provided. Skipping optional installations.[/bold yellow]")
 
     console.print("[bold green]All tools and packages are set up. Exiting script...[/bold green]")
-    sys.exit()
+    sys.exit(0)
