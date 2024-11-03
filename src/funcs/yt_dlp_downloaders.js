@@ -693,8 +693,83 @@ async function handleVideoPlaylistDownload(event, url, quality, settings, downlo
     });
 }
 
+async function handleVideoPlaylistDownload(event, url, quality, settings, downloadId) {
+    const ytDlpCommand = 'yt-dlp';
+
+    activeDownloads.set(downloadId, {
+        url,
+        type: 'video_playlist',
+        infoFetched: false
+    });
+
+    // Fetch playlist info
+    const playlistInfoArgs = [
+        '--flat-playlist',
+        '--print', '%(playlist_title)s',
+        '--print', '%(playlist_uploader)s',
+        '--print', '%(playlist_thumbnail)s',
+        '--print', '%(playlist_count)s',
+        '--no-download',
+        url
+    ];
+
+    const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs);
+    let playlistInfo = { title: '', uploader: '', thumbnail: '', totalVideos: 0 };
+    let outputLines = [];
+
+    playlistInfoProcess.stdout.on('data', (data) => {
+        const output = data.toString().split('\n').filter(line => line.trim());
+        outputLines = outputLines.concat(output);
+
+        if (outputLines.length >= 4 && !activeDownloads.get(downloadId)?.infoFetched) {
+            playlistInfo.title = outputLines[0].trim();
+            playlistInfo.uploader = outputLines[1].trim();
+            playlistInfo.thumbnail = outputLines[2].trim();
+            playlistInfo.totalVideos = parseInt(outputLines[3].trim()) || 0;
+
+            if (!playlistInfo.thumbnail.startsWith('http')) {
+                playlistInfo.thumbnail = 'https:' + playlistInfo.thumbnail;
+            }
+
+            activeDownloads.get(downloadId).infoFetched = true;
+            activeDownloads.get(downloadId).totalFiles = playlistInfo.totalVideos;
+            activeDownloads.get(downloadId).currentFile = 0;
+            activeDownloads.get(downloadId).currentFileProgress = 0;
+
+            event.reply('video-playlist-info', {
+                title: playlistInfo.title,
+                uploader: playlistInfo.uploader,
+                thumbnail: playlistInfo.thumbnail,
+                order: downloadId
+            });
+        }
+    });
+
+    playlistInfoProcess.on('exit', (code) => {
+        if (code === 0) {
+            startVideoPlaylistDownload(event, url, quality, settings, playlistInfo, downloadId);
+        } else {
+            event.reply('download-error', `Failed to fetch playlist info for ${url}`);
+            activeDownloads.delete(downloadId);
+        }
+    });
+}
+
+function sanitizeFileName(filename) {
+    return filename.replace(/[<>:"/\\|?*]/g, '_');
+}
+
 async function startVideoPlaylistDownload(event, url, quality, settings, playlistInfo, downloadId) {
     const ytDlpCommand = 'yt-dlp';
+
+    // Initialize download state
+    const downloadState = activeDownloads.get(downloadId);
+    if (!downloadState) return;
+
+    downloadState.infoFetched = true;
+    downloadState.totalFiles = playlistInfo.totalVideos;
+    downloadState.currentFile = 0;
+    downloadState.currentFileProgress = 0;
 
     // Create playlist directory
     const playlistDir = path.join(settings.downloadLocation || app.getPath('downloads'),
@@ -707,46 +782,110 @@ async function startVideoPlaylistDownload(event, url, quality, settings, playlis
     const playlistSettings = {
         ...settings,
         downloadLocation: playlistDir,
-        // Force playlist index to start from 1
-        output_template: '%(autonumber)s - %(title)s.%(ext)s'
+        output_template: '%(playlist_index)s - %(title)s.%(ext)s',
+        no_playlist: false
     };
 
-    const args = buildYtDlpArgs(url, quality, { ...playlistSettings, no_playlist: false });
+    const args = buildYtDlpArgs(url, quality, playlistSettings);
+    const noPlaylistIndex = args.indexOf('--no-playlist');
+    if (noPlaylistIndex !== -1) {
+        args.splice(noPlaylistIndex, 1);
+    }
     args.push('--yes-playlist');
-    // Add arguments to force playlist index to start from 1
-    args.push('--playlist-start', '1');
-    args.push('--autonumber-start', '1');
 
     const ytDlp = spawn(ytDlpCommand, args);
+
+    let lastProgressUpdate = Date.now();
 
     ytDlp.stdout.on('data', (data) => {
         const output = data.toString();
         console.log(output);
+        lastProgressUpdate = Date.now();
 
-        const progressMatch = output.match(/(\d+\.\d+)%/);
-        if (progressMatch) {
-            const progress = parseFloat(progressMatch[1]);
+        const downloadState = activeDownloads.get(downloadId);
+        if (!downloadState) return;
+
+        // Update current file number when starting a new file
+        const fileMatch = output.match(/\[download\] Downloading (video|item) (\d+) of (\d+)/);
+        if (fileMatch) {
+            const currentFile = parseInt(fileMatch[2]);
+            const totalFiles = parseInt(fileMatch[3]);
+            downloadState.currentFile = currentFile;
+            downloadState.totalFiles = totalFiles;
+            downloadState.currentFileProgress = 0; // Reset progress for new file
+        }
+
+        // Update progress percentage for current file
+        const progressMatch = output.match(/\[download\]\s+([\d\.]+)%/);
+        if (progressMatch && downloadState) {
+            downloadState.currentFileProgress = parseFloat(progressMatch[1]);
+
+            // Calculate total progress
+            const totalProgress = calculateTotalProgress(downloadState);
+
             event.reply('download-update', {
-                progress,
+                progress: totalProgress,
                 title: playlistInfo.title,
                 uploader: playlistInfo.uploader,
                 thumbnail: playlistInfo.thumbnail,
                 order: downloadId
             });
+        } else {
+            // Handle fragment downloads
+            const fragmentMatch = output.match(/Fragment\s+(\d+)\s+of\s+(\d+)/i);
+            if (fragmentMatch && downloadState) {
+                const currentFragment = parseInt(fragmentMatch[1]);
+                const totalFragments = parseInt(fragmentMatch[2]);
+
+                // Estimate current file progress based on fragments
+                downloadState.currentFileProgress = (currentFragment / totalFragments) * 100;
+
+                // Calculate total progress
+                const totalProgress = calculateTotalProgress(downloadState);
+
+                event.reply('download-update', {
+                    progress: totalProgress,
+                    title: playlistInfo.title,
+                    uploader: playlistInfo.uploader,
+                    thumbnail: playlistInfo.thumbnail,
+                    order: downloadId
+                });
+            }
         }
     });
 
+    // Helper function to calculate total progress
+    function calculateTotalProgress(downloadState) {
+        const { currentFile, totalFiles, currentFileProgress } = downloadState;
+        const filesCompleted = (currentFile - 1) * 100;
+        const currentProgress = currentFileProgress;
+        return (filesCompleted + currentProgress) / totalFiles;
+    }
+
+    // Handle errors
     ytDlp.stderr.on('data', (errorData) => {
         const errorOutput = errorData.toString();
         console.error(`Error: ${errorOutput}`);
         event.reply('download-error', `Error: ${errorOutput}`);
+        lastProgressUpdate = Date.now();
     });
 
+    // Set up stall check
+    const stallCheckInterval = setInterval(() => {
+        if (Date.now() - lastProgressUpdate > 30000) {
+            clearInterval(stallCheckInterval);
+            ytDlp.kill();
+            event.reply('download-error', `Download stalled for ${playlistInfo.title}`);
+            activeDownloads.delete(downloadId);
+        }
+    }, 5000);
+
     ytDlp.on('exit', (code) => {
+        clearInterval(stallCheckInterval);
         if (code === 0) {
-            // Create M3U playlist file with proper formatting
+            // Create M3U8 playlist file
             const files = fs.readdirSync(playlistDir)
-                .filter(file => file.endsWith('.mp4')) // Change to .mp4 for video files
+                .filter(file => file.endsWith('.mp4') || file.endsWith('.mkv') || file.endsWith('.webm'))
                 .sort((a, b) => {
                     const numA = parseInt(a.split(' ')[0]);
                     const numB = parseInt(b.split(' ')[0]);
@@ -755,7 +894,7 @@ async function startVideoPlaylistDownload(event, url, quality, settings, playlis
 
             const m3uContent = '#EXTM3U\n' + files.map(file => {
                 const title = file.substring(file.indexOf(' - ') + 3, file.lastIndexOf('.'));
-                return `#EXTINF:-1,${playlistInfo.uploader} - ${title}\n${file}`; // Add uploader to title
+                return `#EXTINF:-1,${title}\n${file}`;
             }).join('\n');
 
             fs.writeFileSync(
@@ -763,9 +902,19 @@ async function startVideoPlaylistDownload(event, url, quality, settings, playlis
                 m3uContent,
                 { encoding: 'utf8' }
             );
-            // ... rest of the code
+
+            const downloadInfo = {
+                downloadName: playlistInfo.title,
+                downloadArtistOrUploader: playlistInfo.uploader,
+                downloadLocation: playlistDir,
+                downloadThumbnail: playlistInfo.thumbnail
+            };
+            saveDownloadToDatabase(downloadInfo);
+            event.reply('download-complete', { order: downloadId });
+        } else {
+            event.reply('download-error', `Process exited with code ${code}`);
         }
+        activeDownloads.delete(downloadId);
     });
 }
-
 module.exports = {handleYtDlpDownload, handleYtDlpMusicDownload};
