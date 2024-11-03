@@ -107,8 +107,10 @@ async function saveSettings(event, settings) {
     // Handle streamrip config
     getStreamripPaths(async (paths) => {
         if (!paths?.configPath) {
-            console.error('Could not get streamrip config path');
-            event.reply('settings-error', 'Could not locate streamrip configuration');
+            console.warn('custom_rip is not installed or not available, skipping streamrip config update');
+            // Since the main settings and service configs are saved successfully,
+            // we can reply settings-saved
+            event.reply('settings-saved', 'Settings saved successfully (without streamrip config)');
             return;
         }
 
@@ -147,13 +149,12 @@ async function saveSettings(event, settings) {
             };
 
             config.tidal = {
-               quality: settings.tidal_quality,
-               user_id: settings.tidal_user_id,
-               country_code: settings.tidal_country_code,
-               access_token: settings.tidal_access_token,
-               refresh_token: settings.tidal_refresh_token,
-               token_expiry: settings.tidal_token_expiry,
-
+                quality: settings.tidal_quality,
+                user_id: settings.tidal_user_id,
+                country_code: settings.tidal_country_code,
+                access_token: settings.tidal_access_token,
+                refresh_token: settings.tidal_refresh_token,
+                token_expiry: settings.tidal_token_expiry,
                 download_videos: settings.tidal_download_videos
             };
 
@@ -176,7 +177,7 @@ async function saveSettings(event, settings) {
                 codec: settings.conversion_codec,
                 sampling_rate: parseInt(settings.conversion_sampling_rate),
                 bit_depth: parseInt(settings.conversion_bit_depth || 16),
-                lossy_bitrate: parseInt(settings.conversion_bit_depth || 320)
+                lossy_bitrate: parseInt(settings.conversion_lossy_bitrate || 320)
             };
 
             config.metadata = {
@@ -223,7 +224,7 @@ function loadSettings(event) {
 
             // Load streamrip settings
             getStreamripPaths((paths) => {
-                if (paths) {
+                if (paths?.configPath) {
                     fs.readFile(paths.configPath, 'utf8', (tomlErr, tomlData) => {
                         if (!tomlErr) {
                             try {
@@ -264,7 +265,7 @@ function loadSettings(event) {
                                     conversion_check: streamripConfig.conversion?.enabled,
                                     conversion_codec: streamripConfig.conversion?.codec || "ALAC",
                                     conversion_sampling_rate: streamripConfig.conversion?.sampling_rate || 48000,
-                                    covnersionlossy_bitrate: streamripConfig.conversion?.lossy_bitrate || 320,
+                                    conversion_lossy_bitrate: streamripConfig.conversion?.lossy_bitrate || 320,
                                     meta_album_name_playlist_check: streamripConfig.metadata?.set_playlist_to_album,
                                     meta_album_order_playlist_check: streamripConfig.metadata?.renumber_playlist_tracks,
                                     excluded_tags: streamripConfig.metadata?.exclude || [],
@@ -282,6 +283,7 @@ function loadSettings(event) {
                         event.reply('settings-data', settings);
                     });
                 } else {
+                    console.warn('custom_rip is not installed or not available, skipping streamrip settings load');
                     event.reply('settings-data', settings);
                 }
             });
@@ -292,6 +294,7 @@ function loadSettings(event) {
         }
     });
 }
+
 function getStreamripPaths(callback) {
     const streamripProcess = spawn('custom_rip', ['config', 'path']);
     let stdout = '';
@@ -305,9 +308,15 @@ function getStreamripPaths(callback) {
         stderr += data.toString();
     });
 
+    streamripProcess.on('error', (err) => {
+        // Handle the case where custom_rip is not installed
+        console.warn('custom_rip is not installed:', err);
+        callback(null);
+    });
+
     streamripProcess.on('close', (code) => {
         if (code !== 0) {
-            console.error(`Error getting custom_rip config path: ${stderr}`);
+            console.warn(`custom_rip exited with code ${code}: ${stderr}`);
             callback(null);
             return;
         }
@@ -325,12 +334,11 @@ function getStreamripPaths(callback) {
 
             callback(paths);
         } else {
-            console.error('Could not find config path in output:', stdout);
+            console.warn('Could not find config path in custom_rip output:', stdout);
             callback(null);
         }
     });
 }
-
 
 function setupSettingsHandlers(ipcMain) {
     ipcMain.on('load-settings', (event) => {
