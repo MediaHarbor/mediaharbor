@@ -18,6 +18,18 @@
     <section id="generic-faq">
         <h2 class="helph2"><i class="fas fa-question-circle"></i> Generic FAQ</h2>
         <div class="faq-content">
+            <h3>Unable to Download: Invalid Credentials</h3>
+            <p>This app requires you to sign in with your own account to download from platforms other than YouTube.</p>
+
+            <h4>Signing in to Apple Music and Spotify:</h4>
+            <p>Install the <strong>cookies.txt</strong> extension in your browser. Then, navigate to the Apple Music or Spotify page and download the cookies.</p>
+            <p>Next, add the cookies to the configurations in the settings.</p>
+
+            <h4>Signing in to Deezer:</h4>
+            <p>First, open the Deezer player in your browser. Then, access the browser's cookies, locate the <strong>arl</strong> cookie, copy its value, and paste it into the settings.</p>
+
+            <h4>Signing in to Qobuz:</h4>
+            <p>You can sign in with your email and password, or with your user ID and token in the settings.</p>
             <h3>Downloads get stuck, what to do?</h3>
             <p>Make sure to diagnose the issue. Currently, you can start the app from the terminal to debug and create a new issue with log.</p>
             <h3>Deleted files aren’t removed from my PC.</h3>
@@ -27,7 +39,6 @@
             <h3>Which batch downloads are supported?</h3>
             <p>Streamrip (Qobuz, Tidal, Deezer), GamDL, Votify.</p>
             <p>yt-dlp batch download will be added in the next updates.</p>
-            <p>Note: Currently there is a flicker issue for GamDL and Votify. Will be fixed in the next updates.</p>
         </div>
     </section>
     <section id="streamrip-help">
@@ -44,8 +55,7 @@
         <div class="faq-content">
             <h3>Why can't I use play button for albums, artists etc.?</h3>
             <p>We will implement a pop-up window to handle watch / listen specific contents in them on the next version.</p>
-            <h3>Why Apple Music not available?</h3>
-            <p>Because I can't access to their developer portal, since I don't have an iOS device.</p>
+            <h4 style="color: darkred">Note: Currently play and download buttons are experimental.</h4>
         </div>
     </section>
     <section id="sponsor-help">
@@ -53,6 +63,13 @@
         <div class="faq-content">
             <p>Support us via the sponsor button on our project page: <a class="linkRef" onclick=openPopup("https://github.com/MediaHarbor/mediaharbor/")>GitHub Sponsor</a>.</p>
             <p>All donations are appreciated!</p>
+        </div>
+    </section>
+    <section id="contribution-help">
+        <h2 class="helph2"><i class="si si-github"></i> Contribution</h2>
+        <div class="faq-content">
+            <h3>Interested in using a CLI on MediaHarbor?</h3>
+            <p>Create a new issue on the project with NEW_CLI template</p>
         </div>
     </section>
 </div>
