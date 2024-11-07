@@ -1,6 +1,8 @@
-// updateChecker.js
 const { app, dialog, shell } = require('electron');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
+const { exec } = require('child_process');
 
 module.exports = class UpdateChecker {
     constructor(owner, repo, currentVersion) {
@@ -10,7 +12,7 @@ module.exports = class UpdateChecker {
         this.apiUrl = `https://api.github.com/repos/${owner}/${repo}/releases`;
     }
 
-    async checkForUpdates() {
+    async checkForUpdates(autoUpdate = false) {
         try {
             const latestRelease = await this.getLatestRelease();
 
@@ -19,12 +21,16 @@ module.exports = class UpdateChecker {
                 return;
             }
 
-            // Remove 'v' prefix if present for comparison
             const latestVersion = latestRelease.tag_name.replace('v', '');
             const currentVersion = this.currentVersion.replace('v', '');
 
             if (this.compareVersions(latestVersion, currentVersion) > 0) {
-                await this.showUpdateDialog(latestRelease);
+                if (autoUpdate) {
+                    console.log('Auto-update enabled. Downloading and installing update...');
+                    await this.downloadAndInstall(latestRelease);
+                } else {
+                    await this.showUpdateDialog(latestRelease);
+                }
             } else {
                 console.log('Application is up to date');
             }
@@ -87,5 +93,35 @@ module.exports = class UpdateChecker {
         if (response.response === 0) {
             await shell.openExternal(release.html_url);
         }
+    }
+
+    async downloadAndInstall(release) {
+        const asset = release.assets.find(a => a.name.endsWith('.exe') || a.name.endsWith('.dmg') || a.name.endsWith('.AppImage'));
+
+        if (!asset) {
+            console.error('No compatible update file found.');
+            return;
+        }
+
+        const downloadPath = path.join(app.getPath('temp'), asset.name);
+
+        const file = fs.createWriteStream(downloadPath);
+        https.get(asset.browser_download_url, (response) => {
+            response.pipe(file);
+
+            file.on('finish', () => {
+                file.close(() => {
+                    console.log('Update downloaded. Installing now...');
+                    if (process.platform === 'darwin' || process.platform === 'linux') {
+                        exec(`open "${downloadPath}"`);
+                    } else if (process.platform === 'win32') {
+                        exec(`start "" "${downloadPath}"`);
+                    }
+                    app.quit();
+                });
+            });
+        }).on('error', (err) => {
+            fs.unlink(downloadPath, () => console.error('Download failed:', err));
+        });
     }
 }
