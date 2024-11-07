@@ -6,7 +6,7 @@ node_modules
 # Editor-based HTTP Client requests
 /httpRequests/
 
-src/apis.json
+src/funcs/apis/apis.json
 /dist/*
 /build/*
 /resources/*
