@@ -1,4 +1,3 @@
-// preload.js
 const { contextBridge, ipcRenderer } = require('electron');
 
 // Combine all electronAPI methods into a single object
@@ -34,7 +33,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
             'start-apple-batch-download',
             'start-spotify-batch-download',
             'install-services',
-            'spawn-tidal-config'
+            'spawn-tidal-config',
+            'updateDep',
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);
@@ -89,4 +89,5 @@ contextBridge.exposeInMainWorld("electron", {
         send: (channel, data) => ipcRenderer.send(channel, data),
         on: (channel, func) => ipcRenderer.on(channel, (event, ...args) => func(...args)),
     },
+
 });
