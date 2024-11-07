@@ -64,7 +64,6 @@
             display: block;
         }
 
-
         .logo {
             width: 180px;
             height: 180px;
@@ -77,7 +76,6 @@
             height: 32px;
             font-size: 32px; /* Ensures the icon scales properly */
         }
-
 
         .service-card {
             background: rgba(255, 255, 255, 0.05);
@@ -204,7 +202,7 @@
 <body>
 <div class="container">
     <div id="page1" class="page active">
-        <img src="./assets/MediaHarbor_Logo.svg" alt="Logo" class="logo">
+        <img src="../assets/MediaHarbor_Logo.svg" alt="Logo" class="logo">
         <h1 style="text-align: center; margin-bottom: 20px;">Welcome to MediaHarbor</h1>
         <p style="text-align: center; color: #a0aec0; margin-bottom: 40px;">
             Let's get you set up with your favorite music services
@@ -234,7 +232,7 @@
             </div>
         </div>
 
-        <div class="service-card" data-service="qobuz">
+        <div class="service-card selected" data-service="qobuz">
             <span class="platform-icon icon-large"><svg id="uuid-4a305beb-0da7-4bf5-8e12-7654f31e0f3b" data-name="katman_1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1022.68 1024">
             <path class="uuid-05bd5b1d-e43f-4ffd-8b8d-2a01f8bc0f4c" d="M914.69,810.74c63.11-84.63,100.92-189.24,100.92-302.92C1015.61,227.37,788.27,0,507.79,0,227.34,0,0,227.34,0,507.79s227.34,507.82,507.82,507.82c113.26,0,217.5-37.54,301.97-100.23l-1.51,1.81,103.55,106.81,110.86-106.81-107.99-106.45Z"/>
             <g>
@@ -247,17 +245,17 @@
             <h3>Qobuz</h3>
         </div>
 
-        <div class="service-card" data-service="tidal">
+        <div class="service-card selected" data-service="tidal">
             <span class="platform-icon si si-tidal si--white icon-large"></span>
             <h3>Tidal</h3>
         </div>
 
-        <div class="service-card" data-service="spotify">
+        <div class="service-card selected" data-service="spotify">
             <span class="platform-icon si si-spotify si--color icon-large"></span>
             <h3>Spotify</h3>
         </div>
 
-        <div class="service-card" data-service="deezer">
+        <div class="service-card selected" data-service="deezer">
             <span class="platform-icon icon-large"><svg viewBox="0 0 277.668 277.67001"  xml:space="preserve"  xmlns="http://www.w3.org/2000/svg">
        <path
                class="st1"
@@ -267,7 +265,7 @@
             <h3>Deezer</h3>
         </div>
 
-        <div class="service-card" data-service="appleMusic">
+        <div class="service-card selected" data-service="appleMusic">
             <span class="platform-icon si si-applemusic si--color icon-large"></span>
             <h3>Apple Music</h3>
         </div>
@@ -320,7 +318,6 @@
 </div>
 
 <script>
-
     function navigate(direction) {
         const currentPage = document.querySelector('.page.active');
         const pages = document.querySelectorAll('.page');
@@ -336,15 +333,14 @@
         }
     }
 
-
     let selectedServices = {
         youtube: true,
         youtubeMusic: true,
-        qobuz: false,
-        tidal: false,
-        spotify: false,
-        deezer: false,
-        appleMusic: false
+        qobuz: true,
+        tidal: true,
+        spotify: true,
+        deezer: true,
+        appleMusic: true
     };
 
     // Initialize service selection
@@ -356,8 +352,6 @@
         });
     });
 
-
-
     function navigateToPage(pageNumber) {
         const current = document.querySelector('.page.active');
         const target = document.getElementById(`page${pageNumber}`);
@@ -368,8 +362,6 @@
             target.classList.add('active');
         }, 500);
     }
-
-
 
     window.electronAPI.receive('python-output', (data) => {
         const cliOutput = document.getElementById('cli-output');
@@ -400,10 +392,8 @@
     function handleServicesNext() {
         let servicesList = [];
 
-        // Always include yt-dlp
         servicesList.push('yt-dlp');
 
-        // Add other services based on selection
         if (selectedServices.youtubeMusic) servicesList.push('ytmusicapi');
         if (selectedServices.qobuz) servicesList.push('https://github.com/MediaHarbor/custom_streamrip.git');
         if (selectedServices.tidal) servicesList.push('https://github.com/MediaHarbor/custom_streamrip.git');
@@ -414,37 +404,16 @@
         // Save selected services to localStorage
         localStorage.setItem('selectedServices', JSON.stringify(servicesList));
 
-        // Show progress container
         document.getElementById('installProgress').style.display = 'block';
-
-        // Send to main process via IPC
         window.electronAPI.send('install-services', servicesList);
     }
-    // Settings management functions
-    async function getAndMergeSettings() {
-        // Get default settings first
-        const defaultSettings = await window.api.getDefaultSettings();
 
-        // Prepare current form settings
+    async function getAndMergeSettings() {
+        const defaultSettings = await window.api.getDefaultSettings();
         const formSettings = {
             firstTime: false,
         };
 
-        // Get Qobuz settings if configured
-        const qobuzConfig = JSON.parse(localStorage.getItem('qobuzConfig'));
-        if (qobuzConfig) {
-            formSettings.qobuz_email_or_userid = qobuzConfig.identifier;
-            formSettings.qobuz_password_or_token = qobuzConfig.password;
-        }
-
-        // Get Deezer settings if configured
-        const deezerARL = localStorage.getItem('deezerARL');
-        if (deezerARL) {
-            formSettings.deezer_arl = deezerARL;
-        }
-
-        // Merge default settings with form settings
-        // Form settings take precedence over default settings
         return {
             ...defaultSettings,
             ...formSettings
@@ -459,23 +428,15 @@
         }
     }
 
-    // Modified finishSetup function
     async function finishSetup() {
         try {
-            // Get and merge all settings
             const mergedSettings = await getAndMergeSettings();
-
-            // Save the merged settings
             await saveSettings(mergedSettings);
-
-            // Send setup complete signal
             window.electronAPI.send('setup-complete');
-
-            // Request app refresh
             window.api.refreshApp();
         } catch (error) {
+            alert('An error occurred during setup completion. Please try again.');
             console.error('Error during setup completion:', error);
-            // You might want to show an error message to the user here
         }
     }
 
@@ -493,7 +454,6 @@
             document.getElementById('tidalStatus').textContent = '❌ Tidal configuration failed';
         }
     }
-
 </script>
 </body>
 </html>
