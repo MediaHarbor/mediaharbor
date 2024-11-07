@@ -14,7 +14,6 @@ const appleConfigPath = path.join(app.getPath('userData'), 'apple_config.json');
 const mergeServiceSettings = (settings, serviceConfig, servicePrefix) => {
     const merged = { ...settings };
 
-    // First, apply any service-specific settings from the config
     Object.entries(serviceConfig).forEach(([key, value]) => {
         const settingKey = `${servicePrefix}_${key}`;
         merged[settingKey] = value;
@@ -108,8 +107,6 @@ async function saveSettings(event, settings) {
     getStreamripPaths(async (paths) => {
         if (!paths?.configPath) {
             console.warn('custom_rip is not installed or not available, skipping streamrip config update');
-            // Since the main settings and service configs are saved successfully,
-            // we can reply settings-saved
             event.reply('settings-saved', 'Settings saved successfully (without streamrip config)');
             return;
         }
@@ -189,6 +186,10 @@ async function saveSettings(event, settings) {
                         ? []
                         : settings.excluded_tags.split(/\s+/)
             };
+            config.misc = {
+                version: '2.0.6',
+                check_for_updates: 'false'
+            }
 
             const tomlString = TOML.stringify(config);
             await fs.promises.writeFile(paths.configPath, tomlString, 'utf8');
@@ -235,7 +236,7 @@ function loadSettings(event) {
                                     ...settings,
                                     downloads_database_path: paths.downloadsDbPath,
                                     failed_downloads_database_path: paths.failedDownloadsDbPath,
-                                    downloadLocation: streamripConfig.downloads?.folder || settings.downloadLocation,
+                                    downloadLocation: settings.downloadLocation || streamripConfig.downloads?.folder,
                                     source_subdirectories: streamripConfig.downloads?.source_subdirectories || false,
                                     disc_subdirectories: streamripConfig.downloads?.disc_subdirectories || true,
                                     max_connections: streamripConfig.downloads?.max_connections || 6,
