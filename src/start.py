@@ -10,9 +10,7 @@ try:
     from rich.theme import Theme
     from rich import print as rich_print
 except ImportError:
-    # Try using pip, possibly with --break-system-packages
     def is_externally_managed():
-        """Check if Python environment is externally managed"""
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", "--dry-run", "dummy-package"],
@@ -24,7 +22,6 @@ except ImportError:
             return False
 
     try:
-        # Check if the environment is externally managed
         if is_externally_managed():
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "--break-system-packages", "rich"],
@@ -83,11 +80,9 @@ def print_logo():
         rich_print(f"{color}{line}[/]")
 
 def is_tool_installed(name):
-    """Check if a program is installed and accessible from PATH"""
     return shutil.which(name) is not None
 
 def install_git_silent():
-    """Install Git silently based on the operating system"""
     system = platform.system().lower()
 
     if is_tool_installed("git"):
@@ -96,7 +91,6 @@ def install_git_silent():
 
     try:
         if system == "linux":
-            # Detect package manager
             if is_tool_installed("apt-get"):
                 subprocess.run(["sudo", "apt-get", "update", "-y"], check=True)
                 subprocess.run(["sudo", "apt-get", "install", "git", "-y"], check=True)
@@ -112,18 +106,15 @@ def install_git_silent():
 
         elif system == "darwin":
             if not is_tool_installed("brew"):
-                # Install Homebrew first
                 brew_install = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
                 subprocess.run(brew_install, shell=True, check=True)
             subprocess.run(["brew", "install", "git"], check=True)
 
         elif system == "windows":
             try:
-                # Use winget if available (Windows 10 and later)
                 if is_tool_installed("winget"):
                     subprocess.run(["winget", "install", "--id", "Git.Git", "-e", "--silent"], check=True)
                 else:
-                    # Alternative: Download and install using PowerShell
                     ps_command = r"""
                     $url = "https://github.com/git-for-windows/git/releases/latest/download/Git-64-bit.exe"
                     $output = "$env:TEMP\GitInstaller.exe"
@@ -136,7 +127,6 @@ def install_git_silent():
                 print("Failed to install Git. Please install manually from https://git-scm.com/")
                 return False
 
-        # Verify installation
         if is_tool_installed("git"):
             print("Git was successfully installed")
             return True
@@ -149,7 +139,6 @@ def install_git_silent():
         return False
 
 def is_externally_managed():
-    """Check if Python environment is externally managed"""
     try:
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", "--dry-run", "dummy-package"],
@@ -161,7 +150,6 @@ def is_externally_managed():
         return False
 
 def install_package(package_name, break_system_packages=False):
-    """Install a package using pip, possibly with --break-system-packages"""
     try:
         if break_system_packages:
             subprocess.run(
@@ -180,6 +168,12 @@ def install_tools():
 
     if break_system_packages:
         console.print("[yellow]Detected externally managed environment. Using pip with --break-system-packages for installations...[/yellow]")
+    if not is_tool_installed("googleapi"):
+            console.print("[bold yellow]Google python api not found. Installing...[/bold yellow]")
+            install_package("googleapi", break_system_packages=break_system_packages)
+    if not is_tool_installed("ffmpeg"):
+        console.print("[bold yellow]FFmpeg not found. Installing...[/bold yellow]")
+        install_package("FFMpeg", break_system_packages=break_system_packages)
 
     if not is_tool_installed("yt-dlp"):
         console.print("[bold yellow]yt-dlp not found. Installing...[/bold yellow]")
@@ -201,12 +195,9 @@ def install_python_packages(packages):
             processed_packages.add(package)
             console.print(f"[bold yellow]Checking for {package}...[/bold yellow]")
 
-            # Check if the package is a Git repository URL
             if package.startswith("https://") and package.endswith(".git"):
-                # Format for pip to recognize as a git repository
                 package = f"git+{package}"
 
-            # Check if the package is already installed
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "show", package],
                 capture_output=True,
