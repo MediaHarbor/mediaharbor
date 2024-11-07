@@ -35,6 +35,12 @@ function getResourcePath(filename) {
     return path.join(__dirname, filename).replace(/\\/g, '/');
 }
 
+ipcMain.on('updateDep', (event, selectedPackages) => {
+    console.log('Received packages:', selectedPackages); // For debugging
+    event.reply('toggleLoading', true); // Show loading overlay
+    updateDependencies(selectedPackages, event);
+});
+
 ipcMain.handle('get-default-settings', async () => {
     return getDefaultSettings();
 });
@@ -185,6 +191,9 @@ ipcMain.handle('perform-search', async (event, { platform, query, type }) => {
                 break;
             case 'qobuz':
                 command = `${pythonCommand} "${scriptPath}" --search-${type || 'track'} "${query}"`;
+                break;
+            case 'applemusic':
+                command = `${pythonCommand} "${scriptPath}" "${query}" --media_type ${type || 'track'}`;
                 break;
             default:
                 reject(new Error('Invalid platform'));
@@ -342,7 +351,7 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js')
         }
     });
-    win.loadFile(`${__dirname}/index.html`);
+    win.loadFile(`${__dirname}/pages/index.html`);
     setupSettingsHandlers(ipcMain);
     ipcMain.on("clear-database", (event, { failedDownloads, downloads }) => {
         // Check and delete the databases based on the user’s selection
@@ -506,7 +515,7 @@ function createFirstStartWindow() {
             });
         });
     });
-    firstStartWindow.loadFile(`${__dirname}/firststart.html`);
+    firstStartWindow.loadFile(`${__dirname}/pages/firststart.html`);
 
     // Save settings when window is closed OR when setup is complete
     ipcMain.once('setup-complete', () => {
@@ -550,20 +559,53 @@ app.on('activate', () => {
 });
 function getPythonScript(platform) {
     const scriptMap = {
-        youtube: 'ytsearchapi.py',
-        youtubeMusic: 'ytmusicsearchapi.py',
-        spotify: 'spotifyapi.py',
-        tidal: 'tidalapi.py',
-        deezer: 'deezerapi.py',
-        qobuz: 'qobuzapi.py'
+        youtube: './funcs/apis/ytsearchapi.py',
+        youtubeMusic: './funcs//apis/ytmusicsearchapi.py',
+        spotify: './funcs/apis/spotifyapi.py',
+        tidal: './funcs/apis/tidalapi.py',
+        deezer: './funcs/apis/deezerapi.py',
+        qobuz: './funcs/apis/qobuzapi.py',
+        applemusic: './funcs/apis/applemusicapi.py'
     };
     return scriptMap[platform] || '';
 }
 
 function getPythonStreamScript(platform) {
     const scriptMap = {
-        youtube: 'ytvideostream.py',
-        youtubeMusic: 'ytaudiostream.py'
+        youtube: './funcs/apis/ytvideostream.py',
+        youtubeMusic: './funcs/apis/ytaudiostream.py'
     };
     return scriptMap[platform] || '';
+}
+function updateDependencies(packages, event) {
+    if (!Array.isArray(packages)) {
+        console.error("Expected an array of packages.");
+        return;
+    }
+
+    packages.forEach(packageName => {
+        let installCommand = "pip install --upgrade ";
+
+        if (packageName.startsWith("https://")) {
+            installCommand += "git+" + packageName;
+        } else {
+            installCommand += packageName;
+        }
+
+        exec(installCommand, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Error installing ${packageName}:`, error.message);
+                event.reply('showNotification', `Failed to install ${packageName}: ${error.message}`);
+            } else {
+                event.reply('showNotification', `Successfully installed ${packageName}`);
+            }
+            if (stderr) {
+                console.error(`stderr for ${packageName}:`, stderr);
+            }
+            console.log(`stdout for ${packageName}:`, stdout);
+            if (packageName === packages[packages.length - 1]) {
+                event.reply('toggleLoading', false);
+            }
+        });
+    });
 }
