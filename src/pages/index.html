@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/simple-icons-font@v13/font/simple-icons.min.css" type="text/css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="../style.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <title>MediaHarbor Desktop</title>
+</head>
+<body>
+<nav class="navbar">
+    <h1>MediaHarbor</h1>
+    <div class="main-nav">
+        <a href="#" id="musicBtn" class="active"><i class="fas fa-music"></i>Music</a>
+        <a href="#" id="videoBtn"><i class="fas fa-film"></i>Video</a>
+        <a href="#" id="downloadsBtn"><i class="fas fa-download"></i>Downloads</a>
+        <a href="#" id="searchBtn"><i class="fa-solid fa-magnifying-glass"></i>Search</a>
+    </div>
+    <div class="secondary-nav">
+        <a href="#" id="settingsBtn"><i class="fas fa-cogs"></i>Settings</a>
+        <a href="#" id="helpBtn"><i class="fas fa-question-circle"></i>Help</a>
+    </div>
+</nav>
+<div class="main-content" id="content"></div>
+<div id="custom-player" class="custom-player">
+    <div class="player-left">
+        <img id="player-thumbnail" class="player-thumbnail" src="../assets/placeholder.png" alt="Thumbnail">
+        <div class="player-info">
+            <div id="player-title" class="player-title"></div>
+            <div id="player-artist" class="player-artist"></div>
+        </div>
+    </div>
+    <div class="player-controls">
+        <div>
+        <button id="prev-btn" class="player-btn">
+            <i class="fas fa-backward"></i>
+        </button>
+        <button id="play-pause-btn" class="player-btn">
+            <i class="fas fa-play"></i>
+        </button>
+        <button id="next-btn" class="player-btn">
+            <i class="fas fa-forward"></i>
+        </button>
+        </div>
+        <div class="time-controls">
+            <span id="current-time">0:00</span>
+            <div class="progress-bar">
+                <div id="progress" class="progress"></div>
+            </div>
+            <span id="duration">0:00</span>
+        </div>
+    </div>
+
+    <div class="player-right">
+        <div class="volume-controls">
+            <button id="mute-btn" class="player-btn">
+                <i class="fas fa-volume-up" id="volume-icon"></i>
+            </button>
+            <input type="range" id="volume-slider" min="0" max="1" step="0.1" value="1">
+        </div>
+        <button id="fullscreen-btn" class="player-btn">
+            <i class="fas fa-expand"></i>
+        </button>
+    </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
