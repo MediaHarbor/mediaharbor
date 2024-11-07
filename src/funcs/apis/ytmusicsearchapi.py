@@ -46,7 +46,8 @@ def search_youtube_music(query, search_type="songs", raw_response=False):
                     "AlbumTitle": result['album'].get('name', 'Unknown Album'),
                     "AlbumCover": result['thumbnails'][-1]['url'],
                     "ArtistName": result['artists'][0].get('name', 'Unknown Artist') if result.get('artists') else 'Unknown Artist',
-                    "TrackURL": f"https://music.youtube.com/watch?v={result['videoId']}" if 'videoId' in result else 'N/A'
+                    "TrackURL": f"https://music.youtube.com/watch?v={result['videoId']}" if 'videoId' in result else 'N/A',
+                    "Explicit": result.get('isExplicit', False)
                 })
     elif search_type == 'album':
         for result in search_results:
@@ -54,7 +55,8 @@ def search_youtube_music(query, search_type="songs", raw_response=False):
                 "AlbumTitle": result.get('title', 'Unknown Album'),
                 "AlbumCover": result['thumbnails'][-1]['url'] if result.get('thumbnails') else 'N/A',
                 "ArtistName": result['artists'][0].get('name', 'Unknown Artist') if result.get('artists') else 'Unknown Artist',
-                "AlbumURL": f"https://music.youtube.com/browse/{result['browseId']}" if 'browseId' in result else 'N/A'
+                "AlbumURL": f"https://music.youtube.com/browse/{result['browseId']}" if 'browseId' in result else 'N/A',
+                "Explicit": result.get('isExplicit', False)
             })
     elif search_type == 'playlist':
         for result in search_results:
