@@ -79,8 +79,7 @@ async function saveSettings(event, settings) {
     }
 
     // Update output paths
-    let spotifyOutputPath, appleOutputPath;
-    if (settings.createPlatformSubfolders) {
+    let spotifyOutputPath, appleOutputPath;if (settings.createPlatformSubfolders) {
         spotifyOutputPath = path.join(settings.downloadLocation, "Spotify");
         appleOutputPath = path.join(settings.downloadLocation, "Apple Music");
     } else {
@@ -112,7 +111,10 @@ async function saveSettings(event, settings) {
         }
 
         try {
-            const data = await fs.promises.readFile(paths.configPath, 'utf8');
+            const normalizedConfigPath = path.normalize(paths.configPath);
+            console.log('Attempting to read from normalized path:', normalizedConfigPath);
+
+            const data = await fs.promises.readFile(normalizedConfigPath, 'utf8');
             let config = {};
 
             try {
@@ -186,17 +188,24 @@ async function saveSettings(event, settings) {
                         ? []
                         : settings.excluded_tags.split(/\s+/)
             };
+            config.filepaths = {
+                add_singles_to_folder: settings.filepaths_add_singles_to_folder,
+                folder_format: settings.filepaths_folder_format,
+                track_format: settings.filepaths_track_format,
+                restrict_characters: settings.filepaths_restrict_characters,
+                truncate_to: settings.filepaths_truncate_to,
+            };
             config.misc = {
                 version: '2.0.6',
                 check_for_updates: 'false'
             }
-
             const tomlString = TOML.stringify(config);
-            await fs.promises.writeFile(paths.configPath, tomlString, 'utf8');
+            await fs.promises.writeFile(normalizedConfigPath, tomlString, 'utf8');
             event.reply('settings-saved', 'Settings saved successfully');
         } catch (err) {
             console.error('Error handling streamrip config:', err);
-            event.reply('settings-error', 'Failed to update streamrip configuration');
+            console.error('Attempted path:', paths.configPath);
+            event.reply('settings-error', `Failed to update streamrip configuration: ${err.message}`);
         }
     });
 }
@@ -310,7 +319,6 @@ function getStreamripPaths(callback) {
     });
 
     streamripProcess.on('error', (err) => {
-        // Handle the case where custom_rip is not installed
         console.warn('custom_rip is not installed:', err);
         callback(null);
     });
@@ -322,10 +330,21 @@ function getStreamripPaths(callback) {
             return;
         }
 
-        const configPathMatch = stdout.match(/Config path: '(.+)'/);
+        const configPathMatch = stdout.match(/Config path: '([^']+)'/);
         if (configPathMatch && configPathMatch[1]) {
-            const configPath = configPathMatch[1];
+
+            const rawPath = configPathMatch[1]
+                .replace(/\n/g, '')
+                .replace(/\r/g, '')
+                .replace(/\\+/g, '/')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            const configPath = path.normalize(rawPath);
             const configDir = path.dirname(configPath);
+            console.log('Raw matched path:', configPathMatch[1]);
+            console.log('Cleaned path:', rawPath);
+            console.log('Normalized config path:', configPath);
 
             const paths = {
                 configPath: configPath,
@@ -340,6 +359,7 @@ function getStreamripPaths(callback) {
         }
     });
 }
+
 
 function setupSettingsHandlers(ipcMain) {
     ipcMain.on('load-settings', (event) => {
