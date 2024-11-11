@@ -6,7 +6,16 @@ const { app } = require("electron");
 const { saveDownloadToDatabase } = require("./db");
 const { fetchWebsiteTitle, extractDomain, fetchHighResImageOrFavicon } = require("./fetchers");
 const { getNextDownloadOrder } = require('./downloadorder');
+let fixPath;
 let downloadCount = 0;
+
+if (process.platform === 'darwin' || process.platform === 'linux') {
+    import('fix-path').then((module) => {
+        fixPath = module.default;
+        fixPath();
+    }).catch(err => console.error('Failed to import fix-path:', err));
+}
+
 const activeDownloads = new Map();
 function buildYtDlpMusicArgs(url, quality, settings) {
     const downloadPath = settings.downloadLocation || path.join(os.homedir(), 'Downloads');
@@ -178,7 +187,10 @@ async function handleYtDlpMusicDownload(event, data, settings) {
         url
     ];
 
-    const videoInfoProcess = spawn(ytDlpCommand, videoInfoArgs);
+    const videoInfoProcess = spawn(ytDlpCommand, videoInfoArgs, {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        shell: process.platform === 'linux'
+    });
     let videoInfo = { title: '', uploader: '', thumbnail: '' };
     let outputLines = [];
 
@@ -243,7 +255,10 @@ async function handlePlaylistDownload(event, url, quality, settings, downloadId)
         url
     ];
 
-    const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs);
+    const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs, {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        shell: process.platform === 'linux'
+    });
     let playlistInfo = { title: '', uploader: '', thumbnail: '', totalVideos: 0 };
     let outputLines = [];
 
@@ -310,7 +325,10 @@ async function handlePlaylistDownload(event, url, quality, settings, downloadId)
     }
     downloadArgs.push('--yes-playlist');
 
-    const ytDlp = spawn(ytDlpCommand, downloadArgs);
+    const ytDlp = spawn(ytDlpCommand, downloadArgs, {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        shell: process.platform === 'linux'
+    });
     let lastProgressUpdate = Date.now();
 
     ytDlp.stdout.on('data', (data) => {
@@ -435,7 +453,10 @@ function startMusicDownload(event, url, quality, settings, videoInfo, downloadId
     let isAlreadyDownloaded = false;
     let lastProgressUpdate = Date.now();
 
-    const ytDlp = spawn(ytDlpCommand, args);
+    const ytDlp = spawn(ytDlpCommand, args, {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        shell: process.platform === 'linux'
+    });
 
     ytDlp.stdout.on('data', (data) => {
         const output = data.toString();
@@ -512,65 +533,68 @@ async function handleYtDlpDownload(event, data, settings, isGeneric = false) {
     const ytDlpCommand = 'yt-dlp';
     const downloadId = getNextDownloadOrder();
     if (!isPlaylist){
-    // Store initial state in activeDownloads
-    activeDownloads.set(downloadId, {
-        url,
-        type: isGeneric ? 'generic' : 'video',
-        infoFetched: false
-    });
+        // Store initial state in activeDownloads
+        activeDownloads.set(downloadId, {
+            url,
+            type: isGeneric ? 'generic' : 'video',
+            infoFetched: false
+        });
 
-    if (!isGeneric) {
-        const videoInfoArgs = [
-            '--print', '%(title)s',
-            '--print', '%(uploader)s',
-            '--print', '%(thumbnail)s',
-            '--no-download',
-            url
-        ];
+        if (!isGeneric) {
+            const videoInfoArgs = [
+                '--print', '%(title)s',
+                '--print', '%(uploader)s',
+                '--print', '%(thumbnail)s',
+                '--no-download',
+                url
+            ];
 
-        const videoInfoProcess = spawn(ytDlpCommand, videoInfoArgs);
-        let videoInfo = { title: '', uploader: '', thumbnail: '' };
-        let outputLines = [];
+            const videoInfoProcess = spawn(ytDlpCommand, videoInfoArgs, {
+                env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+                shell: process.platform === 'linux'
+            });
+            let videoInfo = { title: '', uploader: '', thumbnail: '' };
+            let outputLines = [];
 
-        videoInfoProcess.stdout.on('data', (data) => {
-            const output = data.toString().split('\n').filter(line => line.trim());
-            outputLines = outputLines.concat(output);
+            videoInfoProcess.stdout.on('data', (data) => {
+                const output = data.toString().split('\n').filter(line => line.trim());
+                outputLines = outputLines.concat(output);
 
-            if (outputLines.length >= 3 && !activeDownloads.get(downloadId).infoFetched) {
-                videoInfo.title = outputLines[0].trim();
-                videoInfo.uploader = outputLines[1].trim();
-                videoInfo.thumbnail = outputLines[2].trim();
+                if (outputLines.length >= 3 && !activeDownloads.get(downloadId).infoFetched) {
+                    videoInfo.title = outputLines[0].trim();
+                    videoInfo.uploader = outputLines[1].trim();
+                    videoInfo.thumbnail = outputLines[2].trim();
 
-                if (!videoInfo.thumbnail.startsWith('http')) {
-                    videoInfo.thumbnail = 'https:' + videoInfo.thumbnail;
+                    if (!videoInfo.thumbnail.startsWith('http')) {
+                        videoInfo.thumbnail = 'https:' + videoInfo.thumbnail;
+                    }
+
+                    // Mark that we've fetched info for this download
+                    activeDownloads.get(downloadId).infoFetched = true;
+
+                    event.reply('youtube-video-info', {
+                        title: videoInfo.title,
+                        uploader: videoInfo.uploader,
+                        thumbnail: videoInfo.thumbnail,
+                        order: downloadId
+                    });
+
+                    outputLines = [];
                 }
+            });
 
-                // Mark that we've fetched info for this download
-                activeDownloads.get(downloadId).infoFetched = true;
-
-                event.reply('youtube-video-info', {
-                    title: videoInfo.title,
-                    uploader: videoInfo.uploader,
-                    thumbnail: videoInfo.thumbnail,
-                    order: downloadId
-                });
-
-                outputLines = [];
-            }
-        });
-
-        videoInfoProcess.on('exit', () => {
-            if (videoInfo.title) {
-                startDownload(event, url, quality, settings, videoInfo, downloadId, isGeneric);
-            } else {
-                event.reply('download-error', `Failed to fetch video info for ${url}`);
-                activeDownloads.delete(downloadId);
-            }
-        });
-    } else {
-        startDownload(event, url, quality, settings, null, downloadId, isGeneric);
+            videoInfoProcess.on('exit', () => {
+                if (videoInfo.title) {
+                    startDownload(event, url, quality, settings, videoInfo, downloadId, isGeneric);
+                } else {
+                    event.reply('download-error', `Failed to fetch video info for ${url}`);
+                    activeDownloads.delete(downloadId);
+                }
+            });
+        } else {
+            startDownload(event, url, quality, settings, null, downloadId, isGeneric);
+        }
     }
-}
     else {
         await handleVideoPlaylistDownload(event, url, quality, settings, downloadId);
     }
@@ -602,7 +626,10 @@ async function startDownload(event, url, quality, settings, videoInfo = null, do
         });
     }
 
-    const ytDlp = spawn(ytDlpCommand, args);
+    const ytDlp = spawn(ytDlpCommand, args, {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        shell: process.platform === 'linux'
+    });
 
     ytDlp.stdout.on('data', (data) => {
         const output = data.toString();
@@ -663,7 +690,10 @@ async function handleVideoPlaylistDownload(event, url, quality, settings, downlo
         url
     ];
 
-    const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs);
+    const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs, {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        shell: process.platform === 'linux'
+    });
     let playlistInfo = { title: '', uploader: '', thumbnail: '', totalVideos: 0 };
     let outputLines = [];
 
@@ -713,7 +743,10 @@ async function handleVideoPlaylistDownload(event, url, quality, settings, downlo
         url
     ];
 
-    const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs);
+    const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs, {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        shell: process.platform === 'linux'
+    });
     let playlistInfo = { title: '', uploader: '', thumbnail: '', totalVideos: 0 };
     let outputLines = [];
 
@@ -793,7 +826,10 @@ async function startVideoPlaylistDownload(event, url, quality, settings, playlis
     }
     args.push('--yes-playlist');
 
-    const ytDlp = spawn(ytDlpCommand, args);
+    const ytDlp = spawn(ytDlpCommand, args, {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        shell: process.platform === 'linux'
+    });
 
     let lastProgressUpdate = Date.now();
 
