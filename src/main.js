@@ -1,7 +1,6 @@
-const { app, BrowserWindow, ipcMain,dialog } = require('electron');
-const { shell } = require('electron');
-const { exec } = require('child_process');
-const { spawn } = require('child_process');
+const {clipboard , Menu, MenuItem, app, BrowserWindow, ipcMain,dialog, shell  } = require('electron');
+const { exec, spawn } = require('child_process');
+const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const UpdateChecker = require('./funcs/updatechecker')
@@ -16,6 +15,45 @@ const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
 let settings = loadTheSettings();
 const downloadsDatabasePath = settings.downloads_database;
 const failedDownloadsDatabasePath = settings.failed_downloads_database
+const sudo = require('sudo-prompt');
+if (process.platform === 'darwin' || process.platform === 'linux') {
+    import('fix-path').then((module) => {
+        module.default();
+    }).catch(err => console.error('Failed to load fix-path:', err));
+}
+function setupContextMenu(win) {
+    win.webContents.on('context-menu', (event, params) => {
+        if (params.isEditable) {
+            const hasSelection = params.selectionText.trim().length > 0;
+            const clipboardHasText = clipboard.availableFormats().includes('text/plain');
+            // Create the context menu
+            const contextMenu = new Menu();
+            contextMenu.append(new MenuItem({
+                label: 'Cut',
+                role: 'cut',
+                enabled: hasSelection
+            }));
+            contextMenu.append(new MenuItem({
+                label: 'Copy',
+                role: 'copy',
+                enabled: hasSelection
+            }));
+            contextMenu.append(new MenuItem({
+                label: 'Paste',
+                role: 'paste',
+                enabled: clipboardHasText
+            }));
+            contextMenu.append(new MenuItem({ type: 'separator' }));
+            contextMenu.append(new MenuItem({
+                label: 'Select All',
+                role: 'selectall'
+            }));
+            // Show the context menu
+            contextMenu.popup({ window: win });
+        }
+    });
+}
+
 
 function loadTheSettings() {
     try {
@@ -352,6 +390,7 @@ function createWindow() {
         }
     });
     win.loadFile(`${__dirname}/pages/index.html`);
+    setupContextMenu(win);
     setupSettingsHandlers(ipcMain);
     ipcMain.on("clear-database", (event, { failedDownloads, downloads }) => {
         // Check and delete the databases based on the user’s selection
@@ -449,7 +488,7 @@ function createWindow() {
 }
 
 
-function createFirstStartWindow() {
+async function createFirstStartWindow() {
     const firstStartWindow = new BrowserWindow({
         width: 780,
         height: 500,
@@ -463,11 +502,15 @@ function createFirstStartWindow() {
             preload: path.join(__dirname, 'preload.js'),
         },
     });
-
+    const pythonInstalled = await isPythonInstalled();
+    firstStartWindow.webContents.on('did-finish-load', () => {
+        firstStartWindow.webContents.send('python-check', pythonInstalled);
+    });
     ipcMain.on('spawn-tidal-config', async () => {
-        const customRipCommand = process.platform === 'win32' ? 'custom_rip' : './custom_rip';
+        const customRipCommand = 'custom_rip';
+        const command = `${customRipCommand} url https://tidal.com/track/1`;
 
-        const authProcess = spawn(customRipCommand, ["url", "https://tidal.com/track/1"], {
+        const authProcess = exec(command, {
             env: {
                 ...process.env,
                 PATH: process.env.PATH
@@ -483,41 +526,38 @@ function createFirstStartWindow() {
         });
     });
 
+
     ipcMain.on('install-services', async (event, services) => {
         const pythonCommand = await getPythonCommand();
-        const pythonProcess = spawn(pythonCommand, [getResourcePath('start.py'), ...services], {
-            env: {
-                ...process.env,
-                PATH: process.env.PATH
+        const scriptPath = getResourcePath('start.py');
+        const command = `"${pythonCommand}" "${scriptPath}" ${services.join(' ')}`;
+        const options = {
+            name: 'MediaHarbor',
+        };
+        sudo.exec(command, options, (error, stdout, stderr) => {
+            if (error) {
+                event.sender.send('python-output', {
+                    type: 'error',
+                    data: stderr || error.message,
+                });
+                return;
             }
-        });
-        pythonProcess.stdout.on('data', (data) => {
-            // Send the output back to renderer
+
             event.sender.send('python-output', {
                 type: 'output',
-                data: data.toString()
+                data: stdout,
             });
-        });
-        setupSettingsHandlers(ipcMain);
-        pythonProcess.stderr.on('data', (data) => {
-            // Send error output back to renderer
-            event.sender.send('python-output', {
-                type: 'error',
-                data: data.toString()
-            });
-        });
 
-        pythonProcess.on('close', (code) => {
-            // Send completion status back to renderer
+            setupSettingsHandlers(ipcMain);
             event.sender.send('python-output', {
                 type: 'complete',
-                code: code
+                code: 0,
             });
         });
     });
+
     firstStartWindow.loadFile(`${__dirname}/pages/firststart.html`);
 
-    // Save settings when window is closed OR when setup is complete
     ipcMain.once('setup-complete', () => {
         settings.firstTime = false;
         fs.writeFileSync('./mh-settings.json', JSON.stringify(settings, null, 2));
@@ -577,34 +617,84 @@ function getPythonStreamScript(platform) {
     };
     return scriptMap[platform] || '';
 }
+function getPipCommand() {
+    const platform = os.platform();
+    switch (platform) {
+        case 'win32':
+            return 'py -m pip';  // Use py launcher with -m pip on Windows
+        case 'darwin':
+        case 'linux':
+            return 'python3 -m pip';
+        default:
+            return 'pip';
+    }
+}
+
+function sanitizePackageName(packageName) {
+    return packageName.replace(/[;&|`$]/g, '');
+}
+
 function updateDependencies(packages, event) {
     if (!Array.isArray(packages)) {
         console.error("Expected an array of packages.");
         return;
     }
 
-    packages.forEach(packageName => {
-        let installCommand = "pip install --upgrade ";
+    console.log('Received packages:', packages);
+    const pipCommand = getPipCommand();
+    let completedCount = 0;
 
-        if (packageName.startsWith("https://")) {
-            installCommand += "git+" + packageName;
-        } else {
-            installCommand += packageName;
+    packages.forEach(packageName => {
+        const sanitizedPackage = sanitizePackageName(packageName);
+        let installCommand = `${pipCommand} install --upgrade "${sanitizedPackage}"`;
+
+        // Add --user flag for non-root installations on Unix systems
+        if (os.platform() !== 'win32') {
+            installCommand += ' --user';
         }
 
-        exec(installCommand, (error, stdout, stderr) => {
+        console.log(`Executing: ${installCommand}`);
+
+        exec(installCommand, { shell: true }, (error, stdout, stderr) => {
+            completedCount++;
+
             if (error) {
-                console.error(`Error installing ${packageName}:`, error.message);
-                event.reply('showNotification', `Failed to install ${packageName}: ${error.message}`);
+                console.error(`Error installing ${sanitizedPackage}:`, error.message);
+                event.reply('showNotification', {
+                    type: 'error',
+                    message: `Failed to install ${sanitizedPackage}: ${error.message}`
+                });
             } else {
-                event.reply('showNotification', `Successfully installed ${packageName}`);
+                event.reply('showNotification', {
+                    type: 'success',
+                    message: `Successfully installed ${sanitizedPackage}`
+                });
             }
+
             if (stderr) {
-                console.error(`stderr for ${packageName}:`, stderr);
+                console.warn(`stderr for ${sanitizedPackage}:`, stderr);
             }
-            console.log(`stdout for ${packageName}:`, stdout);
-            if (packageName === packages[packages.length - 1]) {
+            console.log(`stdout for ${sanitizedPackage}:`, stdout);
+
+            if (completedCount === packages.length) {
                 event.reply('toggleLoading', false);
+            }
+        });
+    });
+}
+function isPythonInstalled() {
+    return new Promise((resolve) => {
+        exec('python --version', (error, stdout, stderr) => {
+            if (error) {
+                exec('python3 --version', (error2, stdout2, stderr2) => {
+                    if (error2) {
+                        resolve(false);
+                    } else {
+                        resolve(true);
+                    }
+                });
+            } else {
+                resolve(true);
             }
         });
     });
