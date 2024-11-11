@@ -36,7 +36,7 @@
     <div id="youtube" class="tab-content active">
         <h2>YouTube</h2>
         <input type="text" id="youtube-url" placeholder="Enter YouTube URL">
-        <label style="display: contents">
+        <label class="checkbox-label">
             Playlist <input type="checkbox" id="youtube-playlist">
         </label>
         <div class="dropdown" id="youtube-quality">
@@ -54,12 +54,12 @@
         <h2>Qobuz</h2>
         <input type="text" id="qobuz-url" placeholder="Enter Qobuz URL">
         <div class="dropdown" id="qobuz-quality">
-            <button data-value="1" class="dropdown-btn">320 kbps MP3</button>
+            <button data-value="4" class="dropdown-btn">24 bit, ≤ 192 kHz</button>
             <div class="dropdown-content">
-                <a href="#" data-value="1">320 kbps MP3</a>
-                <a href="#" data-value="2">16 bit, 44.1 kHz (CD)</a>
-                <a href="#" data-value="3">24 bit, ≤ 96 kHz</a>
                 <a href="#" data-value="4">24 bit, ≤ 192 kHz</a>
+                <a href="#" data-value="3">24 bit, ≤ 96 kHz</a>
+                <a href="#" data-value="2">16 bit, 44.1 kHz (CD)</a>
+                <a href="#" data-value="1">320 kbps MP3</a>
             </div>
         </div>
         <button id="qobuz-download-button">Download</button>
@@ -70,12 +70,12 @@
         <h2>Tidal</h2>
         <input type="text" id="tidal-url" placeholder="Enter Tidal URL">
         <div class="dropdown" id="tidal-quality">
-            <button data-value="0" class="dropdown-btn">128 kbps AAC</button>
+            <button data-value="3" class="dropdown-btn">24 bit, ≤ 96 kHz (MQA)</button>
             <div class="dropdown-content">
-                <a href="#" data-value="0">128 kbps AAC</a>
-                <a href="#" data-value="1">320 kbps AAC</a>
-                <a href="#" data-value="2">16 bit, 44.1 kHz (CD)</a>
                 <a href="#" data-value="3">24 bit, ≤ 96 kHz (MQA)</a>
+                <a href="#" data-value="2">16 bit, 44.1 kHz (CD)</a>
+                <a href="#" data-value="1">320 kbps AAC</a>
+                <a href="#" data-value="0">128 kbps AAC</a>
             </div>
         </div>
         <button id="tidal-download-button">Download</button>
@@ -86,11 +86,11 @@
         <h2>Deezer</h2>
         <input type="text" id="deezer-url" placeholder="Enter Deezer URL">
         <div class="dropdown" id="deezer-quality">
-            <button data-value="0" class="dropdown-btn">128 kbps MP3</button>
+            <button data-value="2" class="dropdown-btn">16 bit, 44.1 kHz (CD)</button>
             <div class="dropdown-content">
-                <a href="#" data-value="0">128 kbps MP3</a>
-                <a href="#" data-value="1">320 kbps MP3</a>
                 <a href="#" data-value="2">16 bit, 44.1 kHz (CD)</a>
+                <a href="#" data-value="1">320 kbps MP3</a>
+                <a href="#" data-value="0">128 kbps MP3</a>
             </div>
         </div>
         <button id="deezer-download-button">Download</button>
@@ -101,11 +101,11 @@
         <h2>Spotify</h2>
         <input type="text" id="spotify-url" placeholder="Enter Spotify URL">
         <div class="dropdown" id="spotify-quality">
-            <button data-value="vorbis-low" class="dropdown-btn">96 kbps</button>
+            <button data-value="vorbis-high" class="dropdown-btn">320 kbps</button>
             <div class="dropdown-content">
-                <a href="#" data-value="vorbis-low">96 kbps</a>
-                <a href="#" data-value="vorbis-medium">160 Kbps</a>
                 <a href="#" data-value="vorbis-high">320 kbps</a>
+                <a href="#" data-value="vorbis-medium">160 Kbps</a>
+                <a href="#" data-value="vorbis-low">96 kbps</a>
             </div>
         </div>
         <button id="spotify-download-button">Download</button>
@@ -122,8 +122,8 @@
                 <a href="#" data-value="aac-he-legacy">64 kbps</a>
             </div>
         </div>
-        <button>
-        <span class="fas fa-circle-info helpPop">
+        <button class="helpPop">
+        <span class="fas fa-circle-info">
             <div class="help-popup-content">
                 <h3>
                     Currently the best Apple Music CLI I could find is GAMDL. If you have a better option, create a new issue

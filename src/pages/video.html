@@ -15,7 +15,7 @@
     <div id="youtube" class="tab-content active">
         <h2>YouTube Downloader</h2>
         <input type="text" id="youtube-url" placeholder="Enter YouTube URL">
-        <label style="display: contents">
+        <label class="checkbox-label">
             Playlist
             <input type="checkbox" id="youtube-video-playlist">
         </label>
@@ -23,18 +23,18 @@
             <button class="dropdown-btn">Best Quality</button>
             <div class="dropdown-content">
                 <a href="#" data-value="bestvideo+bestaudio">Best Quality</a>
-                <a href="#" data-value="bestvideo[height<=144]+bestaudio">144p</a>
-                <a href="#" data-value="bestvideo[height<=240]+bestaudio">240p</a>
-                <a href="#" data-value="bestvideo[height<=360]+bestaudio">360p</a>
-                <a href="#" data-value="bestvideo[height<=480]+bestaudio">480p</a>
-                <a href="#" data-value="bestvideo[height<=720]+bestaudio">720p</a>
-                <a href="#" data-value="bestvideo[height<=1080]+bestaudio">1080p</a>
-                <a href="#" data-value="bestvideo[height<=1440]+bestaudio">2K</a>
-                <a href="#" data-value="bestvideo[height<=2160]+bestaudio">4K</a>
-                <a href="#" data-value="bestvideo[height<=1080][fps>30]+bestaudio">1080p60</a>
-                <a href="#" data-value="bestvideo[height<=720][fps>30]+bestaudio">720p60</a>
-                <a href="#" data-value="bestvideo[height<=1440][fps>30]+bestaudio">2K60</a>
                 <a href="#" data-value="bestvideo[height<=2160][fps>30]+bestaudio">4K60</a>
+                <a href="#" data-value="bestvideo[height<=2160]+bestaudio">4K</a>
+                <a href="#" data-value="bestvideo[height<=1440][fps>30]+bestaudio">2K60</a>
+                <a href="#" data-value="bestvideo[height<=1440]+bestaudio">2K</a>
+                <a href="#" data-value="bestvideo[height<=1080][fps>30]+bestaudio">1080p60</a>
+                <a href="#" data-value="bestvideo[height<=1080]+bestaudio">1080p</a>
+                <a href="#" data-value="bestvideo[height<=720][fps>30]+bestaudio">720p60</a>
+                <a href="#" data-value="bestvideo[height<=720]+bestaudio">720p</a>
+                <a href="#" data-value="bestvideo[height<=480]+bestaudio">480p</a>
+                <a href="#" data-value="bestvideo[height<=360]+bestaudio">360p</a>
+                <a href="#" data-value="bestvideo[height<=240]+bestaudio">240p</a>
+                <a href="#" data-value="bestvideo[height<=144]+bestaudio">144p</a>
             </div>
         </div>
         <button id="youtube-download-button">Download</button>
@@ -47,14 +47,14 @@
             <button class="dropdown-btn">Best Quality</button>
             <div class="dropdown-content">
                 <a href="#" data-value="bestvideo+bestaudio">Best Quality</a>
-                <a href="#" data-value="bestvideo[height<=144]+bestaudio">144p</a>
-                <a href="#" data-value="bestvideo[height<=240]+bestaudio">240p</a>
-                <a href="#" data-value="bestvideo[height<=360]+bestaudio">360p</a>
-                <a href="#" data-value="bestvideo[height<=480]+bestaudio">480p</a>
-                <a href="#" data-value="bestvideo[height<=540]+bestaudio">540p</a>
-                <a href="#" data-value="bestvideo[height<=720]+bestaudio">720p</a>
-                <a href="#" data-value="bestvideo[height<=960]+bestaudio">960p</a>
                 <a href="#" data-value="bestvideo[height<=1080]+bestaudio">1080p</a>
+                <a href="#" data-value="bestvideo[height<=960]+bestaudio">960p</a>
+                <a href="#" data-value="bestvideo[height<=720]+bestaudio">720p</a>
+                <a href="#" data-value="bestvideo[height<=540]+bestaudio">540p</a>
+                <a href="#" data-value="bestvideo[height<=480]+bestaudio">480p</a>
+                <a href="#" data-value="bestvideo[height<=360]+bestaudio">360p</a>
+                <a href="#" data-value="bestvideo[height<=240]+bestaudio">240p</a>
+                <a href="#" data-value="bestvideo[height<=144]+bestaudio">144p</a>
             </div>
         </div>
         <div class="dropdown" id="generic-site">
