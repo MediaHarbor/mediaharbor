@@ -65,14 +65,14 @@ function getDefaultSettings() {
         tidal_token_expiry: "",
         // Deezer
         deezer_quality: 1,
-        deezer_use_deezloader: true,
+        deezer_use_deezloader: false,
         deezer_arl: "",
         deezloader_warnings: true,
 
         downloads_database_check: false,
-        downloads_database: "/path/to/downloads/downloads.db.db",
+        downloads_database: "",
         failed_downloads_database_check: false,
-        failed_downloads_database: "/path/to/failed/downloads/failed_downloads.db",
+        failed_downloads_database: "",
         conversion_check: false,
         conversion_codec: "MP3",
         conversion_sampling_rate: 44100,
@@ -82,7 +82,9 @@ function getDefaultSettings() {
         meta_album_order_playlist_check: false,
         meta_exclude_tags_check: false,
         excluded_tags: "",
-
+        filepaths_add_singles_to_folder: true,
+        filepaths_folder_format: "{albumartist} - {title} ({year}) [{container}] [{bit_depth}B-{sampling_rate}kHz]",
+        filepaths_track_format: "{tracknumber:02}. {artist} - {title}{explicit}",
         // Spotify Settings
         spotify_cookies_path: "",
         spotify_wvd_path: "",
