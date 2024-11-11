@@ -593,8 +593,58 @@
                                 Change Album Track Order to Playlist's Order
                             </label>
                         </div>
-                        <div id="meta_exclude_tags_form">
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="filepaths_add_singles_to_folder">
+                                Create Album Folder for Singles
+                            </label>
+                        </div>
+                        <div>
 
+                                <label>
+                                    Folder Format
+                                        <div style="display:flex;">
+                                    <input type="text" id="filepaths_folder_format">
+                                    <button class="helpPop">
+                                        <span class="fas fa-circle-info">
+                                            <div class="help-popup-content">
+                                                <h3 style="color: #45a049!important;">
+                                                    Available keys: "albumartist", "title", "year", "bit_depth", "sampling_rate", "id", and "albumcomposer"
+                                                </h3>
+                                            </div>
+                                        </span>
+                                    </button>
+                                </label>
+                            </div>
+                        </div>
+                        <div>
+                                <label>
+                                    Track Format
+                                        <div style="display: flex">
+                                    <input type="text" id="filepaths_track_format">
+                                    <button class="helpPop">
+                                        <span class="fas fa-circle-info">
+                                            <div class="help-popup-content">
+                                                <h3 style="color: #45a049!important;">
+                                                    Available keys: "tracknumber", "artist", "albumartist", "composer", "title", and "albumcomposer", "explicit"
+                                                </h3>
+                                            </div>
+                                        </span>
+                                    </button>
+                                </label>
+                            </div>
+
+                        </div>
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="filepaths_restrict_characters">
+                                Restrict Characters
+                            </label>
+                        </div>
+                        <div  class="dependent-field" id="filepaths_restrict_characters_form">
+                            <input type="number" id="filepaths_truncate_to">
+                        </div>
+                        <div id="meta_exclude_tags_form">
                             <label>
                                 Excluded Tags
                                 <div style="display: flex">
@@ -608,7 +658,6 @@
                     </div>
                 </div>
             </div>
-
     </div>
     </div>
     <div id="search-settings" class="tab-content">
