@@ -720,7 +720,7 @@ body.dark .dropdown-content::-webkit-scrollbar-thumb {
 }
 
 .settings-grid {
-    display: grid;
+    display: block;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 1.5rem;
     padding: 1rem;
@@ -909,7 +909,7 @@ select.dropdown-btn:focus {
 }
 .clear-all-container {
     position: fixed;
-    bottom: 20px;
+    bottom: 100px;
     right: 20px;
     z-index: 1;
 }
@@ -961,18 +961,34 @@ select.dropdown-btn:focus {
 .help-popup-content {
     display: none;
     position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    top: 120%; /* Slightly below the icon */
+    right: 0;
+    top: 120%;
     background-color: #fff;
     padding: 10px;
     border: 1px solid #d9534f;
     border-radius: 5px;
     z-index: 10;
     width: 300px;
+    max-width: calc(100vw - 20px);
+    font-size: inherit;
+}
+.dark .help-popup-content {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 120%;
+    background-color: #333;
+    color: #fff;
+    padding: 10px;
+    border: 1px solid #444;
+    border-radius: 5px;
+    z-index: 10;
+    width: 300px;
+    max-width: calc(100vw - 20px);
     font-family: "Segoe UI";
     font-size: inherit;
 }
+
 
 .helpPop:hover .help-popup-content,
 .help-popup-content:hover {
@@ -1485,4 +1501,14 @@ h3, p, a {
 .fullscreen video {
     width: 100%;
     height: 100%;
+}
+
+#warning-message {
+    display: none;
+    color: #721c24;
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    padding: 15px;
+    margin-bottom: 20px;
 }
