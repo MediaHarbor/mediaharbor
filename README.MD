@@ -59,7 +59,7 @@ To start the application, run:
 npm run start
 ```
 
-To build the application for production:
+To build the application:
 
 ```bash
 npm run build
