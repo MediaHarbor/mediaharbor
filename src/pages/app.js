@@ -230,6 +230,7 @@ function inToggleActiveOnChange(checkboxId, fieldSelector) {
 }
 async function initializeDownloadStatusPage() {
     const downloadContainer = document.getElementById('download-history-container');
+    const warningContainer = document.getElementById('database-warning');
 
     try {
         let downloads = await window.electronAPI.getDownloads();
@@ -244,7 +245,6 @@ async function initializeDownloadStatusPage() {
         downloads = downloads.reverse();
 
         const downloadsList = downloads.map(download => {
-            // Replace backslashes with forward slashes and escape special characters
             const escapedLocation = download.downloadLocation
                 .replace(/\\/g, '\\\\')  // Escape backslashes first
                 .replace(/'/g, "\\'");    // Escape single quotes
@@ -277,9 +277,11 @@ async function initializeDownloadStatusPage() {
         downloadContainer.innerHTML = downloadsList;
     } catch (error) {
         console.error('Error loading downloads:', error);
-        downloadContainer.innerHTML = '<p class="error">Error loading downloads: ' + error.message + '</p>';
+        showNotification(`ERROR DATABASE FILE NOT FOUND PLEASE SELECT NEW LOCATION, ${error}`)
+        warningContainer.style.display = 'block';
     }
 }
+
 
 
 // Handle dependent fields
@@ -328,7 +330,8 @@ function handleDependentFields() {
         { checkboxId: 'use_cookies', fieldSelector: '#browser_cookies_form' },
         { checkboxId: 'override_download_extension', fieldSelector: '#override_download_extension_form' },
         { checkboxId: 'yt_override_download_extension', fieldSelector: '#youtubeExtensions' },
-        { checkboxId: 'ytm_override_download_extension', fieldSelector: '#youtubeMusicExtensions' }
+        { checkboxId: 'ytm_override_download_extension', fieldSelector: '#youtubeMusicExtensions' },
+        {checkboxId: 'filepaths_restrict_characters', fieldSelector: '#filepaths_restrict_characters_form'}
     ];
 
     // Set up all mappings
@@ -542,6 +545,7 @@ function populateSettings() {
         'tidal_download_videos': 'checked', 'deezer_use_deezloader': 'checked',
         'deezer_arl': 'value', 'downloads_database_check': 'checked', 'downloads_database': 'value',
         'failed_downloads_database_check': 'checked', 'failed_downloads_database': 'value',
+        'filepaths_add_singles_to_folder': 'checked', 'filepaths_folder_format': 'value', 'filepaths_track_format': 'value', 'filepaths_restrict_characters': 'checked', 'filepaths_truncate_to': 'value',
         'conversion_check': 'checked', 'conversion_codec': 'value', 'conversion_sampling_rate': 'value',
         'conversion_bit_depth': 'value', 'meta_album_name_playlist_check': 'checked',
         'meta_album_order_playlist_check': 'checked','excluded_tags': 'value', 'speed_limit_type': 'value',
@@ -625,6 +629,11 @@ function addSettingsListeners() {
         { id: 'meta_album_name_playlist_check', key: 'meta_album_name_playlist_check', type: 'checked' },
         { id: 'meta_album_order_playlist_check', key: 'meta_album_order_playlist_check', type: 'checked' },
         { id: 'excluded_tags', key: 'excluded_tags', type: 'value' },
+        {id:'filepaths_add_singles_to_folder', key:'filepaths_add_singles_to_folder' ,type:'checked'},
+        {id:'filepaths_folder_format', key:'filepaths_folder_format' ,type:'value'},
+        {id:'filepaths_track_format', key:'filepaths_track_format' ,type:'value'},
+        {id:'filepaths_restrict_characters', key:'filepaths_restrict_characters' ,type:'checked'},
+        {id:'filepaths_truncate_to', key:'filepaths_truncate_to' ,type:'value'},
         {id: 'speed_limit_type', key:'speed_limit_type', type: 'value'},
         {id: 'qobuz_app_id', key: 'qobuz_app_id', type: 'value' },
         {id: 'qobuz_secrets', key: 'qobuz_secrets', type: 'value' },
@@ -1155,19 +1164,19 @@ async function playTrackAtIndex(index) {
 // Quality options for downloading on search.
 const qualityOptions = {
     youtube: [
-        {value:"bestvideo+bestaudio", label:"Best Quality"},
-        {value:"bestvideo[height<=144]+bestaudio", label:"144p"},
-        {value:"bestvideo[height<=240]+bestaudio", label:"240p"},
-        {value:"bestvideo[height<=360]+bestaudio", label:"360p"},
-        {value:"bestvideo[height<=480]+bestaudio", label:"480p"},
-        {value:"bestvideo[height<=720]+bestaudio", label:"720p"},
-        {value:"bestvideo[height<=1080]+bestaudio", label:"1080p"},
-        {value:"bestvideo[height<=1440]+bestaudio", label:"2K"},
-        {value:"bestvideo[height<=2160]+bestaudio", label:"4K"},
-        {value:"bestvideo[height<=1080][fps>30]+bestaudio", label:"1080p60"},
-        {value:"bestvideo[height<=720][fps>30]+bestaudio", label:"720p60"},
-        {value:"bestvideo[height<=1440][fps>30]+bestaudio", label:"2K60"},
-        {value:"bestvideo[height<=2160][fps>30]+bestaudio", label:"4K60"}
+        { value: "bestvideo+bestaudio", label: "Best Quality" },
+        { value: "bestvideo[height<=2160][fps>30]+bestaudio", label: "4K60" },
+        { value: "bestvideo[height<=2160]+bestaudio", label: "4K" },
+        { value: "bestvideo[height<=1440][fps>30]+bestaudio", label: "2K60" },
+        { value: "bestvideo[height<=1440]+bestaudio", label: "2K" },
+        { value: "bestvideo[height<=1080][fps>30]+bestaudio", label: "1080p60" },
+        { value: "bestvideo[height<=1080]+bestaudio", label: "1080p" },
+        { value: "bestvideo[height<=720][fps>30]+bestaudio", label: "720p60" },
+        { value: "bestvideo[height<=720]+bestaudio", label: "720p" },
+        { value: "bestvideo[height<=480]+bestaudio", label: "480p" },
+        { value: "bestvideo[height<=360]+bestaudio", label: "360p" },
+        { value: "bestvideo[height<=240]+bestaudio", label: "240p" },
+        { value: "bestvideo[height<=144]+bestaudio", label: "144p" },
     ],
     youtubeMusic: [
         { value: "0", label: "Best" },
@@ -1175,26 +1184,26 @@ const qualityOptions = {
         { value: "9", label: "Worst" }
     ],
     qobuz: [
-        { value: "1", label: "320 kbps MP3" },
-        { value: "2", label: "16 bit, 44.1 kHz (CD)" },
+        { value: "4", label: "24 bit, ≤ 192 kHz" },
         { value: "3", label: "24 bit, ≤ 96 kHz" },
-        { value: "4", label: "24 bit, ≤ 192 kHz" }
+        { value: "2", label: "16 bit, 44.1 kHz (CD)" },
+        { value: "1", label: "320 kbps MP3" }
     ],
     tidal: [
-        { value: "0", label: "128 kbps AAC" },
-        { value: "1", label: "320 kbps AAC" },
+        { value: "3", label: "24 bit, ≤ 96 kHz (MQA)" },
         { value: "2", label: "16 bit, 44.1 kHz (CD)" },
-        { value: "3", label: "24 bit, ≤ 96 kHz (MQA)" }
+        { value: "1", label: "320 kbps AAC" },
+        { value: "0", label: "128 kbps AAC" }
     ],
     deezer: [
-        { value: "0", label: "128 kbps MP3" },
+        { value: "2", label: "16 bit, 44.1 kHz (CD)" },
         { value: "1", label: "320 kbps MP3" },
-        { value: "2", label: "16 bit, 44.1 kHz (CD)" }
+        { value: "0", label: "128 kbps MP3" }
     ],
     spotify: [
-        { value: "vorbis-low", label: "96 kbps" },
+        { value: "vorbis-high", label: "320 kbps" },
         { value: "vorbis-medium", label: "160 kbps" },
-        { value: "vorbis-high", label: "320 kbps" }
+        { value: "vorbis-low", label: "96 kbps" }
     ],
     appleMusic: [
         { value: "aac-legacy", label: "256 kbps" },
@@ -1436,7 +1445,7 @@ function initializePlayerControls(mediaElement, isVideo) {
 
     volumeSlider.oninput = (e) => {
         mediaElement.volume = e.target.value;
-        if (e.target.value == 0) {
+        if (e.target.value === 0) {
             muteBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
         } else {
             muteBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
