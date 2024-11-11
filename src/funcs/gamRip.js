@@ -8,7 +8,11 @@ class gamRip {
         this.settingsFilePath = settingsFilePath;
         this.app = app;
         this.saveDownloadToDatabase = dbFunctions.saveDownloadToDatabase;
-
+        if (process.platform === 'darwin' || process.platform === 'linux') {
+            import('fix-path').then((module) => {
+                module.default();
+            }).catch(err => console.error('Failed to load fix-path:', err));
+        }
         // Dynamic service configuration
         this.serviceConfig = {
             spotify: {
