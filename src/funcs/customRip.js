@@ -6,17 +6,29 @@ const { getPythonCommand } = require("./spawner");
 const path = require("path");
 const { app } = require("electron");
 
+
 class CustomRip {
     constructor(settingsFilePath, app, dbFunctions) {
         this.settingsFilePath = settingsFilePath;
         this.app = app;
         this.saveDownloadToDatabase = dbFunctions.saveDownloadToDatabase;
         this.debug = true;
+        if (process.platform === 'darwin' || process.platform === 'linux') {
+            import('fix-path').then((module) => {
+                module.default();
+            }).catch(err => console.error('Failed to load fix-path:', err));
+        }
+
         this.errorHandlers = {
             'AuthenticationError: Invalid credentials': 'Invalid Credentials',
             'Found invalid url': 'Invalid URL detected, skipping.',
-            'Enter your Qobuz email': 'Enter your credintals on settings!'
-            // More will be added
+            'Enter': 'Enter your credintals on settings!',
+            'ClientConnectorCertificateError': `
+        SSL verification failed. Try:
+        1. Run "Install Certificates.command" in your Python directory.
+        2. Ensure Python & aiohttp are up-to-date.
+        For more help, contact support.
+    `
         };
         this.serviceConfig = {
             qobuz: {
@@ -98,11 +110,11 @@ class CustomRip {
             PYTHONIOENCODING: 'utf-8',
             LANG: 'en_US.UTF-8',
             LC_ALL: 'en_US.UTF-8',
-            FORCE_COLOR: '0', // Disables color
+            FORCE_COLOR: '0', 
             DEBUG: this.debug ? '1' : '0'
         };
 
-        if (process.platform === 'linux') {
+        if (process.platform === 'linux' || process.platform === 'darwin') {
             const additionalPaths = [
                 '/usr/local/bin',
                 '/usr/bin',
@@ -113,7 +125,7 @@ class CustomRip {
             const currentPath = process.env.PATH || '';
             baseEnv.PATH = additionalPaths.join(path.delimiter) + path.delimiter + currentPath;
 
-            this.log('Linux PATH:', baseEnv.PATH);
+            this.log('macOS/Linux PATH:', baseEnv.PATH);
         }
 
         this.log('Process Environment:', baseEnv);
@@ -352,12 +364,12 @@ class CustomRip {
 
     getPythonScript(serviceName) {
         const scriptMap = {
-            youtube: './apis/ytsearchapi.py',
-            youtubeMusic: './apis/ytmusicsearchapi.py',
-            spotify: './apis/spotifyapi.py',
-            tidal: './apis/tidalapi.py',
-            deezer: './apis/deezerapi.py',
-            qobuz: './apis/qobuzapi.py'
+            youtube: 'funcs/apis/ytsearchapi.py',
+            youtubeMusic: 'funcs/apis/ytmusicsearchapi.py',
+            spotify: 'funcs/apis/spotifyapi.py',
+            tidal: 'funcs/apis/tidalapi.py',
+            deezer: 'funcs/apis/deezerapi.py',
+            qobuz: 'funcs/apis/qobuzapi.py'
         };
 
         const scriptName = scriptMap[serviceName] || '';
@@ -367,19 +379,14 @@ class CustomRip {
 
     getResourcePath(filename) {
         let resourcePath;
-
         if (this.app.isPackaged) {
             resourcePath = path.join(process.resourcesPath, 'app.asar.unpacked', 'src', filename);
         } else {
             resourcePath = path.join(__dirname, filename);
         }
-
-        const normalizedPath = path.normalize(resourcePath);
-
-        this.log('Resource path resolved:', { filename, isPackaged: this.app.isPackaged, originalPath: resourcePath, normalizedPath });
-
-        return normalizedPath;
+        return path.normalize(resourcePath);
     }
+
 
     getDefaultSettings() {
         const defaultPath = this.app.getPath('downloads');
