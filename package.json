@@ -14,12 +14,14 @@
   "author": "CrossyAtom46",
   "license": "GPL-3.0-or-later",
   "description": "MediaHarbor",
+  "homepage": "https://mediaharbor.github.io",
   "build": {
     "appId": "AtomDev.MediaHarbor",
     "productName": "MediaHarbor",
     "asarUnpack": [
+      "src/funcs/apis/**/*.py",
       "src/*.py",
-      "src/apis.json"
+      "src/funcs/apis/apis.json"
     ],
     "files": [
       "src/**/*",
@@ -30,7 +32,11 @@
       "output": "dist"
     },
     "win": {
-      "target": ["nsis", "portable", "appx"],
+      "target": [
+        "nsis",
+        "portable",
+        "appx"
+      ],
       "icon": "resources/icon.png"
     },
     "appx": {
@@ -39,20 +45,55 @@
       "identityName": "AtomDevMediaHarbor",
       "publisher": "CN=B799C26F-32FE-4398-8D3A-A8667FA3C70A",
       "publisherDisplayName": "AtomDev",
-      "languages": ["en-US"],
+      "languages": [
+        "en-US"
+      ],
       "displayName": "MediaHarbor",
       "showNameOnTiles": false,
       "artifactName": "MediaHarbor-${version}-${arch}.${ext}"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "resources/icon.png"
     },
     "linux": {
-      "target": ["deb"],
+      "target": [
+        "AppImage",
+        "deb",
+        "snap"
+      ],
       "maintainer": "AtomDev",
       "icon": "resources/icons/",
-      "category": "Utility"
+      "category": "Utility",
+      "executableName": "mediaharbor",
+      "artifactName": "${productName}-${version}.${ext}",
+      "desktop": {
+        "Name": "MediaHarbor",
+        "Comment": "MediaHarbor Application",
+        "Categories": "Utility;",
+        "Type": "Application"
+      },
+      "publish": [
+        "github"
+      ]
+    },
+    "deb": {
+      "afterInstall": "resources/postinst.sh"
+    },
+    "snap": {
+      "grade": "stable",
+      "confinement": "strict",
+      "plugs": [
+        "network",
+        "home",
+        "process-control"
+      ],
+      "environment": {
+        "ELECTRON_ENABLE_LOGGING": "true",
+        "APPARMOR_PROFILE": "/usr/share/apparmor/profiles/mediaharbor"
+      }
     }
   },
   "devDependencies": {
@@ -65,7 +106,10 @@
     "axios": "^1.7.7",
     "cheerio": "^1.0.0",
     "electron-store": "^10.0.0",
+    "fix-path": "^4.0.0",
     "sqlite3": "^5.1.7",
+    "strip-ansi": "^7.1.0",
+    "sudo-prompt": "^9.2.1",
     "sweetalert2": "^11.14.4"
   }
 }
