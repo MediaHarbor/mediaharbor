@@ -3,8 +3,12 @@ name: Create Release
 on:
   push:
     branches: ["main"]
+    paths:
+      - 'package.json'
   pull_request:
     branches: ["main"]
+    paths:
+      - 'package.json'
 
 jobs:
   release:
@@ -15,26 +19,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get Latest Release Version
-        id: get_version
+      - name: Get Version from package.json
+        id: package_version
         run: |
-          LATEST_TAG=$(git ls-remote --tags origin | grep -o 'refs/tags/v[0-9]*\.[0-9]*\.[0-9]*$' | sed 's/refs\/tags\///' | sort -V | tail -n 1)
-          if [[ -z "$LATEST_TAG" ]]; then
-            TAG_NAME="v1.0.0"  # Start from v1.0.0 if no tags found
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=v${VERSION}" >> $GITHUB_ENV
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          if git rev-parse "${{ env.VERSION }}" >/dev/null 2>&1; then
+            echo "Tag already exists, skipping release"
+            echo "TAG_EXISTS=true" >> $GITHUB_ENV
           else
-            if [[ $LATEST_TAG =~ v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-              MAJOR=${BASH_REMATCH[1]}
-              MINOR=${BASH_REMATCH[2]}
-              PATCH=${BASH_REMATCH[3]}
-              PATCH=$((PATCH + 1))  # Increment patch version
-              TAG_NAME="v${MAJOR}.${MINOR}.${PATCH}"
-            else
-              TAG_NAME="v1.0.1"  # Fallback if no valid tag found
-            fi
+            echo "TAG_EXISTS=false" >> $GITHUB_ENV
           fi
-          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
 
       - name: Get Changelog
+        if: env.TAG_EXISTS == 'false'
         id: changelog
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
@@ -48,14 +50,16 @@ jobs:
           echo "EOF" >> $GITHUB_ENV
 
       - name: Create Git Tag
+        if: env.TAG_EXISTS == 'false'
         run: |
-          git tag ${{ env.TAG_NAME }}
-          git push origin ${{ env.TAG_NAME }} || echo "Tag already exists, skipping push."
+          git tag ${{ env.VERSION }}
+          git push origin ${{ env.VERSION }}
 
       - name: Create GitHub Release
+        if: env.TAG_EXISTS == 'false'
         uses: softprops/action-gh-release@v2.0.8
         with:
-          tag_name: ${{ env.TAG_NAME }}
+          tag_name: ${{ env.VERSION }}
           body: |
             ## Changelog
             ${{ env.CHANGELOG }}
