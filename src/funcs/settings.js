@@ -188,6 +188,7 @@ async function saveSettings(event, settings) {
                         ? []
                         : settings.excluded_tags.split(/\s+/)
             };
+            // Config Fixes
             config.filepaths = {
                 add_singles_to_folder: settings.filepaths_add_singles_to_folder,
                 folder_format: settings.filepaths_folder_format,
@@ -195,10 +196,31 @@ async function saveSettings(event, settings) {
                 restrict_characters: settings.filepaths_restrict_characters,
                 truncate_to: settings.filepaths_truncate_to,
             };
+            config.soundcloud = {
+                quality: settings.soundcloud_quality,
+                client_id: settings.soundcloud_client_id,
+                app_version: settings.soundcloud_app_version,
+
+            };
+            config.youtube = {
+                quality: settings.youtube_quality,
+                download_videos: settings.youtube_download_videos,
+                video_downloads_folder: settings.youtube_video_downloads_folder,
+            };
+            config.lastfm = {
+                source: settings.lastfm_source,
+                fallback_source: settings.lastfm_fallback_source,
+            };
+
+            config.cli = {
+                text_output: settings.cli_text_output,
+                progress_bars: settings.cli_progress_bars,
+                max_search_results: settings.cli_max_search_results,
+            };
             config.misc = {
                 version: '2.0.6',
                 check_for_updates: 'false'
-            }
+            };
             const tomlString = TOML.stringify(config);
             await fs.promises.writeFile(normalizedConfigPath, tomlString, 'utf8');
             event.reply('settings-saved', 'Settings saved successfully');
