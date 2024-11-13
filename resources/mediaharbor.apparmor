@@ -1,0 +1,8 @@
+# MediaHarbor AppArmor profile
+/opt/MediaHarbor/** rw,
+/opt/MediaHarbor/chrome-sandbox rix,
+/usr/lib/x86_64-linux-gnu/** rmix,
+/{dev,proc,sys}/** r,
+network,
+capability mknod,
+capability sys_admin,
