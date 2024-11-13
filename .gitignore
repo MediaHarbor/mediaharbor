@@ -9,4 +9,3 @@ node_modules
 src/funcs/apis/apis.json
 /dist/*
 /build/*
-/resources/*
