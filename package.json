@@ -1,6 +1,6 @@
 {
   "name": "mediaharbor",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -16,6 +16,12 @@
   "description": "MediaHarbor",
   "homepage": "https://mediaharbor.github.io",
   "build": {
+    "protocols": [
+      {
+        "name": "MediaHarbor Protocol",
+        "schemes": ["mediaharbor"]
+      }
+    ],
     "appId": "AtomDev.MediaHarbor",
     "productName": "MediaHarbor",
     "asarUnpack": [
@@ -42,7 +48,7 @@
     "appx": {
       "applicationId": "AtomDev.MediaHarbor",
       "backgroundColor": "#464646",
-      "identityName": "AtomDevMediaHarbor",
+      "identityName": "AtomDev.MediaHarbor",
       "publisher": "CN=B799C26F-32FE-4398-8D3A-A8667FA3C70A",
       "publisherDisplayName": "AtomDev",
       "languages": [
@@ -98,18 +104,27 @@
   },
   "devDependencies": {
     "@unocss/preset-icons": "^0.63.4",
-    "electron": "^32.1.2",
+    "electron": "^33.2.0",
     "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "axios": "^1.7.7",
     "cheerio": "^1.0.0",
+    "decompress": "^4.2.1",
+    "decompress-targz": "^4.1.1",
+    "decompress-unzip": "^4.0.1",
     "electron-store": "^10.0.0",
     "fix-path": "^4.0.0",
+    "lzma-native": "^8.0.6",
+    "node-fetch": "^3.3.2",
+    "progress": "^2.0.3",
     "sqlite3": "^5.1.7",
     "strip-ansi": "^7.1.0",
     "sudo-prompt": "^9.2.1",
-    "sweetalert2": "^11.14.4"
+    "sweetalert2": "^11.14.4",
+    "tar": "^7.4.3",
+    "unzipper": "^0.12.3",
+    "xml2js": "^0.6.2"
   }
 }
