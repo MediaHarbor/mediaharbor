@@ -1252,6 +1252,11 @@ function showQualitySelectionPopup(url, platform, title) {
     });
 }
 
+// Protocol Listener
+window.protocolHandler.onProtocolAction((data) => {
+    const { url, platform, title } = data;
+    showQualitySelectionPopup(url, platform,title);
+});
 
 function handlePopupDownload(url, platform, quality) {
     try {

@@ -124,3 +124,9 @@ contextBridge.exposeInMainWorld('errorNotifier', {
         });
     },
 });
+
+contextBridge.exposeInMainWorld('protocolHandler', {
+    onProtocolAction: (callback) => {
+        ipcRenderer.on('protocol-action', (event, data) => callback(data));
+    }
+});

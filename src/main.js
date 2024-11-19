@@ -3,7 +3,7 @@ const {downloadAndInstallBento4} = require( "./funcs/installers/bento4installer"
 const {downloadAndInstallFFmpeg} = require("./funcs/installers/ffmpegInstaller");
 const {downloadAndInstallGit} = require("./funcs/installers/gitInstaller");
 const {downloadAndInstallPython} = require("./funcs/installers/pythonInstaller");
-const {clipboard , Menu, MenuItem, app, BrowserWindow, ipcMain,dialog, shell  } = require('electron');
+const {clipboard , Menu, MenuItem, app, BrowserWindow, ipcMain,dialog, shell,protocol   } = require('electron');
 const { exec, spawn } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
@@ -399,6 +399,30 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js')
         }
     });
+    // Back-up error notifier (For temporary)
+    const originalConsoleError = console.error;
+    console.error = function (...args) {
+        originalConsoleError.apply(console, args);
+        const message = args.map(arg => {
+            if (arg instanceof Error) {
+                return arg.message;
+            }
+            return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+        }).join(' ');
+        if (win && win.webContents) {
+            win.webContents.send('out-error', message);
+        }
+    };
+
+    const gotTheLock = app.requestSingleInstanceLock();
+    // Remove during $npm start
+    if (gotTheLock) {
+        const argv = process.argv;
+        if (process.platform === 'win32' && argv.length >= 2) {
+            handleProtocolUrl(argv[1]);
+        }
+    }
+
     win.loadFile(`${__dirname}/pages/index.html`);
     setupContextMenu(win);
     setupSettingsHandlers(ipcMain);
@@ -529,6 +553,37 @@ async function checkForUpdates() {
         console.error('Update check failed:', error);
     }
 }
+app.setAsDefaultProtocolClient('mediaharbor');
+app.on('open-url', (event, url) => {
+    event.preventDefault();
+    handleProtocolUrl(url);
+});
+if (process.platform === 'win32') {
+    const gotTheLock = app.requestSingleInstanceLock();
+
+    if (!gotTheLock) {
+        app.quit();
+    } else {
+        app.on('second-instance', (event, argv) => {
+            if (process.platform === 'win32') {
+                console.log('Second instance argv:', argv); // Enhanced logging
+                const protocolUrl = argv.find(arg => arg.startsWith('mediaharbor://'));
+                if (protocolUrl) {
+                    handleProtocolUrl(protocolUrl);
+                } else {
+                    console.warn('No mediaharbor protocol URL found in argv:', argv);
+                }
+            }
+
+            const mainWindow = BrowserWindow.getAllWindows()[0];
+            if (mainWindow) {
+                if (mainWindow.isMinimized()) mainWindow.restore();
+                mainWindow.focus();
+            }
+        });
+    }
+}
+
 
 app.whenReady().then(async () => {
     await checkForUpdates();
@@ -851,17 +906,68 @@ async function installWithProgress(command, win, dep) {
     });
 }
 
-// Back-up error notifier (For temporary)
-const originalConsoleError = console.error;
-console.error = function (...args) {
-    originalConsoleError.apply(console, args);
-    const message = args.map(arg => {
-        if (arg instanceof Error) {
-            return arg.message;
+
+function handleProtocolUrl(url) {
+    try {
+        const urlObj = new URL(url);
+        if (urlObj.protocol !== 'mediaharbor:') return;
+
+        const action = urlObj.pathname.slice(1);
+        const params = urlObj.searchParams;
+        const mediaUrl = params.get('url');
+        let platform = params.get('platform');
+
+        if (!mediaUrl) {
+            throw new Error('No media URL provided.');
         }
-        return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
-    }).join(' ');
-    if (mainWindow && mainWindow.webContents) {
-        mainWindow.webContents.send('out-error', message);
+
+        try {
+            new URL(mediaUrl);
+        } catch (e) {
+            throw new Error('The media URL is not a valid URL.');
+        }
+
+        if (!platform) {
+            platform = inferPlatformFromUrl(mediaUrl);
+            if (!platform) {
+                throw new Error('Unable to determine platform from the URL.');
+            }
+        }
+        const mainWindow = BrowserWindow.getAllWindows()[0];
+        if (!mainWindow) return;
+
+        mainWindow.webContents.send('protocol-action', {
+            url: mediaUrl,
+            platform: platform,
+            title: platform,
+        });
+    } catch (error) {
+        console.error('Protocol URL handling error:', error);
+        dialog.showErrorBox(
+            'Protocol Error',
+            `Failed to handle protocol URL: ${error.message}`
+        );
     }
-};
+}
+function inferPlatformFromUrl(url) {
+    const parsedUrl = new URL(url);
+    const hostname = parsedUrl.hostname.toLowerCase();
+
+    if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
+        return 'youtube';
+    } else if (hostname.includes('music.youtube.com') || hostname.includes('ytmusic.com')) {
+        return 'youtubeMusic';
+    } else if (hostname.includes('spotify.com')) {
+        return 'spotify';
+    } else if (hostname.includes('tidal.com')) {
+        return 'tidal';
+    } else if (hostname.includes('deezer.com')) {
+        return 'deezer';
+    } else if (hostname.includes('qobuz.com')) {
+        return 'qobuz';
+    } else if (hostname.includes('apple.com') || hostname.includes('itunes.apple.com') || hostname.includes('music.apple.com')) {
+        return 'applemusic';
+    } else {
+        return null; // Unknown platform
+    }
+}
