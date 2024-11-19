@@ -2,12 +2,13 @@ import argparse
 import json
 import sys
 import os
-from googleapiclient.discovery import build
+import requests
 
 class YouTubeSearch:
+    BASE_URL = 'https://www.googleapis.com/youtube/v3/search'
+
     def __init__(self):
         self.api_key = self._load_api_key()
-        self.youtube = build('youtube', 'v3', developerKey=self.api_key)
 
     def _load_api_key(self):
         try:
@@ -34,77 +35,80 @@ class YouTubeSearch:
             print(json.dumps({'error': f"Failed to load API key: {str(e)}"}, indent=2))
             sys.exit(1)
 
-    def search_videos(self, query, max_results=5):
+    def _make_request(self, params):
+        params['key'] = self.api_key
         try:
-            request = self.youtube.search().list(
-                q=query,
-                part='snippet',
-                type='video',
-                maxResults=max_results
-            )
-            response = request.execute()
-
-            results = []
-            for item in response['items']:
-                result = {
-                    'Thumbnail': item['snippet']['thumbnails']['medium']['url'],
-                    'Video Title': item['snippet']['title'],
-                    'Channel Title': item['snippet']['channelTitle'],
-                    'Video URL': f"https://www.youtube.com/watch?v={item['id']['videoId']}"
-                }
-                results.append(result)
-            return results
-
-        except Exception as e:
+            response = requests.get(self.BASE_URL, params=params)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
             return {'error': str(e)}
+
+    def search_videos(self, query, max_results=5):
+        params = {
+            'q': query,
+            'part': 'snippet',
+            'type': 'video',
+            'maxResults': max_results
+        }
+        response = self._make_request(params)
+        if 'error' in response:
+            return {'error': response['error']}
+
+        results = []
+        for item in response.get('items', []):
+            result = {
+                'Thumbnail': item['snippet']['thumbnails']['medium']['url'],
+                'Video Title': item['snippet']['title'],
+                'Channel Title': item['snippet']['channelTitle'],
+                'Video URL': f"https://www.youtube.com/watch?v={item['id']['videoId']}"
+            }
+            results.append(result)
+        return results
 
     def search_playlists(self, query, max_results=5):
-        try:
-            request = self.youtube.search().list(
-                q=query,
-                part='snippet',
-                type='playlist',
-                maxResults=max_results
-            )
-            response = request.execute()
+        params = {
+            'q': query,
+            'part': 'snippet',
+            'type': 'playlist',
+            'maxResults': max_results
+        }
+        response = self._make_request(params)
+        if 'error' in response:
+            return {'error': response['error']}
 
-            results = []
-            for item in response['items']:
-                result = {
-                    'Thumbnail': item['snippet']['thumbnails']['medium']['url'],
-                    'Playlist Title': item['snippet']['title'],
-                    'Channel Title': item['snippet']['channelTitle'],
-                    'Playlist URL': f"https://www.youtube.com/playlist?list={item['id']['playlistId']}"
-                }
-                results.append(result)
-            return results
-
-        except Exception as e:
-            return {'error': str(e)}
+        results = []
+        for item in response.get('items', []):
+            result = {
+                'Thumbnail': item['snippet']['thumbnails']['medium']['url'],
+                'Playlist Title': item['snippet']['title'],
+                'Channel Title': item['snippet']['channelTitle'],
+                'Playlist URL': f"https://www.youtube.com/playlist?list={item['id']['playlistId']}"
+            }
+            results.append(result)
+        return results
 
     def search_channels(self, query, max_results=5):
-        try:
-            request = self.youtube.search().list(
-                q=query,
-                part='snippet',
-                type='channel',
-                maxResults=max_results
-            )
-            response = request.execute()
+        params = {
+            'q': query,
+            'part': 'snippet',
+            'type': 'channel',
+            'maxResults': max_results
+        }
+        response = self._make_request(params)
+        if 'error' in response:
+            return {'error': response['error']}
 
-            results = []
-            for item in response['items']:
-                result = {
-                    'Thumbnail': item['snippet']['thumbnails']['medium']['url'],
-                    'Channel Title': item['snippet']['title'],
-                    'Channel ID': item['snippet']['channelId'],
-                    'Channel URL': f"https://www.youtube.com/channel/{item['id']['channelId']}"
-                }
-                results.append(result)
-            return results
-
-        except Exception as e:
-            return {'error': str(e)}
+        results = []
+        for item in response.get('items', []):
+            result = {
+                'Thumbnail': item['snippet']['thumbnails']['medium']['url'],
+                'Channel Title': item['snippet']['title'],
+                'Channel ID': item['snippet']['channelId'],
+                'Channel URL': f"https://www.youtube.com/channel/{item['snippet']['channelId']}"
+            }
+            results.append(result)
+        return results
 
 def main():
     parser = argparse.ArgumentParser(description='YouTube Search API')
