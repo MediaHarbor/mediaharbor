@@ -5,26 +5,6 @@
 ![License](https://img.shields.io/github/license/MediaHarbor/MediaHarbor) ![Build Status](https://img.shields.io/github/actions/workflow/status/MediaHarbor/MediaHarbor/node.js.yml) ![Downloads](https://img.shields.io/github/downloads/MediaHarbor/MediaHarbor/latest/total)
 ![Static Badge](https://img.shields.io/badge/website-mediaharbor?style=for-the-badge&logo=github&label=MediaHarbor&link=https%3A%2F%2Fmediaharbor.github.io)
 
-# If you're getting ENONENT errors, please install pip packages manually
-
-## Downloading
-### YouTube / YouTube Music
-#### pip install yt-dlp
-### Spotify
-#### pip install git+https://github.com/mediaharbor/custom_votify.git
-### Qobuz / Tidal / Deezer
-#### pip install git+https://github.com/mediaharbor/custom_streamrip.git
-### Apple Music
-#### pip install git+https://github.com/mediaharbor/custom_gamdl.git
-## Searching
-### YouTube 
-#### pip install googleapi
-### YT Music
-#### pip install ytmusicapi
-### Apple Music
-#### pip install pyapplemusicapi
-
-
 MediaHarbor is your all-in-one media downloader, supporting audio and video downloading / streaming from platforms like YouTube and more—all through an intuitive, streamlined interface.
 
 ## Installation
