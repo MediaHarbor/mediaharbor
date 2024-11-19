@@ -9,7 +9,6 @@ MediaHarbor is your all-in-one media downloader, supporting audio and video down
 
 ## Installation
 You can download and install MediaHarbor from releases page for your OS
-##### It's recommended to use Windows Store for Windows users.
 
 ## Table of Contents
 - [Features](#features)
@@ -64,7 +63,8 @@ To build the application:
 ```bash
 npm run build
 ```
-
+## Manual installation for first start
+You can find which packages MH currenly uses at [MANUELINSTALL.MD](MANUELINSTALL.MD).
 ## Contributing
 All contributions are welcome! Please read the contributing guidelines in the [CONTRIBUTING.md](CONTRIBUTING.md) file.
 
