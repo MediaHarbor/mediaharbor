@@ -1,0 +1,225 @@
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+
+:root {
+    --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    --color-bg: #ffffff;
+    --color-bg-alt: #f9f9f9;
+    --color-text: #333333;
+    --color-primary: #3498db;
+    --color-primary-dark: #2980b9;
+    --color-secondary: #2ecc71;
+    --color-secondary-dark: #27ae60;
+    --color-muted: #95a5a6;
+    --color-error: #e74c3c;
+    --border-radius: 6px;
+    --transition-speed: 0.3s;
+    --transition-ease: ease-in-out;
+}
+
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-family);
+    background-color: var(--color-bg-alt);
+    color: var(--color-text);
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 1rem;
+    position: relative;
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+
+
+.page {
+    background-color: var(--color-bg);
+    border-radius: var(--border-radius);
+    padding: 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    opacity: 0;
+    transform: translateX(20px);
+    transition: opacity var(--transition-speed) var(--transition-ease), transform var(--transition-speed) var(--transition-ease);
+    display: none;
+    overflow-y: auto;
+}
+
+.page.active {
+    display: block;
+    opacity: 1;
+    transform: translateX(0);
+}
+
+
+h1 {
+    text-align: center;
+    color: var(--color-primary);
+    margin-bottom: 1.5rem;
+    font-size: 2rem;
+}
+
+.dependencies-list, .dependency-group {
+    margin-bottom: 1.5rem;
+}
+
+.dependency-group h2 {
+    color: var(--color-text);
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 1.25rem;
+}
+
+.dependency-item {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background-color: var(--color-bg-alt);
+    border-radius: var(--border-radius);
+    margin-bottom: 0.75rem;
+    transition: background-color var(--transition-speed);
+}
+
+.dependency-item:hover {
+    background-color: #f1f1f1;
+}
+
+.status-icon {
+    font-size: 1.2rem;
+    margin-right: 0.75rem;
+    color: var(--color-primary);
+}
+
+.dep-name {
+    flex-grow: 1;
+    font-size: 1rem;
+}
+
+.install-btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: var(--border-radius);
+    background-color: var(--color-primary);
+    color: #fff;
+    cursor: pointer;
+    transition: background-color var(--transition-speed);
+}
+
+.install-btn:hover:not(:disabled) {
+    background-color: var(--color-primary-dark);
+}
+
+.install-btn:disabled {
+    background-color: var(--color-muted);
+    cursor: not-allowed;
+}
+
+.nav-buttons {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 2rem;
+}
+
+.next-btn, .prev-btn, .finish-btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background-color var(--transition-speed);
+}
+
+.next-btn, .finish-btn {
+    background-color: var(--color-secondary);
+    color: #fff;
+}
+
+.next-btn:hover, .finish-btn:hover {
+    background-color: var(--color-secondary-dark);
+}
+
+.prev-btn {
+    background-color: var(--color-muted);
+    color: #fff;
+}
+
+.prev-btn:hover {
+    background-color: #7f8c8d;
+}
+
+#progress-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity var(--transition-speed) var(--transition-ease), visibility var(--transition-speed) var(--transition-ease);
+}
+
+#progress-overlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.progress-container {
+    background-color: var(--color-bg);
+    padding: 2rem;
+    border-radius: var(--border-radius);
+    text-align: center;
+    width: 90%;
+    max-width: 350px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.progress-bar {
+    height: 10px;
+    background-color: #ddd;
+    border-radius: 5px;
+    overflow: hidden;
+    margin: 1rem 0;
+}
+
+.progress-fill {
+    height: 100%;
+    background-color: var(--color-primary);
+    width: 0%;
+    transition: width var(--transition-speed) ease;
+}
+
+.success .status-icon {
+    color: var(--color-secondary);
+}
+
+.error .status-icon {
+    color: var(--color-error);
+}
+
+.warning {
+    color: darkorange;
+    justify-self: center;
+}
+
+.warning-div {
+    background-color: antiquewhite;
+}
