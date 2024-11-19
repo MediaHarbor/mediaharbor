@@ -1,5 +1,12 @@
+const {downloadAndInstallBento4} = require( "./funcs/installers/bento4installer");
+
+const {downloadAndInstallFFmpeg} = require("./funcs/installers/ffmpegInstaller");
+const {downloadAndInstallGit} = require("./funcs/installers/gitInstaller");
+const {downloadAndInstallPython} = require("./funcs/installers/pythonInstaller");
 const {clipboard , Menu, MenuItem, app, BrowserWindow, ipcMain,dialog, shell  } = require('electron');
 const { exec, spawn } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
@@ -16,6 +23,9 @@ let settings = loadTheSettings();
 const downloadsDatabasePath = settings.downloads_database;
 const failedDownloadsDatabasePath = settings.failed_downloads_database
 const sudo = require('sudo-prompt');
+const axios = require('axios');
+const ProgressBar = require('progress');
+const unzipper = require('unzipper');
 if (process.platform === 'darwin' || process.platform === 'linux') {
     import('fix-path').then((module) => {
         module.default();
@@ -502,67 +512,9 @@ async function createFirstStartWindow() {
             preload: path.join(__dirname, 'preload.js'),
         },
     });
-    const pythonInstalled = await isPythonInstalled();
-    firstStartWindow.webContents.on('did-finish-load', () => {
-        firstStartWindow.webContents.send('python-check', pythonInstalled);
-    });
-    ipcMain.on('spawn-tidal-config', async () => {
-        const customRipCommand = 'custom_rip';
-        const command = `${customRipCommand} url https://tidal.com/track/1`;
+    setupFirstStartHandlers(firstStartWindow);
+    await firstStartWindow.loadFile(`${__dirname}/pages/firststart.html`);
 
-        const authProcess = exec(command, {
-            env: {
-                ...process.env,
-                PATH: process.env.PATH
-            }
-        });
-
-        authProcess.stderr.on('data', (data) => {
-            console.error(`Error: ${data}`);
-        });
-
-        authProcess.on('close', (code) => {
-            console.log(`Process exited with code ${code}`);
-        });
-    });
-
-
-    ipcMain.on('install-services', async (event, services) => {
-        const pythonCommand = await getPythonCommand();
-        const scriptPath = getResourcePath('start.py');
-        const command = `"${pythonCommand}" "${scriptPath}" ${services.join(' ')}`;
-        const options = {
-            name: 'MediaHarbor',
-        };
-        sudo.exec(command, options, (error, stdout, stderr) => {
-            if (error) {
-                event.sender.send('python-output', {
-                    type: 'error',
-                    data: stderr || error.message,
-                });
-                return;
-            }
-
-            event.sender.send('python-output', {
-                type: 'output',
-                data: stdout,
-            });
-
-            setupSettingsHandlers(ipcMain);
-            event.sender.send('python-output', {
-                type: 'complete',
-                code: 0,
-            });
-        });
-    });
-
-    firstStartWindow.loadFile(`${__dirname}/pages/firststart.html`);
-
-    ipcMain.once('setup-complete', () => {
-        settings.firstTime = false;
-        fs.writeFileSync('./mh-settings.json', JSON.stringify(settings, null, 2));
-        firstStartWindow.close();
-    });
 }
 async function checkForUpdates() {
     try {
@@ -682,20 +634,234 @@ function updateDependencies(packages, event) {
         });
     });
 }
-function isPythonInstalled() {
+async function getPythonVersionOutput(command) {
+    try {
+        const { stdout, stderr } = await execPromise(`${command} --version`);
+        const output = stdout.trim() || stderr.trim();
+        const versionMatch = output.match(/Python (\d+\.\d+\.\d+)/);
+        return versionMatch ? versionMatch[1] : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+/**
+ * Checks if the installed Python version is between 3.9 and 3.12 inclusive.
+ * @returns {Promise<boolean>} - True if the Python version is within the range, else false.
+ */
+async function checkPythonVersion() {
+    const commandsToTry = ['python', 'python3', 'py'];
+
+    for (const command of commandsToTry) {
+        const version = await getPythonVersionOutput(command);
+        if (version) {
+            const [major, minor] = version.split('.').map(Number);
+            if (major === 3 && minor >= 9 && minor <= 12) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+async function checkGit() {
+    try {
+        await execPromise('git --version');
+        return true;
+    } catch (error) {
+        console.error('Git check failed:', error.message);
+        return false;
+    }
+}
+
+function checkFFmpeg() {
     return new Promise((resolve) => {
-        exec('python --version', (error, stdout, stderr) => {
-            if (error) {
-                exec('python3 --version', (error2, stdout2, stderr2) => {
-                    if (error2) {
-                        resolve(false);
-                    } else {
-                        resolve(true);
-                    }
-                });
+        const process = spawn('ffmpeg', ['-version']);
+        process.on('close', (code) => {
+            resolve(code === 0);
+        });
+        process.on('error', () => {
+            resolve(false);
+        });
+    });
+}
+
+function setupFirstStartHandlers(win) {
+    ipcMain.handle('check-dependencies', async () => {
+        const status = {
+            python: await checkPythonVersion(),
+            git: await checkGit(),
+            ffmpeg: await checkFFmpeg(),
+            ytdlp: false,
+            ytmusic: false,
+            qobuz: false,
+            deezer: false,
+            tidal: false,
+            apple: false,
+            spotify: false,
+        };
+
+        // If Python is installed, check pip packages
+        if (status.python) {
+            try {
+                const pythonCommand = await getPythonCommand();
+                const { stdout, stderr } = await execPromise(`${pythonCommand} -m pip list`);
+
+                console.log('pip list stdout:', stdout);
+                console.log('pip list stderr:', stderr);
+
+                if (typeof stdout === 'string') {
+                    status.ytdlp = stdout.includes('yt-dlp');
+                    status.ytmusic = stdout.includes('ytmusicapi');
+                    status.qobuz = stdout.includes('custom_streamrip');
+                    status.deezer = stdout.includes('custom_streamrip');
+                    status.tidal = stdout.includes('custom_streamrip');
+                    status.apple = stdout.includes('custom_gamdl');
+                    status.spotify = stdout.includes('custom_votify');
+                } else {
+                    console.error('Unexpected type for pipList.stdout:', typeof stdout);
+                }
+            } catch (error) {
+                console.error('Failed to check pip packages:', error);
+            }
+        }
+
+        win.webContents.send('dependency-status', status);
+        return status;
+    });
+
+    ipcMain.handle('install-dependency', async (event, dep) => {
+        try {
+            const pythonCommand = await getPythonCommand();
+
+            switch (dep) {
+                case 'git':
+                    await downloadAndInstallGit(win);
+                    break;
+                case 'python':
+                    await downloadAndInstallPython(win);
+                    break;
+                case 'ffmpeg':
+                    await downloadAndInstallFFmpeg(win);
+                    break;
+                case 'ytdlp':
+                    await installWithProgress(`${pythonCommand} -m pip install --upgrade yt-dlp`, win, dep);
+                    break;
+                case 'ytmusic':
+                    await installWithProgress(`${pythonCommand} -m pip install --upgrade ytmusicapi`, win, dep);
+                    break;
+                case 'qobuz':
+                case 'deezer':
+                case 'tidal':
+                    await installWithProgress(
+                        `${pythonCommand} -m pip install --upgrade git+https://github.com/mediaharbor/custom_streamrip.git`,
+                        win,
+                        dep
+                    );
+                    break;
+                case 'apple':
+                    await downloadAndInstallBento4(win);
+                    await installWithProgress(
+                        `${pythonCommand} -m pip install --upgrade pyapplemusicapi git+https://github.com/mediaharbor/custom_gamdl.git`,
+                        win,
+                        dep
+                    );
+                    break;
+                case 'spotify':
+                    await downloadAndInstallBento4(win);
+                    await installWithProgress(
+                        `${pythonCommand} -m pip install --upgrade git+https://github.com/mediaharbor/custom_votify.git`,
+                        win,
+                        dep
+                    );
+                    break;
+                default:
+                    throw new Error(`Unknown dependency: ${dep}`);
+            }
+
+            return true;
+        } catch (error) {
+            console.error(`Failed to install ${dep}:`, error);
+            throw error;
+        }
+    });
+
+
+    ipcMain.handle('complete-setup', async () => {
+        try {
+            const settings = loadTheSettings();
+            settings.firstTime = false;
+            await fs.promises.writeFile(settingsFilePath, JSON.stringify(settings, null, 2));
+            return true;
+        } catch (error) {
+            console.error('Failed to complete setup:', error);
+            throw error;
+        }
+    });
+
+    ipcMain.on('restart-app', () => {
+        app.relaunch();
+        app.exit(0);
+    });
+}
+async function installWithProgress(command, win, dep) {
+    return new Promise((resolve, reject) => {
+        const process = spawn(command, { shell: true });
+
+        process.stdout.on('data', (data) => {
+            const output = data.toString().trim(); // Convert to plain string
+            console.log(output); // Debugging purpose
+
+            // Match progress percentage from output if it exists
+            const progressMatch = output.match(/(?<=\()\d{1,3}(?=%\))/);
+            const progress = progressMatch ? parseInt(progressMatch[0], 10) : null;
+
+            // Send progress as a plain JSON string
+            win.webContents.send('installation-progress', JSON.stringify({
+                dependency: dep,
+                percent: progress,
+                status: progress ? `Installing ${dep}: ${progress}%` : output,
+            }));
+        });
+
+        process.stderr.on('data', (data) => {
+            const errorOutput = data.toString().trim(); // Convert to plain string
+            console.error(errorOutput);
+
+            // Send error as a plain JSON string
+            win.webContents.send('installation-error', JSON.stringify({
+                dependency: dep,
+                error: errorOutput,
+            }));
+        });
+
+        process.on('close', (code) => {
+            if (code === 0) {
+                win.webContents.send('installation-progress', JSON.stringify({
+                    dependency: dep,
+                    percent: 100,
+                    status: `${dep} installation completed successfully.`,
+                }));
+                resolve();
             } else {
-                resolve(true);
+                reject(new Error(`${dep} installation failed with exit code ${code}`));
             }
         });
     });
 }
+
+// Back-up error notifier (For temporary)
+const originalConsoleError = console.error;
+console.error = function (...args) {
+    originalConsoleError.apply(console, args);
+    const message = args.map(arg => {
+        if (arg instanceof Error) {
+            return arg.message;
+        }
+        return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+    }).join(' ');
+    if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('out-error', message);
+    }
+};

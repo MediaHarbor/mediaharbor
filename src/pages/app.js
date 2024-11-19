@@ -781,6 +781,9 @@ async function performSearch(platform) {
         handleError(error);
     }
 }
+window.errorNotifier.onError((message) => {
+    showNotification(`Error: ${message}`);
+});
 function showLoadingOverlay() {
     const overlay = document.createElement('div');
     overlay.id = 'loading-overlay';

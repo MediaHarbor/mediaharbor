@@ -54,6 +54,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     fileSelectLocation: () => ipcRenderer.invoke('dialog:openFile'),
     openWvdLocation: () => ipcRenderer.invoke('dialog:openwvdFile'),
 
+    checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
+    handleDependencyStatus: (callback) => {
+        ipcRenderer.on('dependency-status', callback);
+    },
+
+    // Installation
+    installDependency: (dep) => ipcRenderer.invoke('install-dependency', dep),
+
+    // Setup completion
+    completeSetup: () => ipcRenderer.invoke('complete-setup'),
+    restartApp: () => ipcRenderer.send('restart-app'),
+
+    // Progress updates
+    onProgress: (callback) => {
+        ipcRenderer.on('installation-progress', callback);
+    },
+
+    // Error handling
+    onError: (callback) => {
+        ipcRenderer.on('installation-error', callback);
+    },
+
+    // Settings
+    saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+    getSettings: () => ipcRenderer.invoke('get-settings'),
 });
 contextBridge.exposeInMainWorld(
     'api', {
@@ -91,4 +116,11 @@ contextBridge.exposeInMainWorld("electron", {
         on: (channel, func) => ipcRenderer.on(channel, (event, ...args) => func(...args)),
     },
 
+});
+contextBridge.exposeInMainWorld('errorNotifier', {
+    onError: (callback) => {
+        ipcRenderer.on('out-error', (event, message) => {
+            callback(message);
+        });
+    },
 });
