@@ -28,7 +28,8 @@ class CustomRip {
         1. Run "Install Certificates.command" in your Python directory.
         2. Ensure Python & aiohttp are up-to-date.
         For more help, contact support.
-    `
+    `,
+            'Try running rip config reset': 'Config is broken try running $rip config reset, if not fixes report issue with logs'
         };
         this.serviceConfig = {
             qobuz: {
