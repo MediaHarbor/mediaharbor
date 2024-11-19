@@ -1,9 +1,11 @@
 const fs = require("fs");
 const path = require("path");
 const { getDefaultSettings } = require('./defaults');
-const {app} = require("electron");
+const { app } = require("electron");
 const sqlite3 = require('sqlite3').verbose();
+
 const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
+
 function loadSettings() {
     try {
         const settingsData = fs.readFileSync(settingsFilePath, 'utf8');
@@ -13,8 +15,26 @@ function loadSettings() {
         return getDefaultSettings(); // Fall back to default settings
     }
 }
+
 const userSettings = loadSettings();
 const dbPath = userSettings.downloadsDatabasePath || path.join(app.getPath('userData'), 'downloads_database.db');
+
+// Ensure the directory for the database exists
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+    try {
+        fs.mkdirSync(dbDir, { recursive: true });
+        console.log(`Created directory: ${dbDir}`);
+    } catch (err) {
+        console.error(`Error creating directory ${dbDir}:`, err.message);
+        // Depending on your application's requirements, you might want to:
+        // - Exit the process
+        // - Use a fallback directory
+        // - Notify the user
+        // For example:
+        // process.exit(1);
+    }
+}
 
 let db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
@@ -28,10 +48,15 @@ let db = new sqlite3.Database(dbPath, (err) => {
             downloadArtistOrUploader TEXT,
             downloadLocation TEXT,
             downloadThumbnail TEXT
-        )`);
+        )`, (err) => {
+            if (err) {
+                console.error('Error creating downloads table:', err.message);
+            } else {
+                console.log('Downloads table is ready.');
+            }
+        });
     }
 });
-
 
 function saveDownloadToDatabase(downloadInfo) {
     const sql = `INSERT INTO downloads (downloadName, downloadArtistOrUploader, downloadLocation, downloadThumbnail) 
@@ -57,6 +82,7 @@ function loadDownloadsFromDatabase(callback) {
         callback(rows);
     });
 }
+
 function deleteFromDatabase(event, id) {
     return new Promise((resolve, reject) => {
         const sql = 'DELETE FROM downloads WHERE id = ?';
@@ -70,6 +96,7 @@ function deleteFromDatabase(event, id) {
         });
     });
 }
+
 async function closeDatabase() {
     return new Promise((resolve, reject) => {
         db.close((err) => {
@@ -86,7 +113,7 @@ async function closeDatabase() {
 
 async function reconnectDatabase() {
     return new Promise((resolve, reject) => {
-        db = new sqlite3.Database(userSettings.downloadsDatabasePath, (err) => {
+        db = new sqlite3.Database(dbPath, (err) => { // Use dbPath instead of userSettings.downloadsDatabasePath for consistency
             if (err) {
                 console.error('Error reopening the database:', err.message);
                 reject(err);
@@ -105,7 +132,7 @@ async function reconnectDatabase() {
                         console.error('Error creating downloads table:', err.message);
                         reject(err);
                     } else {
-                        console.log('Downloads table created (if it did not exist).');
+                        console.log('Downloads table is ready.');
                         resolve();
                     }
                 });
@@ -114,16 +141,15 @@ async function reconnectDatabase() {
     });
 }
 
-
 async function deleteDataBase() {
-    console.log(userSettings.downloadsDatabasePath);
+    console.log(dbPath);
     try {
         // Close the database connection before deleting the file
         await closeDatabase();
 
-        if (fs.existsSync(userSettings.downloadsDatabasePath)) {
+        if (fs.existsSync(dbPath)) {
             // Delete the database file
-            fs.unlinkSync(userSettings.downloadsDatabasePath);
+            fs.unlinkSync(dbPath);
             console.log('Database file deleted successfully.');
 
             // Recreate an empty database and table
@@ -139,7 +165,5 @@ async function deleteDataBase() {
         return { success: false, message: error.message };
     }
 }
-
-
 
 module.exports = { saveDownloadToDatabase, loadDownloadsFromDatabase, deleteFromDatabase, deleteDataBase };
