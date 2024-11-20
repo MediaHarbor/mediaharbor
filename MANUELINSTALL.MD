@@ -19,5 +19,5 @@ I apologize for the first start problems, please create a new issue with details
 | **pyapplemusicapi** (Apple Music Search) | [pyapplemusicapi GitHub](https://github.com/someuser/pyapplemusicapi) | `pip install pyapplemusicapi`                                               |
 
 ## Why custom_?
-Because their installers don't support new line downloaders, I modified them. If they add new line progress bars to their CLI (like yt-dlp), we can use them.
+Because their downloaders don't support new line downloaders, I modified them. If they add new line progress bars to their CLI (like yt-dlp), we can use them.
 
