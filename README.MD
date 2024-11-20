@@ -64,7 +64,7 @@ To build the application:
 npm run build
 ```
 ## Manual installation for first start
-You can find which packages MH currenly uses at [MANUELINSTALL.MD](MANUELINSTALL.MD).
+You can find which packages MH currently uses at [MANUELINSTALL.MD](MANUELINSTALL.MD).
 ## Contributing
 All contributions are welcome! Please read the contributing guidelines in the [CONTRIBUTING.md](CONTRIBUTING.md) file.
 
