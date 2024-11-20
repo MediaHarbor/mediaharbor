@@ -160,6 +160,116 @@ class CustomRip {
     }
 
 
+    // Forgot to keep this long time ago while copying from other IDE. currently works but, it can't show live data. will ve fixed on 1.1.0
+    async handleBatchDownload(event, data, serviceName) {
+        const { filePath, quality } = data;
+        const ripArgs = ['-q', quality, 'file', filePath];
+        const downloadOrder = getNextDownloadOrder();
+        const config = this.serviceConfig[serviceName];
+        let totalTracks = 0;
+        let completedTracks = 0;
+        let trackProgressMap = {};
+
+        event.reply('download-info', {
+            title: `Batch Download #${downloadOrder}`,
+            downloadArtistOrUploader: config.serviceName,
+            order: downloadOrder,
+            isBatch: true
+        });
+
+        const ripProcess = this.spawnProcess('custom_rip', ripArgs);
+
+        ripProcess.stdout.on('data', async (data) => {
+            const output = data.toString();
+            console.log(output);
+
+            const loadingMatch = output.match(/Loading (\d+) items/);
+            if (loadingMatch) {
+                totalTracks = parseInt(loadingMatch[1]);
+            }
+
+            const trackMatch = output.match(/Downloading: Track \d+: track-id=(\d+) \d+\/\d+ \((\d+\.\d+)%\)/);
+            if (trackMatch) {
+                const [, trackId, progress] = trackMatch;
+
+                if (!trackProgressMap[trackId]) {
+                    try {
+                        const details = await fetchServiceDetails(serviceName, trackId);
+                        trackProgressMap[trackId] = {
+                            trackTitle: details.title,
+                            artist: config.downloadInfoParser(details).downloadArtistOrUploader,
+                            progress: parseFloat(progress)
+                        };
+
+                        event.reply('download-update', {
+                            tracksProgress: Object.values(trackProgressMap),
+                            order: downloadOrder,
+                            completedTracks,
+                            totalTracks,
+                            isBatch: true
+                        });
+                    } catch (error) {
+                        console.error('Error fetching track details:', error);
+                    }
+                } else {
+                    trackProgressMap[trackId].progress = parseFloat(progress);
+                    event.reply('download-update', {
+                        tracksProgress: Object.values(trackProgressMap),
+                        order: downloadOrder,
+                        completedTracks,
+                        totalTracks,
+                        isBatch: true
+                    });
+                }
+            }
+
+            if (output.includes('Completed: Track')) {
+                completedTracks++;
+                const completedTrackMatch = output.match(/Completed: Track \d+: track-id=(\d+)/);
+                if (completedTrackMatch) {
+                    delete trackProgressMap[completedTrackMatch[1]];
+                }
+                event.reply('download-complete', {
+                    order: downloadOrder,
+                    completedTracks,
+                    totalTracks
+                });
+            }
+        });
+
+        ripProcess.stderr.on('data', (errorData) => {
+            const errorOutput = errorData.toString();
+            console.error(`Error: ${errorOutput}`);
+            event.reply('download-error', `Error: ${errorOutput}`);
+        });
+
+        ripProcess.on('exit', (code) => {
+            if (code === 0) {
+                fs.readFile(this.settingsFilePath, 'utf8', (err, settingsData) => {
+                    const settings = err ? this.getDefaultSettings() : JSON.parse(settingsData);
+                    const downloadLocation = settings.downloadLocation || this.app.getPath('downloads');
+
+                    const downloadInfo = {
+                        downloadName: `Batch Download #${downloadOrder}`,
+                        downloadArtistOrUploader: config.serviceName,
+                        downloadLocation,
+                        service: serviceName,
+                        isBatch: true
+                    };
+                    this.saveDownloadToDatabase(downloadInfo);
+                });
+                event.reply('download-complete', {
+                    order: downloadOrder,
+                    completedTracks,
+                    totalTracks
+                });
+            } else {
+                event.reply('download-error', `Process exited with code ${code}`);
+            }
+        });
+    }
+
+
     async handleDownload(event, data, serviceName) {
         const { default: stripAnsi } = await import('strip-ansi');
         this.log('Starting download:', { data, serviceName });
