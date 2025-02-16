@@ -14,10 +14,10 @@ I apologize for the first start problems, please create a new issue with details
 | **custom_streamrip** (Qobuz)             | [custom_streamrip](https://github.com/mediaharbor/custom_streamrip.git) | `pip install git+https://github.com/mediaharbor/custom_streamrip.git`     |
 | **custom_streamrip** (Deezer)            | [custom_streamrip](https://github.com/mediaharbor/custom_streamrip.git) | `pip install git+https://github.com/mediaharbor/custom_streamrip.git`     |
 | **custom_streamrip** (Tidal)             | [custom_streamrip](https://github.com/mediaharbor/custom_streamrip.git) | `pip install git+https://github.com/mediaharbor/custom_streamrip.git`     |
-| **custom_votify** (Spotify)              | [custom_votify GitHub](https://github.com/custom_votify)  | `pip install git+https://github.com/custom_votify.git`                    |
-| **custom_gamdl** (Apple Music)           | [custom_gamdl GitHub](https://github.com/custom_gamdl)  | `pip install git+https://github.com/custom_gamdl.git`                      |
-| **pyapplemusicapi** (Apple Music Search) | [pyapplemusicapi GitHub](https://github.com/someuser/pyapplemusicapi) | `pip install pyapplemusicapi`                                               |
+| **custom_votify** (Spotify)              | [custom_votify GitHub](https://github.com/mediaharbor/custom_votify)  | `pip install git+https://github.com/mediaharbor/custom_votify.git`        |
+| **custom_gamdl** (Apple Music)           | [custom_gamdl GitHub](https://github.com/mediaharbor/custom_gamdl)  | `pip install git+https://github.com/mediaharbor/custom_gamdl.git`         |
+| **pyapplemusicapi** (Apple Music Search) | [pyapplemusicapi GitHub](https://github.com/queengooborg/pyapplemusicapi) | `pip install pyapplemusicapi`                                              |
+| **Bento4** (MP4Decrypt)              | [Bento4 Binaries](https://www.bok.net/Bento4/binaries/?C=M;O=D) | Download and extract manually, then add to system path                                             |
 
 ## Why custom_?
 Because their downloaders don't support new line downloaders, I modified them. If they add new line progress bars to their CLI (like yt-dlp), we can use them.
-
