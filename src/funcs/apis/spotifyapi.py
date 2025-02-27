@@ -2,6 +2,7 @@ import datetime
 import json
 import argparse
 import requests
+import sys
 import os
 from base64 import b64encode
 from urllib.parse import quote
