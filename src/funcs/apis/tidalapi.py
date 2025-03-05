@@ -4,7 +4,6 @@ import argparse
 import requests
 import os
 from base64 import b64encode
-from urllib.parse import quote
 
 class TidalAPI:
     API_URL = "https://openapi.tidal.com/v2"
