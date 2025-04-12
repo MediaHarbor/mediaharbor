@@ -62,7 +62,7 @@
     </div>
     <div id="spotify" class="tab-content">
         <h2>Spotify</h2>
-        <input type="text" id="spotify-search" placeholder="Enter YouTube Music Search Query">
+        <input type="text" id="spotify-search" placeholder="Enter Spotify Search Query">
         <div class="dropdown" id="spotify-search-type">
             <button data-value="track" class="dropdown-btn">Tracks</button>
             <div class="dropdown-content">
@@ -78,7 +78,7 @@
     </div>
     <div id="deezer" class="tab-content">
         <h2>Deezer</h2>
-        <input type="text" id="deezer-search" placeholder="Enter YouTube Music Search Query">
+        <input type="text" id="deezer-search" placeholder="Enter Deezer Search Query">
         <div class="dropdown" id="deezer-search-type">
             <button data-value="track" class="dropdown-btn">Tracks</button>
             <div class="dropdown-content">
@@ -95,7 +95,7 @@
     </div>
     <div id="qobuz" class="tab-content">
         <h2>Qobuz</h2>
-        <input type="text" id="qobuz-search" placeholder="Enter YouTube Music Search Query">
+        <input type="text" id="qobuz-search" placeholder="Enter Qobuz Search Query">
         <div class="dropdown" id="qobuz-search-type">
             <button data-value="track" class="dropdown-btn">Tracks</button>
             <div class="dropdown-content">
@@ -109,7 +109,7 @@
     </div>
     <div id="tidal" class="tab-content">
         <h2>Tidal</h2>
-        <input type="text" id="tidal-search" placeholder="Enter YouTube Music Search Query">
+        <input type="text" id="tidal-search" placeholder="Enter Tidal Search Query">
         <div class="dropdown" id="tidal-search-type">
             <button data-value="track" class="dropdown-btn">Tracks</button>
             <div class="dropdown-content">
@@ -123,7 +123,7 @@
     </div>
     <div id="applemusic" class="tab-content">
         <h2>Apple Music</h2>
-        <input type="text" id="applemusic-search" placeholder="Enter YouTube Search Query">
+        <input type="text" id="applemusic-search" placeholder="Enter Apple Music Search Query">
         <div class="dropdown" id="applemusic-search-type">
             <button data-value="track" class="dropdown-btn">Tracks</button>
             <div class="dropdown-content">
@@ -133,6 +133,34 @@
             </div>
         </div>
         <button id="applemusic-search-button"><span class="fa-solid fa-magnifying-glass"></span></button>
+    </div>
+    <!-- Qobuz Album Modal -->
+    <div id="qobuz-album-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <div class="album-header">
+                <img src="" alt="Album Thumbnail" id="album-thumbnail" class="album-thumbnail">
+                <div class="album-info">
+                    <h2 id="album-name">Album Name</h2>
+                    <p id="album-description">Album Description</p>
+                </div>
+            </div>
+            <table id="track-table">
+                <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Track Title</th>
+                    <th>Duration</th>
+                    <th>Download</th>
+                    <th>Play</th>
+                    <th>Copy</th>
+                </tr>
+                </thead>
+                <tbody>
+                <!-- Tracks will be populated here -->
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <div id="floating-search-notifications" class="floating-notifications-container"></div>
