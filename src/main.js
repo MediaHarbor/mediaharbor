@@ -105,6 +105,15 @@ ipcMain.on('refresh-app', () => {
     app.exit(0);
 });
 
+ipcMain.handle('copy-handler', async (event, text) => {
+    try {
+        return await clipboard.writeText(text);
+    } catch (error) {
+        console.error('Copy error:', error);
+        throw error;
+    }
+});
+
 ipcMain.handle('load-downloads', () => {
     return new Promise((resolve, reject) => {
         loadDownloadsFromDatabase((rows) => {
@@ -315,7 +324,7 @@ ipcMain.handle('play-media', async (event, { url, platform }) => {
             default:
                 if (url !== "null"){
                     event.sender.send('stream-ready', { streamUrl: url, platform });
-                    resolve({ streamUrl: url, platform });
+                    resolve({ streamUrl, platform });
                     return;
                 }
                 else if (url === 'WIP') {
@@ -387,10 +396,489 @@ ipcMain.handle('stream-ready', async (event, { streamUrl, platform }) => {
     event.sender.send('stream-ready', { streamUrl, platform });
 });
 
+
+async function handleGetAlbumDetails(platform, albumId) {
+    const platformScripts = {
+        qobuz: 'funcs/apis/qobuzapi.py',
+        tidal: 'funcs/apis/tidalapi.py',
+        deezer: 'funcs/apis/deezerapi.py',
+        youtubeMusic: 'funcs/apis/ytmusicsearchapi.py',
+        spotify: 'funcs/apis/spotifyapi.py',
+    };
+
+    return new Promise(async (resolve, reject) => {
+        try {
+            const pythonScript = platformScripts[platform];
+            if (!pythonScript) {
+                throw new Error(`Unsupported platform: ${platform}`);
+            }
+
+            const scriptPath = getResourcePath(pythonScript);
+            const pythonCommand = await getPythonCommand();
+
+            const process = spawn(pythonCommand, [scriptPath, '--get-track-list', `album/${albumId}`]);
+            let stdout = '';
+            let stderr = '';
+
+            process.stdout.on('data', (data) => {
+                stdout += data.toString();
+            });
+
+            process.stderr.on('data', (data) => {
+                stderr += data.toString();
+            });
+
+            process.on('close', (code) => {
+                if (code === 0) {
+                    try {
+                        const result = JSON.parse(stdout);
+                        const formattedResult = formatPlatformResponseAlbum(platform, result);
+                        resolve(formattedResult);
+                    } catch (error) {
+                        console.error('JSON Parse Error:', error);
+                        console.log('Raw stdout:', stdout);
+                        reject(new Error(`Failed to parse JSON: ${error.message}`));
+                    }
+                } else {
+                    console.error(`Process error: ${stderr}`);
+                    reject(new Error(`Process failed with code ${code}: ${stderr}`));
+                }
+            });
+
+            process.on('error', (error) => {
+                reject(new Error(`Failed to start process: ${error.message}`));
+            });
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+function formatPlatformResponseAlbum(platform, result) {
+    const formatters = {
+        qobuz: (data) => {
+            const albumInfo = {
+                title: 'Unknown Album',
+                artist: data[0]?.performer?.name || 'Unknown Artist',
+                releaseDate: data[0]?.release_date_original || 'Unknown Date',
+                coverUrl: '',
+                description: '',
+                duration: data.reduce((sum, track) => sum + (track.duration || 0), 0),
+                genre: '',
+            };
+
+            const tracks = data.map((track, index) => ({
+                id: track.id,
+                number: track.track_number || (index + 1),
+                title: track.title,
+                duration: track.duration,
+                quality: `${track.maximum_bit_depth || '16'}bit / ${track.maximum_sampling_rate || '44.1'}kHz`,
+                playUrl: track.id ? `https://play.qobuz.com/track/${track.id}` : null,
+                artist: track.performer ? track.performer.name : albumInfo.artist,
+            }));
+
+            return { album: albumInfo, tracks };
+        },
+
+        tidal: (data) => {
+            const albumData = data.data.attributes;
+            const trackList = data.included;
+            const trackOrderMap = new Map(
+                data.data.relationships.items.data.map((item, index) => [item.id, index + 1])
+            );
+
+            const albumInfo = {
+                title: albumData.title || 'Unknown Album',
+                artist: 'Unknown Artist',
+                releaseDate: albumData.releaseDate || 'Unknown Date',
+                coverUrl: albumData.imageLinks?.[0]?.href || '',
+                description: '',
+                duration: parseDuration(albumData.duration),
+                genre: '',
+            };
+
+            const tracks = trackList
+                .filter(track => track.type === 'tracks')
+                .sort((a, b) => {
+                    const aOrder = trackOrderMap.get(a.id) || 0;
+                    const bOrder = trackOrderMap.get(b.id) || 0;
+                    return aOrder - bOrder;
+                })
+                .map(track => ({
+                    id: track.id,
+                    number: trackOrderMap.get(track.id) || 0,
+                    title: track.attributes.title,
+                    duration: parseDuration(track.attributes.duration),
+                    quality: track.attributes.mediaTags.includes('LOSSLESS') ? '16bit / 44.1kHz' : 'AAC',
+                    playUrl: track.attributes.externalLinks?.[0]?.href || null,
+                    artist: 'Unknown Artist',
+                }));
+
+            return { album: albumInfo, tracks };
+        },
+
+        deezer: (data) => {
+            const albumInfo = {
+                title: data.name || 'Unknown Album',
+                artist: data.artist || 'Unknown Artist',
+                releaseDate: data.release_date || 'Unknown Date',
+                coverUrl: data.md5_image ? `https://e-cdns-images.dzcdn.net/images/cover/${data.md5_image}/1000x1000.jpg` : '',
+                description: '',
+                duration: data.tracks.reduce((sum, track) => sum + (track.duration || 0), 0),
+                genre: '',
+            };
+
+            const tracks = data.tracks.map(track => ({
+                id: track.id,
+                number: track.track_position || 0,
+                title: track.title,
+                duration: track.duration,
+                quality: '',
+                playUrl: track.preview || null,
+                artist: track.artist?.name || albumInfo.artist,
+            }));
+
+            return { album: albumInfo, tracks };
+        },
+
+        youtubeMusic: (data) => {
+            const albumInfo = {
+                title: data.album.title || 'Unknown Album',
+                artist: data.album.artist || 'Unknown Artist',
+                releaseDate: data.album.releaseDate || 'Unknown Date',
+                coverUrl: data.album.coverUrl || '',
+                description: data.album.description || '',
+                duration: data.album.duration || 0,
+                genre: data.album.genre || '',
+            };
+
+            const tracks = data.tracks.map(track => ({
+                id: track.id || '',
+                number: track.number || 0,
+                title: track.title || 'Unknown Title',
+                duration: track.duration || 0,
+                quality: track.quality || '256Kbps',
+                playUrl: track.playUrl || null,
+                artist: albumInfo.artist,
+            }));
+
+            return { album: albumInfo, tracks };
+        },
+
+        spotify: (data) => {
+            const albumInfo = {
+                title: data.album_name || 'Unknown Album',
+                artist: data.artist_name || 'Unknown Artist',
+                releaseDate: data.release_date || 'Unknown Date',
+                coverUrl: data.cover_url || '',
+                description: '',
+                duration: '',
+                genre: '',
+            };
+
+            const tracks = data.tracks.map(track => ({
+                id: track.id,
+                number: track.track_number || 0,
+                title: track.name,
+                duration: Math.floor(track.duration_ms / 1000),
+                quality: '',
+                playUrl: track.preview_url || null,
+                artist: track.artists?.[0]?.name || albumInfo.artist,
+            }));
+
+            return { album: albumInfo, tracks };
+        },
+    };
+
+    const formatter = formatters[platform];
+    if (!formatter) {
+        throw new Error(`No formatter available for platform: ${platform}`);
+    }
+
+    return formatter(result);
+}
+
+async function handleGetPlaylistDetails(platform, playlistId) {
+    const platformScripts = {
+        qobuz: 'funcs/apis/qobuzapi.py',
+        tidal: 'funcs/apis/tidalapi.py',
+        deezer: 'funcs/apis/deezerapi.py',
+        youtubeMusic: 'funcs/apis/ytmusicsearchapi.py',
+        spotify: 'funcs/apis/spotifyapi.py',
+        youtube: 'funcs/apis/ytsearchapi.py'
+    };
+
+    return new Promise(async (resolve, reject) => {
+        try {
+            const pythonScript = platformScripts[platform];
+            if (!pythonScript) {
+                throw new Error(`Unsupported platform: ${platform}`);
+            }
+
+            const scriptPath = getResourcePath(pythonScript);
+            const pythonCommand = await getPythonCommand();
+
+            const process = spawn(pythonCommand, [scriptPath, '--get-track-list', `playlist/${playlistId}`]);
+            let stdout = '';
+            let stderr = '';
+
+            process.stdout.on('data', (data) => {
+                stdout += data.toString();
+            });
+
+            process.stderr.on('data', (data) => {
+                stderr += data.toString();
+            });
+
+            process.on('close', (code) => {
+                if (code === 0) {
+                    try {
+                        const result = JSON.parse(stdout);
+                        const formattedResult = formatPlatformResponsePlaylist(platform, result);
+                        resolve(formattedResult);
+                    } catch (error) {
+                        console.error('JSON Parse Error:', error);
+                        console.log('Raw stdout:', stdout);
+                        reject(new Error(`Failed to parse JSON: ${error.message}`));
+                    }
+                } else {
+                    console.error(`Process error: ${stderr}`);
+                    reject(new Error(`Process failed with code ${code}: ${stderr}`));
+                }
+            });
+
+            process.on('error', (error) => {
+                reject(new Error(`Failed to start process: ${error.message}`));
+            });
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+function formatPlatformResponsePlaylist(platform, result) {
+    const formatters = {
+        qobuz: (data) => {
+            const playlistInfo = {
+                title: 'Unknown Playlist',
+                creator: '',
+                creationDate: data[0]?.creation_date || 'Unknown Date',
+                coverUrl: '',
+                description: data[0]?.description || 'No description available',
+                duration: data.reduce((sum, track) => sum + (track.duration || 0), 0),
+                totalTracks: data.length,
+            };
+
+            const tracks = data.map((track, index) => ({
+                id: track.id,
+                number: track.position || (index + 1),
+                title: track.title,
+                cover: track.album.image.small,
+                albumTitle: track.album.title,
+                albumArtist: track.album.artist.name,
+                explicit: track.parental_warning,
+                duration: track.duration,
+                quality: `${track.maximum_bit_depth || '16'}bit / ${track.maximum_sampling_rate || '44.1'}kHz`,
+                playUrl: track.url || null,
+                artist: track.performer ? track.performer.name : 'Unknown Artist',
+            }));
+
+            return { playlist: playlistInfo, tracks };
+        },
+
+        deezer: (data) => {
+            const playlistInfo = {
+                title: data.name || 'Unknown Playlist',
+                creator: data.artist || 'Unknown Creator',
+                creationDate: data.release_date || 'Unknown Date',
+                coverUrl: data.md5_image
+                    ? `https://e-cdns-images.dzcdn.net/images/cover/${data.md5_image}/1000x1000.jpg`
+                    : '',
+                description: '',
+                duration: data.tracks.reduce((sum, track) => sum + (track.duration || 0), 0),
+                totalTracks: data.total_tracks || data.tracks.length
+            };
+
+            const tracks = data.tracks.map((track, index) => {
+                return {
+                    id: track.id,
+                    number: index + 1,
+                    title: track.title,
+                    cover: track.album?.cover_small,
+                    albumTitle: track.album?.title,
+                    explicit: track.explicit_lyrics,
+                    duration: track.duration,
+                    quality: 'MP3 320kbps',
+                    playUrl: track.preview || null,
+                    albumArtist: track.artist?.name || 'Unknown Artist'
+                };
+            });
+
+            return { playlist: playlistInfo, tracks };
+        },
+
+
+        youtubeMusic: (data) => {
+            const playlistInfo = {
+                title: data.album.title || 'Unknown Album',
+                artist: data.album.artist || 'Unknown Artist',
+                releaseDate: data.album.releaseDate || 'Unknown Date',
+                coverUrl: data.album.coverUrl || '',
+                description: data.album.description || '',
+                duration: data.album.duration || 0,
+                genre: data.album.genre || '',
+            };
+
+            const tracks = data.tracks.map(track => ({
+                id: track.id || '',
+                number: track.number || 0,
+                title: track.title || 'Unknown Title',
+                duration: track.duration || 0,
+                quality: track.quality || '256Kbps',
+                playUrl: track.playUrl || null,
+                artist: playlistInfo.artist,
+            }));
+
+            return { playlist: playlistInfo, tracks };
+        },
+
+        spotify: (data) => {
+            const playlistInfo = {
+                title: data.playlist_name || 'Unknown Album',
+                artist: data.owner_name || 'Unknown Artist',
+                releaseDate: '', // No release date at playlist level
+                coverUrl: data.cover_url || '',
+                description: '',
+                duration: '',
+                genre: '',
+            };
+
+            const tracks = data.tracks.map((item, index) => {
+                const track = item.track;
+                return {
+                    id: track?.id,
+                    number: index + 1,
+                    title: track.name,
+                    duration: Math.floor(track.duration_ms / 1000),
+                    quality: '320 Kbps',
+                    playUrl: track.preview_url || null,
+                    cover: track.album.images[2]?.url || '',
+                    albumArtist: track.album.artists[0]?.name || '',
+                    albumTitle: track.album?.name || '',
+                };
+            });
+
+            return { playlist: playlistInfo, tracks };
+        },
+
+
+        youtube: (data) => {
+            const playlistInfo = {
+                title: data.Playlist.title,
+                artist: data.Playlist.artist,
+                releaseDate: data.Playlist.releaseDate,
+                coverUrl: data.Playlist.coverUrl,
+                description: data.Playlist.description,
+                duration: data.Playlist.duration
+            };
+
+            const tracks = data.Tracks.map(track => ({
+                id: track.id,
+                number: track.number,
+                title: track.title,
+                cover: track.coverUrl,
+                duration: track.duration,
+            }));
+
+            return { playlist: playlistInfo, tracks };
+        }
+    };
+
+    const formatter = formatters[platform];
+    if (!formatter) {
+        throw new Error(`No formatter available for platform: ${platform}`);
+    }
+
+    return formatter(result);
+}
+
+
+
+function parseDuration(duration) {
+    if (!duration) return 0;
+
+    const matches = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    if (!matches) return 0;
+
+    const [_, hours, minutes, seconds] = matches;
+    return (parseInt(hours || 0) * 3600) +
+        (parseInt(minutes || 0) * 60) +
+        (parseInt(seconds || 0));
+}
+// IPC handler
+ipcMain.handle('get-album-details', async (event, platform, albumId) => {
+    try {
+        const result = await handleGetAlbumDetails(platform, albumId);
+        return {
+            success: true,
+            data: result
+        };
+    } catch (error) {
+        console.error('Error in get-album-details:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+});
+
+ipcMain.handle('get-playlist-details', async (event, platform, playlistId) => {
+    try {
+        const result = await handleGetPlaylistDetails(platform, playlistId);
+        return {
+            success: true,
+            data: result
+        };
+    } catch (error) {
+        console.error('Error in get-playlist-details:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+});
+
+ipcMain.handle('get-qobuz-track-list', async (event, { playUrl }) => {
+    const pythonCommand = await getPythonCommand(); // Ensure this function is defined
+    const platform = "qobuz"
+    const scriptPath = getResourcePath(getPythonStreamScript(platform));
+
+    return new Promise((resolve, reject) => {
+        const command = `${pythonCommand} "${scriptPath}" --get-track-list "${playUrl}"`;
+        exec(command, { encoding: 'utf8' }, (error, stdout, stderr) => {
+            if (error) {
+                console.error('Error executing Qobuz API script:', error);
+                reject(new Error('Failed to retrieve track list'));
+                return;
+            }
+
+            try {
+                console.log(stdout)
+                const trackList = JSON.parse(stdout);
+                resolve(trackList);
+            } catch (parseError) {
+                console.error('Error parsing track list:', parseError);
+                reject(new Error('Invalid track list format'));
+            }
+        });
+    });
+});
 function createWindow() {
     const win = new BrowserWindow({
         width: 1200,
         height: 800,
+        minHeight: 600,
+        minWidth: 915,
         frame: true,
         autoHideMenuBar: true,
         webPreferences: {
@@ -472,6 +960,16 @@ function createWindow() {
         {saveDownloadToDatabase}
     );
 
+    ipcMain.handle('clear-zotify-credentials', async (event) => {
+        try {
+            await gamRip.clearCredentials();
+            return { success: true, message: 'Credentials cleared successfully' };
+        } catch (error) {
+            console.error('Error clearing credentials:', error);
+            return { success: false, message: error.message };
+        }
+    });
+
     ipcMain.on('start-spotify-download', (event, command) => {
         gamRip.handleDownload(event, command, 'spotify')
     })
@@ -480,10 +978,10 @@ function createWindow() {
         gamRip.handleDownload(event, command, 'applemusic')
     })
     ipcMain.on('start-apple-batch-download', (event, command) => {
-        gamRipInstance.handleBatchDownload(event, data, 'applemusic');
+        gamRip.handleBatchDownload(event, data, 'applemusic');
     })
     ipcMain.on('start-spotify-batch-download', (event, command) => {
-        gamRipInstance.handleBatchDownload(event, data, 'spotify');
+        gamRip.handleBatchDownload(event, data, 'spotify');
     })
 
     const customRip = new CustomRip(
@@ -566,7 +1064,7 @@ if (process.platform === 'win32') {
     } else {
         app.on('second-instance', (event, argv) => {
             if (process.platform === 'win32') {
-                console.log('Second instance argv:', argv); // Enhanced logging
+                console.log('Second instance argv:', argv);
                 const protocolUrl = argv.find(arg => arg.startsWith('mediaharbor://'));
                 if (protocolUrl) {
                     handleProtocolUrl(protocolUrl);
@@ -620,7 +1118,8 @@ function getPythonScript(platform) {
 function getPythonStreamScript(platform) {
     const scriptMap = {
         youtube: './funcs/apis/ytvideostream.py',
-        youtubeMusic: './funcs/apis/ytaudiostream.py'
+        youtubeMusic: './funcs/apis/ytaudiostream.py',
+        qobuz: './funcs/apis/qobuzapi.py'
     };
     return scriptMap[platform] || '';
 }
@@ -628,7 +1127,7 @@ function getPipCommand() {
     const platform = os.platform();
     switch (platform) {
         case 'win32':
-            return 'py -m pip';  // Use py launcher with -m pip on Windows
+            return 'python -m pip';
         case 'darwin':
         case 'linux':
             return 'python3 -m pip';
@@ -642,52 +1141,72 @@ function sanitizePackageName(packageName) {
 }
 
 function updateDependencies(packages, event) {
-    if (!Array.isArray(packages)) {
-        console.error("Expected an array of packages.");
+    if (!Array.isArray(packages) || packages.length === 0) {
+        console.error("Expected a non-empty array of packages.");
+        event.sender.send('showNotification', {
+            type: 'error',
+            message: 'Invalid package list provided'
+        });
+        event.sender.send('toggleLoading', false);
         return;
     }
 
-    console.log('Received packages:', packages);
+    console.log('Updating packages:', packages);
+    event.sender.send('toggleLoading', true);
+
     const pipCommand = getPipCommand();
-    let completedCount = 0;
+    const promises = packages.map(packageName => {
+        return new Promise((resolve) => {
+            const sanitizedPackage = sanitizePackageName(packageName);
+            let installCommand = `${pipCommand} install --upgrade "${sanitizedPackage}"`;
 
-    packages.forEach(packageName => {
-        const sanitizedPackage = sanitizePackageName(packageName);
-        let installCommand = `${pipCommand} install --upgrade "${sanitizedPackage}"`;
-
-        // Add --user flag for non-root installations on Unix systems
-        if (os.platform() !== 'win32') {
-            installCommand += ' --user';
-        }
-
-        console.log(`Executing: ${installCommand}`);
-
-        exec(installCommand, { shell: true }, (error, stdout, stderr) => {
-            completedCount++;
-
-            if (error) {
-                console.error(`Error installing ${sanitizedPackage}:`, error.message);
-                event.reply('showNotification', {
-                    type: 'error',
-                    message: `Failed to install ${sanitizedPackage}: ${error.message}`
-                });
-            } else {
-                event.reply('showNotification', {
-                    type: 'success',
-                    message: `Successfully installed ${sanitizedPackage}`
-                });
+            if (os.platform() !== 'win32' && process.getuid && process.getuid() !== 0) {
+                installCommand += ' --user';
             }
 
-            if (stderr) {
-                console.warn(`stderr for ${sanitizedPackage}:`, stderr);
-            }
-            console.log(`stdout for ${sanitizedPackage}:`, stdout);
+            console.log(`Executing: ${installCommand}`);
 
-            if (completedCount === packages.length) {
-                event.reply('toggleLoading', false);
-            }
+            exec(installCommand, { shell: true }, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Error installing ${sanitizedPackage}:`, error.message);
+                    event.sender.send('showNotification', {
+                        type: 'error',
+                        message: `Failed to install ${sanitizedPackage}: ${error.message}`
+                    });
+                } else {
+                    console.log(`Successfully installed ${sanitizedPackage}`);
+                    event.sender.send('showNotification', {
+                        type: 'success',
+                        message: `Successfully installed ${sanitizedPackage}`
+                    });
+                }
+
+                if (stderr && stderr.trim()) {
+                    console.warn(`stderr for ${sanitizedPackage}:`, stderr);
+                }
+
+                if (stdout && stdout.trim()) {
+                    console.log(`stdout for ${sanitizedPackage}:`, stdout);
+                }
+
+                resolve();
+            });
         });
     });
+
+    Promise.all(promises)
+        .then(() => {
+            console.log('All package installations completed');
+            event.sender.send('toggleLoading', false);
+            event.sender.send('showNotification', {
+                type: 'success',
+                message: `Update completed for ${packages.length} package(s)`
+            });
+        })
+        .catch(err => {
+            console.error('Unexpected error during installation:', err);
+            event.sender.send('toggleLoading', false);
+        });
 }
 async function getPythonVersionOutput(command) {
     try {
@@ -701,7 +1220,7 @@ async function getPythonVersionOutput(command) {
 }
 
 /**
- * Checks if the installed Python version is between 3.9 and 3.12 inclusive.
+ * Checks if the installed Python version is between 3.10 and 3.13 inclusive.
  * @returns {Promise<boolean>} - True if the Python version is within the range, else false.
  */
 async function checkPythonVersion() {
@@ -711,7 +1230,7 @@ async function checkPythonVersion() {
         const version = await getPythonVersionOutput(command);
         if (version) {
             const [major, minor] = version.split('.').map(Number);
-            if (major === 3 && minor >= 9 && minor <= 12) {
+            if (major === 3 && minor >= 10 && minor <= 13) {
                 return true;
             }
         }
@@ -773,7 +1292,7 @@ function setupFirstStartHandlers(win) {
                     status.deezer = stdout.includes('custom_streamrip');
                     status.tidal = stdout.includes('custom_streamrip');
                     status.apple = stdout.includes('custom_gamdl');
-                    status.spotify = stdout.includes('custom_votify');
+                    status.spotify = stdout.includes('custom_zotify');
                 } else {
                     console.error('Unexpected type for pipList.stdout:', typeof stdout);
                 }
@@ -801,7 +1320,7 @@ function setupFirstStartHandlers(win) {
                     await downloadAndInstallFFmpeg(win);
                     break;
                 case 'ytdlp':
-                    await installWithProgress(`${pythonCommand} -m pip install --upgrade yt-dlp`, win, dep);
+                    await installWithProgress(`${pythonCommand} -m pip install --upgrade yt-dlp isodate`, win, dep);
                     break;
                 case 'ytmusic':
                     await installWithProgress(`${pythonCommand} -m pip install --upgrade ytmusicapi`, win, dep);
@@ -816,17 +1335,45 @@ function setupFirstStartHandlers(win) {
                     );
                     break;
                 case 'apple':
-                    await downloadAndInstallBento4(win);
+                    
+                    await downloadAndInstallBento4(win)
+                    
+
                     await installWithProgress(
-                        `${pythonCommand} -m pip install --upgrade pyapplemusicapi git+https://github.com/mediaharbor/custom_gamdl.git`,
+                        `${pythonCommand} -m pip install --upgrade pyapplemusicapi`,
                         win,
-                        dep
+                        'apple',
+                        {
+                            startPercent: 30,
+                            endPercent: 60,
+                            prefix: 'Installing pyapplemusicapi'
+                        }
+                    );
+                    await installWithProgress(
+                        `${pythonCommand} -m pip install --upgrade pyapplemusicapi`,
+                        win,
+                        'apple',
+                        {
+                            startPercent: 30,
+                            endPercent: 60,
+                            prefix: 'Installing pyapplemusicapi'
+                        }
+                    );
+
+                    await installWithProgress(
+                        `${pythonCommand} -m pip install --upgrade git+https://github.com/mediaharbor/custom_gamdl.git`,
+                        win,
+                        'apple',
+                        {
+                            startPercent: 60,
+                            endPercent: 100,
+                            prefix: 'Installing custom_gamdl'
+                        }
                     );
                     break;
                 case 'spotify':
-                    await downloadAndInstallBento4(win);
                     await installWithProgress(
-                        `${pythonCommand} -m pip install --upgrade git+https://github.com/mediaharbor/custom_votify.git`,
+                        `${pythonCommand} -m pip install --upgrade git+https://github.com/mediaharbor/custom_zotify.git`,
                         win,
                         dep
                     );
@@ -860,53 +1407,155 @@ function setupFirstStartHandlers(win) {
         app.exit(0);
     });
 }
-async function installWithProgress(command, win, dep) {
+function installWithProgress(command, win, dep, options = {}) {
+    const {
+        startPercent = 0,
+        endPercent = 100,
+        prefix = `Installing ${dep}`
+    } = options;
+
     return new Promise((resolve, reject) => {
-        const process = spawn(command, { shell: true });
+        let currentCommand = command;
+        const executeCommand = (cmd) => {
+            const process = spawn(cmd, { shell: true });
+            let hasErrors = false;
+            let lastOutput = '';
+            let externallyManagedError = false;
 
-        process.stdout.on('data', (data) => {
-            const output = data.toString().trim(); // Convert to plain string
-            console.log(output); // Debugging purpose
-
-            // Match progress percentage from output if it exists
-            const progressMatch = output.match(/(?<=\()\d{1,3}(?=%\))/);
-            const progress = progressMatch ? parseInt(progressMatch[0], 10) : null;
-
-            // Send progress as a plain JSON string
-            win.webContents.send('installation-progress', JSON.stringify({
-                dependency: dep,
-                percent: progress,
-                status: progress ? `Installing ${dep}: ${progress}%` : output,
-            }));
-        });
-
-        process.stderr.on('data', (data) => {
-            const errorOutput = data.toString().trim(); // Convert to plain string
-            console.error(errorOutput);
-
-            // Send error as a plain JSON string
-            win.webContents.send('installation-error', JSON.stringify({
-                dependency: dep,
-                error: errorOutput,
-            }));
-        });
-
-        process.on('close', (code) => {
-            if (code === 0) {
+            const sendProgress = (progress, status) => {
+                const scaledProgress = Math.floor(
+                    startPercent + ((progress / 100) * (endPercent - startPercent))
+                );
                 win.webContents.send('installation-progress', JSON.stringify({
                     dependency: dep,
-                    percent: 100,
-                    status: `${dep} installation completed successfully.`,
+                    percent: scaledProgress,
+                    status: status || `${prefix}: ${progress}%`
                 }));
-                resolve();
-            } else {
-                reject(new Error(`${dep} installation failed with exit code ${code}`));
-            }
-        });
+            };
+
+            process.stdout.on('data', (data) => {
+                const output = data.toString().trim();
+                console.log(`[${dep}] stdout:`, output);
+                lastOutput = output;
+
+                if (output.includes('Cloning into')) {
+                    sendProgress(10, `${prefix}: Cloning repository...`);
+                } else if (output.includes('Receiving objects:')) {
+                    const match = output.match(/Receiving objects:\s+(\d+)%/);
+                    if (match) {
+                        const progress = parseInt(match[1]);
+                        sendProgress(10 + (progress * 0.3), `${prefix}: Cloning repository ${progress}%`);
+                    }
+                }
+                else if (output.includes('Building wheels')) {
+                    sendProgress(50, `${prefix}: Building package...`);
+                } else if (output.includes('Successfully built')) {
+                    sendProgress(75, `${prefix}: Package built successfully`);
+                }
+
+                else {
+                    const downloadMatch = output.match(/(?<=\()\d{1,3}(?=%\))/);
+                    if (downloadMatch) {
+                        const progress = parseInt(downloadMatch[0]);
+                        sendProgress(progress);
+                    }
+                }
+
+                if (output.includes('Successfully installed')) {
+                    sendProgress(100, `${prefix}: Installation completed`);
+                }
+            });
+
+            process.stderr.on('data', (data) => {
+                const errorOutput = data.toString().trim();
+
+                if (errorOutput.includes('externally-managed-environment')) {
+                    externallyManagedError = true;
+                    return;
+                }
+
+                if (errorOutput.includes('is installed in') && errorOutput.includes('which is not on PATH')) {
+                    const pathMatch = errorOutput.match(/'([^']+)'/);
+                    if (pathMatch) {
+                        const pythonPath = pathMatch[1];
+
+                        let plainMessage = '';
+                        const platform = process.platform;
+                        
+                        if (platform === 'darwin') {
+                            plainMessage = `Package Installed Successfully
+Run this command to add to PATH:
+echo 'export PATH="${pythonPath}:$PATH"' >> ~/.zshrc && source ~/.zshrc`;
+                        } else if (platform === 'win32') {
+                            // Windows instructions
+                            plainMessage = `Package Installed Successfully
+To add to PATH in Windows:
+1. Open System Properties > Advanced > Environment Variables
+2. Edit the PATH variable and add: ${pythonPath}
+3. Restart your terminal or command prompt for changes to take effect`;
+                        } else {
+                            plainMessage = `Package Installed Successfully
+Run this command to add to PATH:
+echo 'export PATH="${pythonPath}:$PATH"' >> ~/.bashrc && source ~/.bashrc`;
+                        }
+                        
+                        win.webContents.send('installation-message', plainMessage);
+                        return;
+                    }
+                }
+                const isWarning = /warn|warning|notice|deprecated/i.test(errorOutput) &&
+                    !/error|fail|exception|fatal/i.test(errorOutput);
+
+                if (isWarning) {
+                    console.warn(`[${dep}] warning:`, errorOutput);
+                } else {
+                    console.error(`[${dep}] error:`, errorOutput);
+                    hasErrors = true;
+                }
+
+                win.webContents.send('installation-message', {
+                    dependency: dep,
+                    message: errorOutput,
+                    type: isWarning ? 'warning' : 'error'
+                });
+            });
+
+            process.on('close', (code) => {
+                if (externallyManagedError) {
+                    console.log(`[${dep}] Detected externally-managed-environment error, retrying with --break-system-packages`);
+                    const modifiedCommand = cmd.replace(/pip install/g, 'pip install --break-system-packages');
+                    executeCommand(modifiedCommand);
+                    return;
+                }
+                
+                if (code === 0 || (!hasErrors && code !== null)) {
+                    sendProgress(100, `${prefix}: Installation completed successfully`);
+                    resolve();
+                } else {
+                    const errorMessage = `${dep} installation failed with exit code ${code}. Last output: ${lastOutput}`;
+                    win.webContents.send('installation-message', {
+                        dependency: dep,
+                        message: errorMessage,
+                        type: 'error'
+                    });
+                    reject(new Error(errorMessage));
+                }
+            });
+
+            process.on('error', (error) => {
+                const errorMessage = `Failed to start ${dep} installation: ${error.message}`;
+                console.error(`[${dep}] process error:`, errorMessage);
+                win.webContents.send('installation-message', {
+                    dependency: dep,
+                    message: errorMessage,
+                    type: 'error'
+                });
+                reject(new Error(errorMessage));
+            });
+        };
+        executeCommand(currentCommand);
     });
 }
-
-
 function handleProtocolUrl(url) {
     try {
         const urlObj = new URL(url);
@@ -955,7 +1604,7 @@ function inferPlatformFromUrl(url) {
 
     if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
         return 'youtube';
-    } else if (hostname.includes('music.youtube.com') || hostname.includes('ytmusic.com')) {
+    } else if (hostname.includes('music.youtube.com')) {
         return 'youtubeMusic';
     } else if (hostname.includes('spotify.com')) {
         return 'spotify';
@@ -965,9 +1614,9 @@ function inferPlatformFromUrl(url) {
         return 'deezer';
     } else if (hostname.includes('qobuz.com')) {
         return 'qobuz';
-    } else if (hostname.includes('apple.com') || hostname.includes('itunes.apple.com') || hostname.includes('music.apple.com')) {
+    } else if (hostname.includes('apple.com') || hostname.includes('itunes.apple.com') || hostname.includes('music.apple.com') || hostname.includes('music.*.apple.com')) {
         return 'applemusic';
     } else {
-        return null; // Unknown platform
+        return null;
     }
 }
