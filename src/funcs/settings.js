@@ -7,10 +7,10 @@ const { getDefaultSettings } = require("./defaults");
 const stream = require("node:stream");
 
 const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
-const spotifyConfigPath = path.join(app.getPath('userData'), 'spotify_config.json');
+const spotifyConfigPath = path.join(app.getPath('userData'), 'zotify_config.json'); // Renamed, otherwise could make some problems.
 const appleConfigPath = path.join(app.getPath('userData'), 'apple_config.json');
 
-// Updated merge function to preserve all settings
+
 const mergeServiceSettings = (settings, serviceConfig, servicePrefix) => {
     const merged = { ...settings };
 
@@ -33,13 +33,17 @@ function loadTheSettings() {
 }
 
 async function saveServiceConfig(configPath, settings, servicePrefix) {
+    const defaults = getDefaultSettings();
+    const defaultKeys = Object.keys(defaults).filter(k => k.startsWith(servicePrefix + "_"));
+
     const serviceSettings = Object.entries(settings)
-        .filter(([key]) => key.startsWith(servicePrefix))
+        .filter(([key, value]) =>
+            key.startsWith(servicePrefix) &&
+            defaultKeys.includes(key) &&
+            value !== null && value !== undefined && value !== ''
+        )
         .reduce((obj, [key, value]) => {
-            const configKey = key.replace(servicePrefix + '_', '');
-            if (value !== null && value !== undefined && value !== '') {
-                obj[configKey] = value;
-            }
+            obj[key.replace(servicePrefix + '_', '')] = value;
             return obj;
         }, {});
 
@@ -66,11 +70,14 @@ async function loadServiceConfig(configPath) {
 }
 
 async function saveSettings(event, settings) {
-    // First, save the main settings file
+    const defaultKeys = Object.keys(getDefaultSettings());
+    const cleanedSettings = Object.fromEntries(
+        Object.entries(settings).filter(([key]) => defaultKeys.includes(key))
+    );
     try {
         await fs.promises.writeFile(
             settingsFilePath,
-            JSON.stringify(settings, null, 4)
+            JSON.stringify(cleanedSettings, null, 4)
         );
     } catch (err) {
         console.error('Error saving main settings:', err);
@@ -130,7 +137,8 @@ async function saveSettings(event, settings) {
                 disc_subdirectories: settings.disc_subdirectories,
                 concurrency: settings.concurrency,
                 max_connections: parseInt(settings.max_connections),
-                requests_per_minute: parseInt(settings.requests_per_minute)
+                requests_per_minute: parseInt(settings.requests_per_minute),
+                verify_ssl: true
             };
 
             config.qobuz = {
@@ -178,6 +186,22 @@ async function saveSettings(event, settings) {
                 bit_depth: parseInt(settings.conversion_bit_depth || 16),
                 lossy_bitrate: parseInt(settings.conversion_lossy_bitrate || 320)
             };
+            config.qobuz_filters = {
+                extras: false,
+                repeats: false,
+                non_albums: false,
+                features: false,
+                non_studio_albums: false,
+                non_remaster: false
+            }
+
+            config.artwork = {
+                embed: true,
+                embed_size :"large",
+                embed_max_width: -1,
+                save_artwork: true,
+                saved_max_width: -1,
+            }
 
             config.metadata = {
                 set_playlist_to_album: settings.meta_album_name_playlist_check,
