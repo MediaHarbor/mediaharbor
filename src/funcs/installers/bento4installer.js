@@ -7,8 +7,8 @@ const unzipper = require("unzipper");
 const { spawn } = require("child_process");
 
 const config = {
-    version: "1-6-0-641", // If they update version
-    baseUrl: "https://www.bok.net/Bento4/binaries", //If they move website
+    version: "1-6-0-641",
+    baseUrl: "https://www.bok.net/Bento4/binaries",
     installDir: process.env.BENTO4_INSTALL_DIR || null,
 };
 
@@ -53,9 +53,76 @@ function createLogger(mainWin) {
  * Adds Bento4 'bin' directory to system PATH.
  */
 async function addBento4ToPath(binDir, platform, log, mainWin) {
+    if (platform === 'darwin') {
+
+        const files = fs.readdirSync(binDir);
+        for (const file of files) {
+            const filePath = path.join(binDir, file);
+            try {
+
+                fs.chmodSync(filePath, '755');
+                log(`Set executable permissions for ${file}`);
+            } catch (error) {
+                log(`Error setting permissions for ${file}: ${error.message}`);
+            }
+        }
+
+        const shellFiles = [
+            path.join(os.homedir(), '.zshrc'),
+            path.join(os.homedir(), '.bash_profile')
+        ];
+
+        for (const rcFile of shellFiles) {
+            try {
+                const exportCommand = `\n# Added by Bento4 installer\nexport PATH="${binDir}:$PATH"\n`;
+
+                if (fs.existsSync(rcFile)) {
+                    const rcContent = fs.readFileSync(rcFile, 'utf8');
+                    if (!rcContent.includes(binDir)) {
+                        fs.appendFileSync(rcFile, exportCommand);
+                        log(`Added Bento4 to PATH in ${rcFile}`);
+                    } else {
+                        log(`Bento4 already in PATH in ${rcFile}`);
+                    }
+                } else {
+                    fs.writeFileSync(rcFile, exportCommand);
+                    log(`Created ${rcFile} with Bento4 PATH`);
+                }
+            } catch (error) {
+                log(`Error updating ${rcFile}: ${error.message}`);
+            }
+        }
+
+        const localBinDir = '/usr/local/bin';
+        try {
+            if (!fs.existsSync(localBinDir)) {
+                fs.mkdirSync(localBinDir, { recursive: true });
+            }
+
+            files.forEach(file => {
+                const sourcePath = path.join(binDir, file);
+                const targetPath = path.join(localBinDir, file);
+
+                try {
+                    if (fs.existsSync(targetPath)) {
+                        fs.unlinkSync(targetPath);
+                    }
+                    fs.symlinkSync(sourcePath, targetPath);
+                    log(`Created symlink for ${file} in ${localBinDir}`);
+                } catch (error) {
+                    log(`Error creating symlink for ${file}: ${error.message}`);
+                }
+            });
+        } catch (error) {
+            log(`Error accessing ${localBinDir}: ${error.message}`);
+        }
+
+        return;
+    }
+
     if (platform === 'win32') {
         return new Promise((resolve, reject) => {
-            const normalizedBinDir = binDir.replace(/\//g, '\\');
+            const normalizedBinDir = binDir.replace(/\
             const psCommand = `
                 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
                 $binDir = '${normalizedBinDir}'
@@ -112,7 +179,7 @@ async function addBento4ToPath(binDir, platform, log, mainWin) {
             });
         });
     } else {
-        // Unix-like systems
+
         const shell = process.env.SHELL || '/bin/bash';
         let rcFile;
         if (shell.includes('zsh')) {
@@ -140,7 +207,6 @@ async function addBento4ToPath(binDir, platform, log, mainWin) {
     }
 }
 
-
 async function downloadFile(url, destPath, log, mainWin) {
     log(`Starting download from ${url}`);
     const writer = fs.createWriteStream(destPath);
@@ -154,22 +220,17 @@ async function downloadFile(url, destPath, log, mainWin) {
     const totalLength = parseInt(response.headers['content-length'], 10);
     let downloaded = 0;
 
-    const bar = new ProgressBar('Downloading [:bar] :percent :etas', {
-        width: 40,
-        complete: '=',
-        incomplete: ' ',
-        total: totalLength,
-    });
-
     response.data.on('data', (chunk) => {
         downloaded += chunk.length;
-        bar.tick(chunk.length);
+
         const progress = Math.floor((downloaded / totalLength) * 100);
-        const adjustedProgress = Math.min(Math.floor(progress * 0.4), 40);
-        mainWin.webContents.send('installation-progress', {
-            percent: adjustedProgress,
-            status: `Downloading Bento4: ${progress}%`
-        });
+
+        if (mainWin && typeof mainWin.webContents.send === 'function') {
+            mainWin.webContents.send('installation-progress', {
+                percent: Math.floor(progress * 0.4),
+                status: `Downloading Bento4: ${progress}%`
+            });
+        }
     });
 
     response.data.pipe(writer);
@@ -186,14 +247,39 @@ async function downloadFile(url, destPath, log, mainWin) {
 
 async function extractZip(zipPath, extractTo, log, mainWin) {
     log(`Extracting ${zipPath} to ${extractTo}`);
-    mainWin.webContents.send('installation-progress', {
-        percent: 40,
-        status: 'Extracting Bento4...'
-    });
+
+    if (mainWin && typeof mainWin.webContents.send === 'function') {
+        mainWin.webContents.send('installation-progress', {
+            percent: 40,
+            status: 'Extracting Bento4...'
+        });
+    }
+
+    let extractionProgress = 0;
+    const updateInterval = setInterval(() => {
+        extractionProgress += 5;
+        if (extractionProgress <= 35) {
+            if (mainWin && typeof mainWin.webContents.send === 'function') {
+                mainWin.webContents.send('installation-progress', {
+                    percent: 40 + extractionProgress,
+                    status: `Extracting Bento4: ${Math.min(100, Math.floor(extractionProgress * 100 / 35))}%`
+                });
+            }
+        }
+    }, 500);
 
     await fs.createReadStream(zipPath)
         .pipe(unzipper.Extract({ path: extractTo }))
         .promise();
+
+    clearInterval(updateInterval);
+
+    if (mainWin && typeof mainWin.webContents.send === 'function') {
+        mainWin.webContents.send('installation-progress', {
+            percent: 75,
+            status: 'Extraction completed'
+        });
+    }
 
     log(`Extraction completed to ${extractTo}`);
 }
@@ -202,14 +288,15 @@ async function extractZip(zipPath, extractTo, log, mainWin) {
  * Main function to download and install Bento4.
  */
 async function downloadAndInstallBento4(mainWin, options = {}) {
+    const log = createLogger(mainWin);
+
     try {
+        log('Starting Bento4 installation...');
         const platform = os.platform();
         const arch = os.arch();
         const version = options.version || config.version;
         const { downloadUrl, defaultInstallDir } = getDownloadInfo(platform, arch, version);
         const installDir = options.installDir || config.installDir || defaultInstallDir;
-
-        const log = createLogger(mainWin);
 
         log(`Detected platform: ${platform}`);
         log(`Architecture: ${arch}`);
@@ -217,12 +304,17 @@ async function downloadAndInstallBento4(mainWin, options = {}) {
         log(`Download URL: ${downloadUrl}`);
         log(`Installation directory: ${installDir}`);
 
-        // Create installation directory if it doesn't exist
         if (!fs.existsSync(installDir)) {
             fs.mkdirSync(installDir, { recursive: true });
             log(`Created installation directory at ${installDir}`);
         } else {
             log(`Installation directory exists at ${installDir}`);
+        }
+        if (mainWin && typeof mainWin.webContents.send === 'function') {
+            mainWin.webContents.send('installation-progress', {
+                percent: 0,
+                status: 'Starting Bento4 installation...'
+            });
         }
 
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bento4-'));
@@ -230,43 +322,84 @@ async function downloadAndInstallBento4(mainWin, options = {}) {
 
         await downloadFile(downloadUrl, zipPath, log, mainWin);
 
-        await extractZip(zipPath, installDir, log, mainWin);
+        await extractZip(zipPath, tempDir, log, mainWin);
 
-        const zipBaseName = `Bento4-SDK-${version}`;
-        const extractedFolderPath = path.join(installDir, zipBaseName);
-        const binDir = path.join(extractedFolderPath, 'bin');
+        function findBinDir(startPath) {
+            if (!fs.existsSync(startPath)) return null;
 
-        if (!fs.existsSync(binDir)) {
+            const items = fs.readdirSync(startPath);
+
+            if (items.includes('bin')) {
+                return path.join(startPath, 'bin');
+            }
+
+            for (const item of items) {
+                const itemPath = path.join(startPath, item);
+                if (fs.statSync(itemPath).isDirectory()) {
+                    const binPath = findBinDir(itemPath);
+                    if (binPath) return binPath;
+                }
+            }
+
+            return null;
+        }
+
+        const binDir = findBinDir(tempDir);
+
+        if (!binDir) {
             throw new Error('Bento4 bin directory not found after extraction');
         }
 
-        // Add to PATH
+        if (!fs.existsSync(installDir)) {
+            fs.mkdirSync(installDir, { recursive: true });
+        }
+
+        const sdkDir = path.dirname(binDir);
+        const finalBinDir = path.join(installDir, 'bin');
+
+        if (fs.existsSync(finalBinDir)) {
+            fs.rmSync(finalBinDir, { recursive: true, force: true });
+        }
+
+        fs.cpSync(binDir, finalBinDir, { recursive: true });
+
+        if (platform === 'darwin') {
+            log('Setting up permissions for macOS...');
+
+            fs.chmodSync(finalBinDir, '755');
+            log('Set permissions for bin directory');
+        }
+
         log('Adding Bento4 to system PATH...');
-        mainWin.webContents.send('installation-progress', {
-            percent: 80,
-            status: 'Configuring system PATH...'
-        });
+        if (mainWin && typeof mainWin.webContents.send === 'function') {
+            mainWin.webContents.send('installation-progress', {
+                percent: 80,
+                status: 'Configuring system PATH...'
+            });
+        }
 
-        await addBento4ToPath(binDir, platform, log, mainWin);
+        await addBento4ToPath(finalBinDir, platform, log, mainWin);
 
-        // Clean up
         fs.rmSync(tempDir, { recursive: true, force: true });
         log('Cleaned up temporary files.');
 
-        // Final Progress Update
-        mainWin.webContents.send('installation-progress', {
-            percent: 100,
-            status: 'Bento4 installed successfully! Please restart your terminal to use Bento4.'
-        });
+        if (mainWin && typeof mainWin.webContents.send === 'function') {
+            mainWin.webContents.send('installation-progress', {
+                percent: 100,
+                status: 'Bento4 installed successfully! Please restart your terminal to use Bento4.'
+            });
+        }
 
         log('Bento4 has been successfully downloaded and installed. Please restart your terminal or system for the PATH changes to take effect.');
     } catch (error) {
-        const log = createLogger(mainWin);
+        log(`Installation failed: ${error.message}`);
+        if (error.stack) {
+            log(`Stack trace: ${error.stack}`);
+        }
         if (mainWin && typeof mainWin.webContents.send === 'function') {
             mainWin.webContents.send('installation-error', error.message);
         }
-        log(`An error occurred: ${error.message}`);
-        throw error; // Re-throw the error after logging
+        throw error;
     }
 }
 
