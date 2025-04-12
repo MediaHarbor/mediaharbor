@@ -6,6 +6,7 @@ const { app } = require("electron");
 const { saveDownloadToDatabase } = require("./db");
 const { fetchWebsiteTitle, extractDomain, fetchHighResImageOrFavicon } = require("./fetchers");
 const { getNextDownloadOrder } = require('./downloadorder');
+const { log } = require("console");
 let fixPath;
 let downloadCount = 0;
 
@@ -189,7 +190,7 @@ async function handleYtDlpMusicDownload(event, data, settings) {
 
     const videoInfoProcess = spawn(ytDlpCommand, videoInfoArgs, {
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-        shell: process.platform === 'linux'
+        shell: false
     });
     let videoInfo = { title: '', uploader: '', thumbnail: '' };
     let outputLines = [];
@@ -257,7 +258,7 @@ async function handlePlaylistDownload(event, url, quality, settings, downloadId)
 
     const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs, {
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-        shell: process.platform === 'linux'
+        shell: false
     });
     let playlistInfo = { title: '', uploader: '', thumbnail: '', totalVideos: 0 };
     let outputLines = [];
@@ -327,7 +328,7 @@ async function handlePlaylistDownload(event, url, quality, settings, downloadId)
 
     const ytDlp = spawn(ytDlpCommand, downloadArgs, {
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-        shell: process.platform === 'linux'
+        shell: false
     });
     let lastProgressUpdate = Date.now();
 
@@ -455,7 +456,7 @@ function startMusicDownload(event, url, quality, settings, videoInfo, downloadId
 
     const ytDlp = spawn(ytDlpCommand, args, {
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-        shell: process.platform === 'linux'
+        shell: false
     });
 
     ytDlp.stdout.on('data', (data) => {
@@ -551,7 +552,7 @@ async function handleYtDlpDownload(event, data, settings, isGeneric = false) {
 
             const videoInfoProcess = spawn(ytDlpCommand, videoInfoArgs, {
                 env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-                shell: process.platform === 'linux'
+                shell: false
             });
             let videoInfo = { title: '', uploader: '', thumbnail: '' };
             let outputLines = [];
@@ -628,7 +629,7 @@ async function startDownload(event, url, quality, settings, videoInfo = null, do
 
     const ytDlp = spawn(ytDlpCommand, args, {
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-        shell: process.platform === 'linux'
+        shell: false
     });
 
     ytDlp.stdout.on('data', (data) => {
@@ -692,7 +693,7 @@ async function handleVideoPlaylistDownload(event, url, quality, settings, downlo
 
     const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs, {
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-        shell: process.platform === 'linux'
+        shell: false
     });
     let playlistInfo = { title: '', uploader: '', thumbnail: '', totalVideos: 0 };
     let outputLines = [];
@@ -745,7 +746,7 @@ async function handleVideoPlaylistDownload(event, url, quality, settings, downlo
 
     const playlistInfoProcess = spawn(ytDlpCommand, playlistInfoArgs, {
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-        shell: process.platform === 'linux'
+        shell: false
     });
     let playlistInfo = { title: '', uploader: '', thumbnail: '', totalVideos: 0 };
     let outputLines = [];
@@ -828,7 +829,7 @@ async function startVideoPlaylistDownload(event, url, quality, settings, playlis
 
     const ytDlp = spawn(ytDlpCommand, args, {
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-        shell: process.platform === 'linux'
+        shell: false
     });
 
     let lastProgressUpdate = Date.now();
