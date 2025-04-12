@@ -56,7 +56,7 @@
     <div id="app-settings" class="tab-content active">
         <div class="settings-container">
         <div class="settings-section">
-            <div class="settings-header" onclick="toggleSection('app-general')">
+            <div class="settings-header">
                 <i class="fas fa-cog"></i>
                 <h2>General Settings</h2>
             </div>
@@ -119,7 +119,7 @@
     <div id="yt-dlp-settings" class="tab-content">
         <div class="settings-container">
             <div class="settings-section">
-                <div class="settings-header" onclick="toggleSection('download-options')">
+                <div class="settings-header">
                     <i class="fas fa-download"></i>
                     <h2>Download Options</h2>
                 </div>
@@ -259,7 +259,7 @@
             </div>
 
             <div class="settings-section">
-                <div class="settings-header" onclick="toggleSection('metadata-options')">
+                <div class="settings-header">
                     <i class="fas fa-tags"></i>
                     <h2>Metadata Options</h2>
                 </div>
@@ -289,7 +289,7 @@
             </div>
 
             <div class="settings-section">
-                <div class="settings-header" onclick="toggleSection('network-options')">
+                <div class="settings-header">
                     <i class="fas fa-network-wired"></i>
                     <h2>Network Options</h2>
                 </div>
@@ -310,7 +310,7 @@
             </div>
 
             <div class="settings-section">
-                <div class="settings-header" onclick="toggleSection('authentication-options')">
+                <div class="settings-header">
                     <i class="fas fa-lock"></i>
                     <h2>Authentication Options</h2>
                 </div>
@@ -337,7 +337,7 @@
             </div>
 
             <div class="settings-section">
-                <div class="settings-header" onclick="toggleSection('sponsorblock-options')">
+                <div class="settings-header">
                     <i class="fas fa-ban"></i>
                     <h2>SponsorBlock Options</h2>
                 </div>
@@ -373,105 +373,105 @@
 
     <div id="streamrip-settings" class="tab-content">
         <div class="settings-container">
-        <div class="settings-section">
-            <div class="settings-header" onclick="toggleSection('streamrip-general')">
-                <i class="fas fa-sliders-h"></i>
-                <h2>General Options</h2>
-            </div>
-            <div id="streamrip-general" class="settings-content">
-                <div class="settings-grid">
-                    <div>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="disc_subdirectories">
-                            Disc Subdirectories
-                        </label>
-                    </div>
-                    <div>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="concurrency">
-                            Concurrency
-                        </label>
-                    </div>
-                    <div>
-                        <label for="max_connections">Max Connections:</label>
-                        <input type="number" id="max_connections" value="">
-                    </div>
-                    <div>
-                        <label for="requests_per_minute">Requests Per Minute:</label>
-                        <input type="number" id="requests_per_minute" value="">
-                    </div>
+            <div class="settings-section">
+                <div class="settings-header">
+                    <i class="fas fa-sliders-h"></i>
+                    <h2>General Options</h2>
                 </div>
-            </div>
-        </div>
-
-        <div class="settings-section">
-            <div class="settings-header" onclick="toggleSection('streamrip-services')">
-                <i class="fas fa-music"></i>
-                <h2>Services Configuration</h2>
-            </div>
-            <div id="streamrip-services" class="settings-content">
-                <div class="settings-grid">
-                    <!-- Qobuz Settings -->
-                    <div class="service-group">
-                        <h3>Qobuz</h3>
+                <div id="streamrip-general" class="settings-content">
+                    <div class="settings-grid">
                         <div>
                             <label class="checkbox-label">
-                                <input type="checkbox" id="qobuz_download_booklets">
-                                Download Booklets
+                                <input type="checkbox" id="disc_subdirectories">
+                                Disc Subdirectories
                             </label>
                         </div>
                         <div>
                             <label class="checkbox-label">
-                                <input type="checkbox" id="qobuz_token_or_email">
-                                User ID and Token Login
+                                <input type="checkbox" id="concurrency">
+                                Concurrency
                             </label>
                         </div>
                         <div>
-                            <label for="qobuz_email_or_userid">Email/User ID:</label>
-                            <input type="text" id="qobuz_email_or_userid">
+                            <label for="max_connections">Max Connections:</label>
+                            <input type="number" id="max_connections" value="">
                         </div>
                         <div>
-                            <label for="qobuz_password_or_token">Password/Token:</label>
-                            <input type="password" id="qobuz_password_or_token">
-                        </div>
-                        <div>
-                            <label for="qobuz_app_id">App ID</label>
-                            <input type="text" id="qobuz_app_id">
-                        </div>
-                        <div>
-                            <label for="qobuz_secrets">Secrets</label>
-                            <input type="text" id="qobuz_secrets">
-                        </div>
-                    </div>
-
-                    <!-- Tidal Settings -->
-                    <div class="service-group">
-                        <h3>Tidal</h3>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="tidal_download_videos">
-                                Download Videos
-                            </label>
-                        </div>
-                    </div>
-
-                    <!-- Deezer Settings -->
-                    <div class="service-group">
-                        <h3>Deezer</h3>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="deezer_use_deezloader">
-                                Use Deezloader
-                            </label>
-                        </div>
-                        <div id="deezer_arl_input" class="dependent-field">
-                            <label for="deezer_arl">Enter ARL:</label>
-                            <input type="password" id="deezer_arl">
+                            <label for="requests_per_minute">Requests Per Minute:</label>
+                            <input type="number" id="requests_per_minute" value="">
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
+
+            <div class="settings-section">
+                <div class="settings-header">
+                    <i class="fas fa-music"></i>
+                    <h2>Services Configuration</h2>
+                </div>
+                <div id="streamrip-services" class="settings-content">
+                    <div class="settings-grid">
+                        <!-- Qobuz Settings -->
+                        <div class="service-group">
+                            <h3>Qobuz</h3>
+                            <div>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="qobuz_download_booklets">
+                                    Download Booklets
+                                </label>
+                            </div>
+                            <div>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="qobuz_token_or_email">
+                                    User ID and Token Login
+                                </label>
+                            </div>
+                            <div>
+                                <label for="qobuz_email_or_userid">Email/User ID:</label>
+                                <input type="text" id="qobuz_email_or_userid">
+                            </div>
+                            <div>
+                                <label for="qobuz_password_or_token">Password/Token:</label>
+                                <input type="password" id="qobuz_password_or_token">
+                            </div>
+                            <div>
+                                <label for="qobuz_app_id">App ID</label>
+                                <input type="text" id="qobuz_app_id">
+                            </div>
+                            <div>
+                                <label for="qobuz_secrets">Secrets</label>
+                                <input type="text" id="qobuz_secrets">
+                            </div>
+                        </div>
+
+                        <!-- Tidal Settings -->
+                        <div class="service-group">
+                            <h3>Tidal</h3>
+                            <div>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="tidal_download_videos">
+                                    Download Videos
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Deezer Settings -->
+                        <div class="service-group">
+                            <h3>Deezer</h3>
+                            <div>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="deezer_use_deezloader">
+                                    Use Deezloader
+                                </label>
+                            </div>
+                            <div id="deezer_arl_input" class="dependent-field">
+                                <label for="deezer_arl">Enter ARL:</label>
+                                <input type="password" id="deezer_arl">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <div class="settings-section">
                 <div class="settings-header" onclick="">
@@ -488,12 +488,12 @@
                         </div>
                         <div class="dependent-field" id="str_download_database_form">
                             <div style="display: flex;">
-                            <label style="width: 100%">
-                                <div style="display: flex">
-                                <input type="text" id="downloads_database">
-                                <button id="download_database_select" onclick="selectFileLocation('downloads_database')" title="Select file location"><span class="fas fa-file"></span></button>
-                                </div>
-                            </label>
+                                <label style="width: 100%">
+                                    <div style="display: flex">
+                                        <input type="text" id="downloads_database">
+                                        <button id="download_database_select" onclick="selectFileLocation('downloads_database')" title="Select file location"><span class="fas fa-file"></span></button>
+                                    </div>
+                                </label>
 
                             </div>
                         </div>
@@ -507,8 +507,8 @@
                             <div  style="display: flex">
                                 <label style="width: 100%">
                                     <div style="display: flex">
-                                    <input type="text" id="failed_downloads_database">
-                                    <button id="str_failed_download_database_select" onclick="selectFileLocation('failed_downloads_database')" title="Select file location"><span class="fas fa-file"></span></button>
+                                        <input type="text" id="failed_downloads_database">
+                                        <button id="str_failed_download_database_select" onclick="selectFileLocation('failed_downloads_database')" title="Select file location"><span class="fas fa-file"></span></button>
                                     </div>
                                 </label>
 
@@ -530,52 +530,51 @@
                 </div>
             </div>
 
-        <div class="settings-section">
-            <div class="settings-header" onclick="toggleSection('streamrip-conversion')">
-                <i class="fas fa-exchange-alt"></i>
-                <h2>Conversion Settings</h2>
-            </div>
-            <div id="streamrip-conversion" class="settings-content">
-                <div class="settings-grid">
-                    <div>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="conversion_check">
-                            Enable Conversion
-                        </label>
+            <div class="settings-section">
+                <div class="settings-header">
+                    <i class="fas fa-exchange-alt"></i>
+                    <h2>Conversion Settings</h2>
+                </div>
+                <div id="streamrip-conversion" class="settings-content">
+                    <div class="settings-grid">
+                        <div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="conversion_check">
+                                Enable Conversion
+                            </label>
+                        </div>
+                        <div id="conversion_container" class="dependent-field">
+                            <div>
+                                <label for="conversion_codec">Codec:</label>
+                                <select id="conversion_codec" class="dropdown-btn">
+                                    <option value="ALAC">ALAC</option>
+                                    <option value="FLAC">FLAC</option>
+                                    <option value="MP3">MP3</option>
+                                    <option value="AAC">AAC</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="conversion_sampling_rate">Sampling Rate:</label>
+                                <select id="conversion_sampling_rate" class="dropdown-btn">
+                                    <option value="44100">44.1 kHz</option>
+                                    <option value="48000">48 kHz</option>
+                                    <option value="88200">88.2 kHz</option>
+                                    <option value="96000">96 kHz</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="conversion_bit_depth">Bit Depth:</label>
+                                <select id="conversion_bit_depth" class="dropdown-btn">
+                                    <option value="16">16-bit</option>
+                                    <option value="24">24-bit</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
-                    <div id="conversion_container" class="dependent-field">
-                        <div>
-                            <label for="conversion_codec">Codec:</label>
-                            <select id="conversion_codec" class="dropdown-btn">
-                                <option value="ALAC">ALAC</option>
-                                <option value="FLAC">FLAC</option>
-                                <option value="MP3">MP3</option>
-                                <option value="AAC">AAC</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label for="conversion_sampling_rate">Sampling Rate:</label>
-                            <select id="conversion_sampling_rate" class="dropdown-btn">
-                                <option value="44100">44.1 kHz</option>
-                                <option value="48000">48 kHz</option>
-                                <option value="88200">88.2 kHz</option>
-                                <option value="96000">96 kHz</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label for="conversion_bit_depth">Bit Depth:</label>
-                            <select id="conversion_bit_depth" class="dropdown-btn">
-                                <option value="16">16-bit</option>
-                                <option value="24">24-bit</option>
-                            </select>
-                        </div>
-                    </div>
-
                 </div>
             </div>
-        </div>
             <div class="settings-section">
-                <div class="settings-header" onclick="toggleSection('streamrip-metadata')">
+                <div class="settings-header">
                     <i class="fas fa-exchange-alt"></i>
                     <h2>Metadata Settings</h2>
                 </div>
@@ -600,40 +599,38 @@
                             </label>
                         </div>
                         <div>
-
-                                <label>
-                                    Folder Format
-                                        <div style="display:flex;">
+                            <label>
+                                Folder Format
+                                <div style="display:flex;">
                                     <input type="text" id="filepaths_folder_format">
                                     <button class="helpPop">
-                                        <span class="fas fa-circle-info">
-                                            <div class="help-popup-content">
-                                                <h3 style="color: #45a049!important;">
-                                                    Available keys: "albumartist", "title", "year", "bit_depth", "sampling_rate", "id", and "albumcomposer"
-                                                </h3>
-                                            </div>
-                                        </span>
+                                <span class="fas fa-circle-info">
+                                    <div class="help-popup-content">
+                                        <h3 style="color: #45a049!important;">
+                                            Available keys: "albumartist", "title", "year", "bit_depth", "sampling_rate", "id", and "albumcomposer"
+                                        </h3>
+                                    </div>
+                                </span>
                                     </button>
-                                </label>
-                            </div>
+                                </div>
+                            </label>
                         </div>
                         <div>
-                                <label>
-                                    Track Format
-                                        <div style="display: flex">
+                            <label>
+                                Track Format
+                                <div style="display: flex">
                                     <input type="text" id="filepaths_track_format">
                                     <button class="helpPop">
-                                        <span class="fas fa-circle-info">
-                                            <div class="help-popup-content">
-                                                <h3 style="color: #45a049!important;">
-                                                    Available keys: "tracknumber", "artist", "albumartist", "composer", "title", and "albumcomposer", "explicit"
-                                                </h3>
-                                            </div>
-                                        </span>
+                                <span class="fas fa-circle-info">
+                                    <div class="help-popup-content">
+                                        <h3 style="color: #45a049!important;">
+                                            Available keys: "tracknumber", "artist", "albumartist", "composer", "title", and "albumcomposer", "explicit"
+                                        </h3>
+                                    </div>
+                                </span>
                                     </button>
-                                </label>
-                            </div>
-
+                                </div>
+                            </label>
                         </div>
                         <div>
                             <label class="checkbox-label">
@@ -641,7 +638,7 @@
                                 Restrict Characters
                             </label>
                         </div>
-                        <div  class="dependent-field" id="filepaths_restrict_characters_form">
+                        <div class="dependent-field" id="filepaths_restrict_characters_form">
                             <input type="number" id="filepaths_truncate_to">
                         </div>
                         <div id="meta_exclude_tags_form">
@@ -658,157 +655,141 @@
                     </div>
                 </div>
             </div>
-    </div>
+        </div>
     </div>
     <div id="search-settings" class="tab-content">
         <div class="settings-container">
             <h2>Search Settings</h2>
-            <h4>Coming Soon</h4>
+            <h4>Coming at v1.1</h4>
         </div>
     </div>
     <div id="spotify-settings" class="tab-content">
         <div class="settings-container">
+            <!-- Download Options Section -->
             <div class="settings-section">
-                <div class="settings-header" onclick="toggleSection('spotify-download-options')">
+                <div class="settings-header">
                     <i class="fas fa-download"></i>
                     <h2>Download Options</h2>
                 </div>
                 <div id="spotify-download-options" class="settings-content">
                     <div class="settings-grid">
                         <div>
-                            <label for="spotify_cookies_path">Cookies:</label>
                             <div style="display: flex">
-                                <input type="text" id="spotify_cookies_path" value="">
-                                <button title="Select Cookies file" onclick="openFileLocation('spotify_cookies_path')"><span class="fas fa-file"></span></button>
+                                <label for="zotify_userName">User Name:</label>
+                                <input type="text" id="zotify_userName" placeholder="Your Spotify user name." >
+                                <button title="Logout" onclick="deleteZotifyCredentials()"><span class="fas  fa-right-from-bracket"></span></button>
                             </div>
                         </div>
                         <div>
-                            <label for="spotify_temp_path">Temp Path:</label>
-                            <input type="text" id="spotify_temp_path" value="temp">
-                        </div>
-                        <div>
-                            <label for="spotify_wait_interval">Wait Interval:</label>
-                            <input type="number" id="spotify_wait_interval" value="5">
-                        </div>
-                        <div>
-                            <label for="spotify_wvd_path">WVD File:</label>
-                            <div style="display: flex">
-                                <input type="text" id="spotify_wvd_path" value="">
-                                <button title="Select Cookies file" onclick="openWvdLocation('spotify_wvd_path')"><span class="fas fa-file"></span></button>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="spotify_no_exceptions">
-                                No Exceptions
-                            </label>
-                        </div>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="spotify_save_cover">
-                                Save Cover
-                            </label>
-                        </div>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="spotify_save_playlist">
-                                Save Playlist
-                            </label>
-                        </div>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="spotify_overwrite">
-                                Overwrite
-                            </label>
-                        </div>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="spotify_lrc_only">
-                                LRC Only
-                            </label>
-                        </div>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="spotify_no_lrc">
-                                No LRC
-                            </label>
-                        </div>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="spotify_enable_videos">
-                                Enable Videos
-                            </label>
-                        </div>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="spotify_download_music_videos">
-                                Download Music Videos
-                            </label>
-                        </div>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="spotify_download_podcast_videos">
-                                Download Podcast Videos
-                            </label>
-                        </div>
-                        <div>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="spotify_force_premium">
-                                Force Premium
-                            </label>
-                        </div>
-                        <div>
-                            <label for="spotify_download_mode">Download Mode:</label>
-                            <select id="spotify_download_mode" class="dropdown-btn">
-                                <option value="ytdlp">ytdlp</option>
-                                <option value="aria2c">aria2c</option>
+                            <label for="spotify_audio_format">Download Format:</label>
+                            <select id="spotify_audio_format" class="dropdown-btn">
+                                <option value="mp3">MP3</option>
+                                <option value="aac">AAC (M4A)</option>
+                                <option value="flac">FLAC</option>
+                                <option value="opus">OPUS</option>
+                                <option value="fdk_aac" title="May not be supported on some FFMPEG builds">FDK AAC (M4A)*</option>
+                                <option value="vorbis">OGG (Vorbis)</option>
+                                <option value="wav">WAV*</option>
+                                <option value="wavpack" title="May not be supported on some FFMPEG builds">WV (WavPack)*</option>
                             </select>
+                            <h3 style="color: #d9534f; font-weight: bold;">
+                                * May not be supported on some FFMPEG builds
+                            </h3>
                         </div>
+                        <label for="spotify_transcode_bitrate">Transcode Bitrate:</label>
+                        <input type="number" id="spotify_transcode_bitrate" placeholder="-1 for auto" min="-1" step="1"  oninput="const v = this.value;if (v === '0') {this.value = '-1';} else if (v !== '' && !/^(-1|[1-9][0-9]*)$/.test(v)){this.value = '';}">
+
+                        <label for="spotify_ffmpeg_args">FFmpeg Args:</label>
+                        <input type="text" id="spotify_ffmpeg_args" value="">
+                    </div>
+
+                    <div>
+                        <label for="spotify_download_quality">Download Quality:</label>
+                        <select id="spotify_download_quality" class="dropdown-btn">
+                            <option value="auto">Auto</option>
+                        </select>
+
+                        <label for="spotify_artwork_size">Artwork Size:</label>
+                        <select id="spotify_artwork_size" class="dropdown-btn">
+                            <option value="large">Large</option>
+                        </select>
+
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="spotify_save_subtitles">
+                            Save Subtitles
+                        </label>
+
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="spotify_lyrics_file">
+                            Save Lyrics to File
+                        </label>
+
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="spotify_lyrics_only">
+                            Lyrics Only
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Metadata & Save Options -->
+            <div class="settings-section">
+                <div class="settings-header">
+                    <i class="fas fa-tags"></i>
+                    <h2>Metadata & Save Options</h2>
+                </div>
+                <div class="settings-content">
+                    <div class="settings-grid">
                         <div>
-                            <label for="spotify_video_format">Video Format:</label>
-                            <select id="spotify_video_format" class="dropdown-btn">
-                                <option value="mp4">mp4</option>
-                                <option value="webm">webm</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label for="spotify_remux_mode_video">Remux Mode Video:</label>
-                            <select id="spotify_remux_mode_video" class="dropdown-btn">
-                                <option value="ffmpeg">ffmpeg</option>
-                                <option value="mp4box">mp4box</option>
-                            </select>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_create_playlist_file" checked>
+                                Create Playlist File
+                            </label>
+
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_save_metadata" checked>
+                                Save Metadata
+                            </label>
+
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_replace_existing">
+                                Replace Existing Files
+                            </label>
+
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_skip_previous" checked>
+                                Skip Previously Downloaded
+                            </label>
+
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="spotify_skip_duplicates" checked>
+                                Skip Duplicates
+                            </label>
                         </div>
                     </div>
                 </div>
             </div>
 
+            <!-- Output Paths -->
             <div class="settings-section">
-                <div class="settings-header" onclick="toggleSection('spotify-template-options')">
-                    <i class="fas fa-folder"></i>
-                    <h2>Template Options</h2>
+                <div class="settings-header">
+                    <i class="fas fa-folder-open"></i>
+                    <h2>File Naming</h2>
                 </div>
-                <div id="spotify-template-options" class="settings-content">
+                <div class="settings-content">
                     <div class="settings-grid">
                         <div>
-                            <label for="spotify_template_folder_album">Template Folder Album:</label>
-                            <div style="display: flex">
-                                <input type="text" id="spotify_template_folder_album" value="{album_artist}/{album}">
-                                <button onclick="openPopup('https://github.com/glomatico/gamdl?tab=readme-ov-file#tags-variables')" title="Help">
-                                    <span class="fa fa-question-circle"></span>
-                                </button>
-                            </div>
-                        </div>
-                        <div>
-                            <label for="spotify_template_folder_compilation">Template Folder Compilation:</label>
-                            <input type="text" id="spotify_template_folder_compilation" value="Compilations/{album}">
-                        </div>
-                        <div>
-                            <label for="spotify_template_file_single_disc">Template File Single Disc:</label>
-                            <input type="text" id="spotify_template_file_single_disc" value="{track:02d} {title}">
-                        </div>
-                        <div>
-                            <label for="spotify_template_file_multi_disc">Template File Multi Disc:</label>
-                            <input type="text" id="spotify_template_file_multi_disc" value="{disc}-{track:02d} {title}">
+                            <label for="spotify_output_album">Album Output Template:</label>
+                            <input type="text" id="spotify_output_album" value="{album_artist}/{album}/{track_number}. {artists} - {title}">
+
+                            <label for="spotify_output_playlist_track">Playlist Track Template:</label>
+                            <input type="text" id="spotify_output_playlist_track" value="{playlist}/{artists} - {title}">
+
+                            <label for="spotify_output_playlist_episode">Playlist Episode Template:</label>
+                            <input type="text" id="spotify_output_playlist_episode" value="{playlist}/{episode_number} - {title}">
+
+                            <label for="spotify_output_podcast">Podcast Template:</label>
+                            <input type="text" id="spotify_output_podcast" value="{podcast}/{episode_number} - {title}">
                         </div>
                     </div>
                 </div>
@@ -816,10 +797,11 @@
         </div>
     </div>
 
+
     <div id="applemusic-settings" class="tab-content">
         <div class="settings-container">
             <div class="settings-section">
-                <div class="settings-header" onclick="toggleSection('applemusic-download-options')">
+                <div class="settings-header">
                     <i class="fas fa-download"></i>
                     <h2>Download Options</h2>
                 </div>
@@ -912,7 +894,7 @@
             </div>
 
             <div class="settings-section">
-                <div class="settings-header" onclick="toggleSection('applemusic-template-options')">
+                <div class="settings-header">
                     <i class="fas fa-folder"></i>
                     <h2>Template Options</h2>
                 </div>
@@ -945,5 +927,6 @@
         </div>
     </div>
 </div>
+<div id="floating-notifications" class="floating-notifications-container"></div>
 </body>
 </html>
