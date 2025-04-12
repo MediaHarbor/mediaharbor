@@ -550,13 +550,28 @@ function populateSettings() {
         'conversion_bit_depth': 'value', 'meta_album_name_playlist_check': 'checked',
         'meta_album_order_playlist_check': 'checked','excluded_tags': 'value', 'speed_limit_type': 'value',
         'qobuz_app_id': 'value', 'qobuz_secrets': 'value',
-        'spotify_output_path': 'value', 'spotify_temp_path': 'value','spotify_enable_videos': 'checked', 'spotify_download_music_videos': 'checked', 'spotify_download_podcast_videos': 'checked', 'spotify_force_premium': 'checked', 'spotify_download_premium_videos': 'checked', 'spotify_download_mode': 'value', 'spotify_video_format': 'value', 'spotify_remux_mode_video': 'value',
-        'spotify_template_folder_album': 'value', 'spotify_template_folder_compilation': 'value', 'spotify_template_file_single_disc': 'value', 'spotify_template_file_multi_disc': 'value',
         'apple_output_path': 'value', 'apple_temp_path': 'value', 'apple_download_mode': 'value', 'apple_remux_mode': 'value', 'apple_cover_format': 'value', 'apple_synced_lyrics_format': 'value',
         'apple_template_folder_album': 'value', 'apple_template_folder_compilation': 'value', 'apple_template_file_single_disc': 'value', 'apple_template_file_multi_disc': 'value',
-        "spotify_wait_interval" : "value", "spotify_no_exceptions": "checked", "spotify_save_cover": "checked", "spotify_save_playlist": "checked", "spotify_overwrite": "checked", "spotify_lrc_only": "checked", "spotify_no_lrc": "checked",
         "apple_disable_music_video_skip": "checked", "apple_save_cover": "checked", "apple_overwrite": "checked", "apple_save_playlist": "checked", "apple_synced_lyrics_only": "checked", "apple_no_synced_lyrics": "checked", "apple_cover_size": "value",
-        "apple_cookies_path": "value", "spotify_cookies_path": "value", "spotify_wvd_path": "value",
+        "apple_cookies_path": "value",
+        "zotify_userName": "value",
+        "spotify_audio_format": "value",
+        "spotify_transcode_bitrate": "value",
+        "spotify_ffmpeg_args": "value",
+        "spotify_download_quality": "value",
+        "spotify_artwork_size": "value",
+        "spotify_save_subtitles": "checked",
+        "spotify_lyrics_file": "checked",
+        "spotify_lyrics_only": "checked",
+        "spotify_create_playlist_file": "checked",
+        "spotify_save_metadata": "checked",
+        "spotify_replace_existing": "checked",
+        "spotify_skip_previous": "checked",
+        "spotify_skip_duplicates": "checked",
+        "spotify_output_album": "value",
+        "spotify_output_playlist_track": "value",
+        "spotify_output_playlist_episode": "value",
+        "spotify_output_podcast": "value",
     };
 
     Object.keys(settingFields).forEach(id => {
@@ -568,6 +583,21 @@ function populateSettings() {
     handleDependentFields();
 }
 
+async function deleteZotifyCredentials() {
+    try {
+        const zotify_userName = document.getElementById('zotify_userName');
+        const result = await window.electron.invoke('clear-zotify-credentials');
+        zotify_userName.value = '';
+        if (result.success) {
+            showNotification('Credentials cleared',);
+        } else {
+            throw new Error(result.message);
+        }
+    } catch (error) {
+        console.error('Failed to clear credentials:', error);
+        showNotification('Error', 'Failed to clear credentials: ' + error.message);
+    }
+}
 
 function addSettingsListeners() {
     const settingsMapping = [
@@ -637,20 +667,6 @@ function addSettingsListeners() {
         {id: 'speed_limit_type', key:'speed_limit_type', type: 'value'},
         {id: 'qobuz_app_id', key: 'qobuz_app_id', type: 'value' },
         {id: 'qobuz_secrets', key: 'qobuz_secrets', type: 'value' },
-        {id: 'spotify_output_path', key: 'spotify_output_path', type: 'value' },
-        {id: 'spotify_temp_path', key: 'spotify_temp_path', type: 'value' },
-        {id: 'spotify_enable_videos', key:'spotify_enable_videos', type: 'checked'},
-        {id: 'spotify_download_music_videos', key:'spotify_download_music_videos', type: 'checked'},
-        {id: 'spotify_download_podcast_videos', key:'spotify_download_podcast_videos', type: 'checked'},
-        {id: 'spotify_force_premium', key:'spotify_force_premium', type: 'checked'},
-        {id: 'spotify_download_premium_videos', key:'spotify_download_premium_videos', type: 'checked'},
-        {id: 'spotify_download_mode', key: 'spotify_download_mode', type:'value'},
-        {id: 'spotify_video_format', key: 'spotify_video_format', type:'value'},
-        {id: 'spotify_remux_mode_video', key: 'spotify_remux_mode_video', type:'value'},
-        {id: 'spotify_template_folder_album', key: 'spotify_template_folder_album', type:'value'},
-        {id: 'spotify_template_folder_compilation', key: 'spotify_template_folder_compilation', type:'value'},
-        {id: 'spotify_template_file_single_disc', key: 'spotify_template_file_single_disc', type:'value'},
-        {id: 'spotify_template_file_multi_disc', key: 'spotify_template_file_multi_disc', type:'value'},
         {id:'apple_output_path', key:'apple_output_path', type: 'value'},
         {id:'apple_temp_path', key:'apple_temp_path', type: 'value'},
         {id:'apple_download_mode', key:'apple_download_mode', type: 'value'},
@@ -661,13 +677,6 @@ function addSettingsListeners() {
         {id:'apple_template_folder_compilation', key:'apple_template_folder_compilation', type: 'value'},
         {id:'apple_template_file_single_disc', key:'apple_template_file_single_disc', type: 'value'},
         {id:'apple_template_file_multi_disc', key:'apple_template_file_multi_disc', type: 'value'},
-        {id: "spotify_wait_interval" ,key: "spotify_wait_interval", type: "value"},
-        {id: "spotify_no_exceptions" ,key: "spotify_no_exceptions", type: "checked"},
-        {id: "spotify_save_cover" ,key: "spotify_save_cover", type: "checked"},
-        {id: "spotify_save_playlist" ,key: "spotify_save_playlist", type: "checked"},
-        {id: "spotify_overwrite" ,key: "spotify_overwrite", type: "checked"},
-        {id: "spotify_lrc_only" ,key: "spotify_lrc_only", type: "checked"},
-        {id: "spotify_no_lrc" ,key: "spotify_no_lrc", type: "checked"},
         {id: "apple_disable_music_video_skip", key: "apple_disable_music_video_skip", type: "checked"},
         {id: "apple_save_cover", key: "apple_save_cover", type: "checked"},
         {id: "apple_overwrite", key: "apple_overwrite", type: "checked"},
@@ -675,24 +684,50 @@ function addSettingsListeners() {
         {id: "apple_synced_lyrics_only", key: "apple_synced_lyrics_only", type: "checked"},
         {id: "apple_no_synced_lyrics", key: "apple_no_synced_lyrics", type: "checked"},
         {id: "apple_cover_size", key: "apple_cover_size", type: "value"},
-        {id: "spotify_cookies_path", key: "spotify_cookies_path", type: "value"},
         {id: "apple_cookies_path", key: "apple_cookies_path", type: "value"},
-        {id: "spotify_wvd_path", key:"spotify_wvd_path", type: "value"},
+        {id: "zotify_userName", key: "zotify_userName", type: "value"},
+        {id: "spotify_audio_format", key: "spotify_audio_format", type: "value"},
+        {id: "spotify_transcode_bitrate", key: "spotify_transcode_bitrate", type: "integer"},
+        {id: "spotify_ffmpeg_args", key: "spotify_ffmpeg_args", type: "value"},
+        {id: "spotify_download_quality", key: "spotify_download_quality", type: "value"},
+        {id: "spotify_artwork_size", key: "spotify_artwork_size", type: "value"},
+        {id: "spotify_save_subtitles", key: "spotify_save_subtitles", type: "checked"},
+        {id: "spotify_lyrics_file", key: "spotify_lyrics_file", type: "checked"},
+        {id: "spotify_lyrics_only", key: "spotify_lyrics_only", type: "checked"},
+        {id: "spotify_create_playlist_file", key: "spotify_create_playlist_file", type: "checked"},
+        {id: "spotify_save_metadata", key: "spotify_save_metadata", type: "checked"},
+        {id: "spotify_replace_existing", key: "spotify_replace_existing", type: "checked"},
+        {id: "spotify_skip_previous", key: "spotify_skip_previous", type: "checked"},
+        {id: "spotify_skip_duplicates", key: "spotify_skip_duplicates", type: "checked"},
+        {id: "spotify_output_album", key: "spotify_output_album", type: "value"},
+        {id: "spotify_output_playlist_track", key: "spotify_output_playlist_track", type: "value"},
+        {id: "spotify_output_playlist_episode", key: "spotify_output_playlist_episode", type: "value"},
+        {id: "spotify_output_podcast", key: "spotify_output_podcast", type: "value"}
     ];
 
     settingsMapping.forEach(({ id, key, type }) => {
         const element = document.getElementById(id);
         if (element) {
-            // Add change listener for all elements
             element.addEventListener('change', (e) => {
-                settings[key] = type === 'checked' ? e.target.checked : e.target.value;
+                if (type === 'checked') {
+                    settings[key] = e.target.checked;
+                } else if (type === 'integer') {
+                    const intValue = parseInt(e.target.value, 10);
+                    settings[key] = isNaN(intValue) ? 0 : intValue;
+                } else {
+                    settings[key] = e.target.value;
+                }
                 window.electronAPI.send('save-settings', settings);
             });
 
-            // Add input listener for text fields to save as you type
             if (type === 'value' && element.tagName === 'INPUT') {
                 element.addEventListener('input', (e) => {
-                    settings[key] = e.target.value;
+                    if (type === 'integer') {
+                        const intValue = parseInt(e.target.value, 10);
+                        settings[key] = isNaN(intValue) ? 0 : intValue;
+                    } else {
+                        settings[key] = e.target.value;
+                    }
                     window.electronAPI.send('save-settings', settings);
                 });
             }
@@ -871,26 +906,85 @@ window.electronAPI.receive('showNotification', (message) => {
     showNotification(message);
 });
 async function dependencypopup() {
+    let loadingPopup = null;
+    const notificationHandler = (event, data) => {
+        console.log("Notification received:", data); // Debug logging
+        hideLoadingOverlay();
+        let title = 'Notification';
+        let message = 'Operation completed';
+        let icon = 'info';
+
+        try {
+            // Only try to extract data if it's properly formed
+            if (data && typeof data === 'object' && data.message) {
+                icon = data.type || 'info';
+                message = data.message;
+
+                title = {
+                    'success': 'Success',
+                    'error': 'Error',
+                    'warning': 'Warning',
+                    'info': 'Information'
+                }[icon] || 'Notification';
+            } else if (typeof data === 'string') {
+                message = data;
+            }
+        } catch (e) {
+            console.error("Error processing notification:", e);
+        }
+
+        Swal.fire({
+            title: title,
+            text: message,
+            icon: icon,
+            timer: 3000,
+            timerProgressBar: true
+        });
+    };
+
+    const loadingHandler = (event, isLoading) => {
+        console.log("Loading state changed:", isLoading); // Debug logging
+
+        if (isLoading === true) {
+            loadingPopup = Swal.fire({
+                title: 'Updating Dependencies',
+                text: 'Please wait while dependencies are updated...',
+                allowOutsideClick: false,
+                allowEscapeKey: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+        } else {
+            hideLoadingOverlay();
+        }
+    };
+
+    // Register event listeners
+    window.electronAPI.receive('showNotification', notificationHandler);
+    window.electronAPI.receive('toggleLoading', loadingHandler);
+
     const dependencies = [
         { id: 'yt-dlp', label: 'yt-dlp', link: 'https://github.com/ytdlp/ytdlp', description: '' },
-        { id: 'streamrip', label: 'streamrip', link: 'https://github.com/mediaharbor/custom_streamrip', description: '(Qobuz, Deezer, Tidal)' },
-        { id: 'ytmusicapi', label: 'YTMusic API', link: 'https://github.com/sigma67/ytmusicapi', description: '' },
-        { id: 'votify', label: 'votify', link: 'https://github.com/mediaharbor/custom_votify', description: '(Spotify)' },
-        { id: 'gamdl', label: 'gamdl', link: 'https://github.com/mediaharbor/custom_gamdl', description: '(Apple Music)' },
+        { id: 'streamrip', label: 'streamrip (Qobuz, Tidal, Deezer Downloader)', link: 'https://github.com/mediaharbor/custom_streamrip', description: '(Qobuz, Deezer, Tidal)' },
+        { id: 'ytmusicapi', label: 'YTMusic API (YT Music Search)', link: 'https://github.com/sigma67/ytmusicapi', description: '' },
+        { id: 'zotify', label: 'Zotify (Spotify Downloader)', link: 'https://github.com/mediaharbor/custom_zotify', description: '(Spotify)' },
+        { id: 'gamdl', label: 'Gamdl (Apple Music Downloader)', link: 'https://github.com/mediaharbor/custom_gamdl', description: '(Apple Music)' },
         { id: 'googleapi', label: 'googleapi', link: 'https://github.com/googleapis/google-api-python-client', description: '(YouTube Search API)' },
-        { id: 'pyapplemusicapi', label: 'pyapplemusicapi', link: 'https://github.com/queengooborg/pyapplemusicapi', description: '(Apple Music Search API)' },
+        { id: 'pyapplemusicapi', label: 'pyapplemusicapi (Apple Music API for Search)', link: 'https://github.com/queengooborg/pyapplemusicapi', description: '(Apple Music Search API)' },
     ];
 
+
     const dependencyHTML = dependencies.map(dep => `
-        <div style="margin-bottom: 8px;">
-            <label style="display: flex; align-items: center;">
-                <input type="checkbox" id="${dep.id}" style="margin-right: 8px;" ${['yt-dlp', 'streamrip', 'ytmusicapi', 'votify', 'gamdl'].includes(dep.id) ? 'checked' : ''}>
-                <span>
-                    ${dep.label} (<a href="${dep.link}" target="_blank">GitHub</a>) ${dep.description}
-                </span>
-            </label>
-        </div>
-    `).join('');
+    <div style="margin-bottom: 8px;">
+        <label style="display: flex; align-items: center;">
+            <input type="checkbox" id="${dep.id}" style="margin-right: 8px;" ${['yt-dlp', 'streamrip', 'ytmusicapi', 'zotify', 'gamdl'].includes(dep.id) ? 'checked' : ''}>
+            <span>
+                ${dep.label} (<a href="${dep.link}" target="_blank">GitHub</a>) ${dep.description}
+            </span>
+        </label>
+    </div>
+`).join('');
 
     const { value: selectedPackages } = await Swal.fire({
         title: 'Select Dependencies to Update',
@@ -904,12 +998,7 @@ async function dependencypopup() {
         preConfirm: () => {
             const selected = dependencies
                 .filter(dep => Swal.getPopup().querySelector(`#${dep.id}`).checked)
-                .map(dep => {
-                    if (dep.id === 'streamrip' || dep.id === 'votify' || dep.id === 'gamdl') {
-                        return `${dep.link}.git`;
-                    }
-                    return dep.label;
-                });
+                .map(dep => dep.id);
             return selected;
         }
     });
@@ -919,10 +1008,12 @@ async function dependencypopup() {
     } else if (selectedPackages !== undefined) {
         Swal.fire('No dependencies selected', 'Please select at least one package to install.', 'warning');
     }
+
+    return function cleanup() {
+        window.electronAPI.removeListener('showNotification', notificationHandler);
+        window.electronAPI.removeListener('toggleLoading', loadingHandler);
+    };
 }
-
-
-
 document.addEventListener("DOMContentLoaded", function () {
     const volumeSlider = document.getElementById('volume-slider');
     const muteButton = document.getElementById('mute-btn');
@@ -969,6 +1060,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const observer = new MutationObserver(adjustNavbarPadding);
     observer.observe(player, { attributes: true, attributeFilter: ["style"] });
     window.addEventListener("beforeunload", () => observer.disconnect());
+
 });
 
 
@@ -1105,7 +1197,7 @@ function createResultCard(result, platform, type = 'track') {
     if (downloadBtn) {
         downloadBtn.addEventListener('click', (event) => {
             const urlToDownload = downloadBtn.dataset.url;
-            showQualitySelectionPopup(urlToDownload, platform, title); // Pass title to the function
+            showQualitySelectionPopup(urlToDownload, platform, title);
         });
     }
 
@@ -1116,19 +1208,43 @@ function createResultCard(result, platform, type = 'track') {
             copyClipboard(urlToCopy);
         });
     }
+    // Testing a clickable album browser from tracks menu (only for qobuz rn)
+    const albumHref = card.querySelector('.album-href');
+    if (albumHref) {
+        albumHref.addEventListener('click', async () => {
+            try {
+                showLoadingOverlay();
+                const albumId = albumHref.dataset.value;
+
+                await showAlbumDetails(platform, albumId, result, type);
+            } catch (error) {
+                console.error('Error:', error);
+            } finally {
+                hideLoadingOverlay();
+            }
+        });
+    }
 
     const playBtn = card.querySelector('.play-button');
     if (playBtn) {
         playBtn.addEventListener('click', async () => {
             try {
                 showLoadingOverlay();
-                currentCardData = getCardData(result, platform, type);
-                await window.api.playMedia({
-                    url: playBtn.dataset.url,
-                    platform,
-                    type,
-                    id: result.id
-                });
+
+                if (type === "album") {
+                    await showAlbumDetails(platform, playBtn.dataset.url, result, type);
+                }
+                else if (type === "playlist") {
+                    await showPlaylistDetails(platform, playBtn.dataset.url, result, type);
+                } else {
+                    currentCardData = getCardData(result, platform, type);
+                    await window.api.playMedia({
+                        url: playBtn.dataset.url,
+                        platform,
+                        type,
+                        id: result.id
+                    });
+                }
             } catch (error) {
                 handleError(error);
                 console.error("Error during media playback:", error);
@@ -1139,6 +1255,446 @@ function createResultCard(result, platform, type = 'track') {
     }
     return card;
 }
+
+async function showAlbumDetails(platform, albumId, result, type) {
+    try {
+        showLoadingOverlay();
+
+        const response = await window.electronAPI.getAlbumDetails(platform, albumId);
+
+        if (!response.success) {
+            throw new Error(response.error);
+        }
+
+        const data = response.data;
+        let sortConfig = {
+            column: 'number',
+            direction: 'asc'
+        };
+        let searchTerm = '';
+
+        const currentCardData = getCardData(result, platform, type);
+
+        const overlay = document.createElement('div');
+        overlay.className = 'popup-overlay';
+
+        const popup = document.createElement('div');
+        popup.className = 'album-popup';
+
+        function getSortIcon(columnName) {
+            if (sortConfig.column !== columnName) return '↕️';
+            return sortConfig.direction === 'asc' ? '↑' : '↓';
+        }
+
+        function filterAndSortTracks() {
+            return [...data.tracks]
+                .filter(track => {
+                    if (!searchTerm) return true;
+                    const searchLower = searchTerm.toLowerCase();
+                    return (
+                        track.title.toLowerCase().includes(searchLower) ||
+                        String(track.number).includes(searchLower) ||
+                        (track.quality || '').toLowerCase().includes(searchLower)
+                    );
+                })
+                .sort((a, b) => {
+                    let comparison = 0;
+                    switch (sortConfig.column) {
+                        case 'number':
+                            comparison = a.number - b.number;
+                            break;
+                        case 'title':
+                            comparison = a.title.localeCompare(b.title);
+                            break;
+                        case 'duration':
+                            comparison = a.duration - b.duration;
+                            break;
+                        case 'quality':
+                            comparison = (a.quality || '').localeCompare(b.quality || '');
+                            break;
+                    }
+                    return sortConfig.direction === 'asc' ? comparison : -comparison;
+                });
+        }
+
+        function updatePopupContent() {
+            popup.innerHTML = `
+                <div class="album-info">
+                    <img src="${currentCardData.thumbnail}" alt="${currentCardData.title}" class="album-cover">
+                    <div class="album-details">
+                        <h2 class="album-title">${currentCardData.title}</h2>
+                        <p class="album-artist">${data.album.artist}</p>
+                        <p class="album-date">Released ${data.album.releaseDate}</p>
+                        ${data.album.description ? `<p class="album-description">${data.album.description}</p>` : ''}
+                    </div>
+                </div>
+                <div class="tracks-section">
+                    <div class="search-container">
+                        <input type="text" 
+                               class="search-input" 
+                               placeholder="Search tracks..." 
+                               value="${searchTerm}">
+                        <span class="search-icon">🔍</span>
+                    </div>
+                    <div class="tracks-container">
+                        ${renderTracks()}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderTracks() {
+            const filteredAndSortedTracks = filterAndSortTracks();
+
+            if (filteredAndSortedTracks.length === 0) {
+                return `
+                    <div class="track-row track-header">
+                        <div data-sort="number"># ${getSortIcon('number')}</div>
+                        <div data-sort="title">Title ${getSortIcon('title')}</div>
+                        <div data-sort="duration">Duration ${getSortIcon('duration')}</div>
+                        <div data-sort="quality">Quality ${getSortIcon('quality')}</div>
+                        <div>Actions</div>
+                    </div>
+                    <div class="no-results">No tracks found matching your search</div>
+                `;
+            }
+
+            return `
+                <div class="track-row track-header">
+                    <div data-sort="number"># ${getSortIcon('number')}</div>
+                    <div data-sort="title">Title ${getSortIcon('title')}</div>
+                    <div data-sort="duration">Duration ${getSortIcon('duration')}</div>
+                    <div data-sort="quality">Quality ${getSortIcon('quality')}</div>
+                    <div>Actions</div>
+                </div>
+                ${filteredAndSortedTracks.map(track => `
+                    <div class="track-row">
+                        <div>${track.number}</div>
+                        <div class="track-title">${track.title}</div>
+                        <div>${formatDuration(track.duration)}</div>
+                        <div>${track.quality || 'N/A'}</div>
+                        <div class="button-container">
+                            <button class="play-button" data-url="${track.playUrl}">
+                                <span class="fa-solid fa-play"></span>
+                            </button>
+                            <button class="download-btn" data-track-id="${track.playUrl}">
+                                <span class="fa-solid fa-download"></span>
+                            </button>
+                            <button class="copy-btn" data-track-id="${track.playUrl}">
+                                <span class="fa-solid fa-copy"></span>
+                            </button>
+                        </div>
+                    </div>
+                `).join('')}
+            `;
+        }
+
+        // Initialize popup content
+        updatePopupContent();
+
+        // Event handlers
+        popup.addEventListener('click', async (e) => {
+            const playButton = e.target.closest('.play-button');
+            const downloadButton = e.target.closest('.download-btn');
+            const copyButton = e.target.closest('.copy-btn');
+            const sortHeader = e.target.closest('[data-sort]');
+            const title = e.target.closest('.track-title');
+
+            if (playButton) {
+                try {
+                    const url = playButton.dataset.url;
+                    await window.api.playMedia({
+                        url,
+                        platform,
+                        type: 'track',
+                        id: playButton.closest('.track-row').querySelector('.download-btn').dataset.trackId
+                    });
+                    window.api.onStreamReady(({ streamUrl, platform }) => {
+                        console.log('Stream Ready Data:', { streamUrl, platform });
+                        console.log('Current Card Data:', currentCardData);
+                        console.log('Album Data:', data.album);
+
+                        const filteredAndSortedTracks = filterAndSortTracks();
+                        const currentTrack = filteredAndSortedTracks.find(t => t.playUrl === streamUrl);
+                        console.log('Found Track:', currentTrack);
+
+                        if (currentTrack) {
+                            const mediaData = {
+                                streamUrl,
+                                platform,
+                                thumbnail: currentCardData.thumbnail,
+                                title: currentTrack.title,
+                                artist: data.album.artist,
+                                album: currentCardData.title
+                            };
+                            console.log('Media Data Being Sent:', mediaData);
+                            handleStreamReady(mediaData);
+                        }
+                    });
+                } catch (error) {
+                    handleError(error);
+                    console.error("Error during media playback:", error);
+                }
+            }
+            else if (downloadButton) {
+                const trackId = downloadButton.dataset.trackId;
+                console.log('Download clicked for track:', trackId);
+                showQualitySelectionPopup(trackId, platform, title)
+            }
+            else if (copyButton) {
+                const downUrl = copyButton.dataset.trackId;
+                console.log('Sending', downUrl, 'to clipboard');
+                await window.electronAPI.copyText(downUrl);
+
+            }
+            else if (sortHeader) {
+                const column = sortHeader.dataset.sort;
+                if (sortConfig.column === column) {
+                    sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
+                } else {
+                    sortConfig.column = column;
+                    sortConfig.direction = 'asc';
+                }
+                updatePopupContent();
+            }
+        });
+
+        popup.addEventListener('input', (e) => {
+            if (e.target.classList.contains('search-input')) {
+                searchTerm = e.target.value;
+                updatePopupContent();
+            }
+        });
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                overlay.remove();
+            }
+        });
+
+        overlay.appendChild(popup);
+        document.body.appendChild(overlay);
+
+    } catch (error) {
+        handleError(error);
+        console.error('Error showing album details:', error);
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+async function showPlaylistDetails(platform, playlistId, result, type) {
+    try {
+        const response = await window.electronAPI.getPlaylistDetails(platform, playlistId);
+
+        if (!response.success) {
+            throw new Error(response.error);
+        }
+
+        const data = response.data;
+        let sortConfig = {
+            column: 'number',
+            direction: 'asc'
+        };
+        let searchTerm = '';
+
+        // Create popup container
+        const overlay = document.createElement('div');
+        overlay.className = 'popup-overlay';
+
+        const popup = document.createElement('div');
+        popup.className = 'playlist-popup';
+        currentCardData = getCardData(result, platform, type);
+
+        function getSortIcon(columnName) {
+            if (sortConfig.column !== columnName) return '↕️';
+            return sortConfig.direction === 'asc' ? '↑' : '↓';
+        }
+
+        function filterAndSortTracks() {
+            return [...data.tracks]
+                .filter(track => {
+                    if (!searchTerm) return true;
+                    const searchLower = searchTerm.toLowerCase();
+                    return (
+                        track.title.toLowerCase().includes(searchLower) ||
+                        String(track.number).includes(searchLower) ||
+                        (track.quality || '').toLowerCase().includes(searchLower)
+                    );
+                })
+                .sort((a, b) => {
+                    let comparison = 0;
+                    switch (sortConfig.column) {
+                        case 'number':
+                            comparison = a.number - b.number;
+                            break;
+                        case 'title':
+                            comparison = a.title.localeCompare(b.title);
+                            break;
+                        case 'duration':
+                            comparison = a.duration - b.duration;
+                            break;
+                        case 'quality':
+                            comparison = (a.quality || '').localeCompare(b.quality || '');
+                            break;
+                    }
+                    return sortConfig.direction === 'asc' ? comparison : -comparison;
+                });
+        }
+
+        function renderTracks() {
+            const filteredAndSortedTracks = filterAndSortTracks();
+
+            if (filteredAndSortedTracks.length === 0) {
+                return `
+            <div class="track-row track-header">
+                <div data-sort="number"># ${getSortIcon('number')}</div>
+                <div></div>
+                <div></div>
+                <div data-sort="title">Title ${getSortIcon('title')}</div>
+                <div data-sort="duration">Duration ${getSortIcon('duration')}</div>
+                <div data-sort="quality">Quality ${getSortIcon('quality')}</div>
+                <div>Actions</div>
+            </div>
+            <div class="no-results">No tracks found matching your search</div>
+        `;
+            }
+
+            return `
+        <div class="track-row track-header">
+            <div data-sort="number"># ${getSortIcon('number')}</div>
+            <div></div>
+            <div></div>
+            <div data-sort="title">Title ${getSortIcon('title')}</div>
+            <div data-sort="duration">Duration ${getSortIcon('duration')}</div>
+            <div data-sort="quality">Quality ${getSortIcon('quality')}</div>
+            <div>Actions</div>
+        </div>
+        ${filteredAndSortedTracks.map(track => `
+            <div class="track-row">
+                <div>${track.number}</div>
+                <div><img src="${track.cover}" alt="Track cover"/></div>
+                <div>${track.explicit ? '<span class="explicit-badge">E</span>' : ''}</div>
+                <div class="track-info">
+                    <h2>${track.title}</h2>
+                    <div class="album-info">
+                        ${track.albumTitle ? `<div>${track.albumTitle}</div>` : ''}
+                        ${track.albumArtist ? `<div>${track.albumArtist}</div>` : ''}
+                    </div>
+                </div>
+                <div>${formatDuration(track.duration)}</div>
+                <div>${track.quality || 'N/A'}</div>
+                <div class="button-container">
+                    <button class="btn play-btn" data-track-id="${track.id}">
+                        <span class="fa-solid fa-play"></span>
+                    </button>
+                    <button class="btn download-btn" data-track-id="${track.id}">
+                        <span class="fa-solid fa-download"></span>
+                    </button>
+                    <button class="btn copy-btn" data-track-id="${track.id}">
+                        <span class="fa-solid fa-copy"></span>
+                    </button>
+                </div>
+            </div>
+        `).join('')}
+    `;
+        }
+        function updatePopupContent() {
+            popup.innerHTML = `
+                <div class="playlist-info">
+                    <img src="${currentCardData.thumbnail}" alt="${currentCardData.title}" class="playlist-cover">
+                    <div class="playlist-details">
+                        <h2 class="playlist-title">${currentCardData.title}</h2>
+                        <p class="playlist-artist">${data.playlist.artist}</p>
+                        <p class="playlist-date">Released ${data.playlist.releaseDate}</p>
+                        ${data.playlist.description ? `<p class="playlist-description">${data.playlist.description}</p>` : ''}
+                    </div>
+                </div>
+                <div class="tracks-section">
+                    <div class="search-container">
+                        <input type="text" 
+                               class="search-input" 
+                               placeholder="Search tracks..." 
+                               value="${searchTerm}"
+                        >
+                        <span class="search-icon">🔍</span>
+                    </div>
+                    <div class="tracks-container">
+                        ${renderTracks()}
+                    </div>
+                </div>
+            `;
+        }
+
+        updatePopupContent();
+
+        popup.addEventListener('input', (e) => {
+            if (e.target.classList.contains('search-input')) {
+                searchTerm = e.target.value;
+                const tracksContainer = popup.querySelector('.tracks-container');
+                tracksContainer.innerHTML = renderTracks();
+            }
+        });
+
+        popup.addEventListener('click', async (e) => {
+            if (e.target.closest('[data-sort]')) {
+                const column = e.target.closest('[data-sort]').dataset.sort;
+                if (sortConfig.column === column) {
+                    sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
+                } else {
+                    sortConfig.column = column;
+                    sortConfig.direction = 'asc';
+                }
+                const tracksContainer = popup.querySelector('.tracks-container');
+                tracksContainer.innerHTML = renderTracks();
+            }
+
+            if (e.target.classList.contains('play-btn')) {
+                const trackId = e.target.dataset.trackId;
+                try {
+                    await window.api.playMedia({
+                        url: data.tracks.find(t => t.id === trackId)?.playUrl,
+                        platform,
+                        type: 'track',
+                        id: trackId
+                    });
+                } catch (error) {
+                    console.error('Error playing track:', error);
+                }
+            }
+
+            if (e.target.classList.contains('download-btn')) {
+                const trackId = e.target.dataset.trackId;
+                console.log('Download clicked for track:', trackId);
+            }
+        });
+
+        // Close popup when clicking overlay
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                overlay.remove();
+            }
+        });
+
+        // Add to document
+        overlay.appendChild(popup);
+        document.body.appendChild(overlay);
+
+    } catch (error) {
+        console.error('Error showing playlist details:', error);
+    }
+}
+
+function formatDuration(seconds) {
+    if (!seconds) return '--:--';
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+// Export for use in your renderer process
+window.showAlbumDetails = showAlbumDetails;
+window.showPlaylistDetails = showPlaylistDetails;
 async function playTrackAtIndex(index) {
     if (index < 0 || index >= playlist.length) {
         console.error("Index out of bounds");
@@ -1204,9 +1760,10 @@ const qualityOptions = {
         { value: "0", label: "128 kbps MP3" }
     ],
     spotify: [
-        { value: "vorbis-high", label: "320 kbps" },
-        { value: "vorbis-medium", label: "160 kbps" },
-        { value: "vorbis-low", label: "96 kbps" }
+        { value: "auto", label: "Best"},
+        { value: "very_high", label: "Very High" },
+        { value: "high", label: "High" },
+        { value: "normal", label: "Normal" }
     ],
     appleMusic: [
         { value: "aac-legacy", label: "256 kbps" },
@@ -1361,8 +1918,8 @@ function handleStreamReady({ streamUrl, platform, thumbnail, title, artist, albu
         });
 
         navigator.mediaSession.setActionHandler('previoustrack', () => {
-                currentIndex--;
-                playTrackAtIndex(currentIndex);
+            currentIndex--;
+            playTrackAtIndex(currentIndex);
 
         });
 
@@ -1521,7 +2078,7 @@ function getCardData(result, platform, type = 'track') {
                         thumbnail: result.Thumbnail,
                         title: result['Playlist Title'],
                         details: `<p>Channel: ${result['Channel Title']}</p>`,
-                        playUrl: result['Playlist URL'],
+                        playUrl: result.BrowseId,
                         copyUrl: result['Playlist URL']
                     };
                 case 'channel':
@@ -1545,7 +2102,7 @@ function getCardData(result, platform, type = 'track') {
                         artist: result.ArtistName,
                         album: result.AlbumTitle,
                         explicit: result.Explicit,
-                        playUrl: result.AlbumURL,
+                        playUrl: result.BrowseId,
                         copyUrl: result.AlbumURL,
                     };
                 case "playlist":
@@ -1555,7 +2112,7 @@ function getCardData(result, platform, type = 'track') {
                         details: `
                         <p>${result.Author}`,
                         explicit: result.Explicit,
-                        playUrl: result.PlaylistURL,
+                        playUrl: result.BrowseId,
                         copyUrl: result.PlaylistURL
                     };
                 case "song":
@@ -1619,7 +2176,7 @@ function getCardData(result, platform, type = 'track') {
                         title: result.name,
                         details: `<h4>${result.release_date}</h4><p>Artist: ${result.artists[0]?.name || 'Unknown Artist'}</p>`,
                         totalTracks: result.total_tracks,
-                        playUrl: `WIP`,
+                        playUrl: result.id,
                         copyUrl: result.external_urls.spotify
                     };
                 case 'artist':
@@ -1632,11 +2189,11 @@ function getCardData(result, platform, type = 'track') {
                     };
                 case 'playlist':
                     return {
-                        thumbnail: result.images[0]?.url || '',
-                        title: result.name,
-                        details: `<p>By: ${result.owner?.display_name || 'Unknown'}</p>`,
-                        playUrl: `WIP`,
-                        copyUrl: result.external_urls.spotify
+                        thumbnail: result?.images?.[0]?.url || '',
+                        title: result?.name,
+                        details: `<p>By: ${result?.owner?.display_name || 'Unknown'}</p>`,
+                        playUrl: result?.id,
+                        copyUrl: result?.external_urls.spotify
                     };
                 case 'podcast':
                     return {
@@ -1677,7 +2234,7 @@ function getCardData(result, platform, type = 'track') {
                         details: `<p>Artist: ${result.artist?.name || 'Unknown Artist'}</p>`,
                         explicit: result.explicit_lyrics,
                         totalTracks: result.nb_tracks,
-                        playUrl: `WIP`,
+                        playUrl: result.id,
                         copyUrl: result.link
                     };
                 case 'artist':
@@ -1685,7 +2242,7 @@ function getCardData(result, platform, type = 'track') {
                         thumbnail: result.picture_medium,
                         title: result.name,
                         details: `<p>Fans: ${result.nb_fan || 0}</p>`,
-                        playUrl: `WIP`,
+                        playUrl: result.id,
                         copyUrl: result.link
                     };
                 case 'playlist':
@@ -1693,7 +2250,7 @@ function getCardData(result, platform, type = 'track') {
                         thumbnail: result.picture_medium,
                         title: result.title,
                         details: `<p>Tracks: ${result.nb_tracks || 0}</p>`,
-                        playUrl: `WIP`,
+                        playUrl: result.id,
                         copyUrl: result.link
                     };
             }
@@ -1706,7 +2263,7 @@ function getCardData(result, platform, type = 'track') {
                         title: result.title || 'Unknown Title',
                         details: `
                     <p style="font-size: 0.9em;">${result.maximum_bit_depth}-Bit/${result.maximum_sampling_rate} kHz</p>
-                    <p>Album: ${result.album?.title || 'Unknown Album'}</p>
+                    <p data-value="${result.album?.id || ''}" id="album-href" class="album-href">Album: ${result.album?.title || 'Unknown Album'}</p>
                     <p>Artist: ${result.album?.artist?.name || 'Unknown Artist'}</p>
                 `,
                         artist: result.album?.artist?.name,
@@ -1730,7 +2287,7 @@ function getCardData(result, platform, type = 'track') {
                         explicit: result.parental_warning,
                         hires: result.hires,
                         totalTracks: `${result.tracks_count}/${result.media_count} `,
-                        playUrl: 'WIP',
+                        playUrl: result.id,
                         copyUrl: `https://play.qobuz.com/album/${result.id}`,
                     };
                 case 'playlist':
@@ -1738,7 +2295,7 @@ function getCardData(result, platform, type = 'track') {
                         thumbnail: result.image_rectangle[0],
                         title: result.name,
                         details: `<p>${result.genres[0].percent}% ${result.genres[0].name}</p>`,
-                        playUrl: `WIP`,
+                        playUrl: result.id,
                         copyUrl: `https://play.qobuz.com/playlist/${result.id}`,
                     }
                 case 'artist':
@@ -1780,7 +2337,7 @@ function getCardData(result, platform, type = 'track') {
                 `,
                         explicit: result.properties?.content ? result.properties.content[0] : null,
                         totalTracks: `${result.numberOfTracks}/${result.numberOfVolumes}`,
-                        playUrl: "WIP",
+                        playUrl: result.id,
                         copyUrl: result.tidalUrl
                     };
                 case 'artist':
@@ -1867,7 +2424,11 @@ function handleError(error) {
 }
 
 function showNotification(message) {
-    const container = document.getElementById('floating-search-notifications');
+    let container = document.getElementById('floating-download-notifications') ||
+        document.getElementById('floating-search-notifications') || document.getElementById('floating-notifications');
+
+    if (!container) return;
+
     const notification = document.createElement('div');
     notification.className = 'notification';
     notification.textContent = message;
@@ -1878,6 +2439,7 @@ function showNotification(message) {
         notification.remove();
     }, 3000);
 }
+
 function displayCompletionNotification(message) {
     const container = document.getElementById('floating-download-notifications');
 
@@ -1932,6 +2494,21 @@ function initializeVideoTab() {
 
     // Initialize dropdowns
     initializeDropdowns();
+
+    const platformBoxes = ['youtube', 'generic'];
+
+    platformBoxes.forEach(platform => {
+        const input = document.getElementById(`${platform}-url`);
+        const downloadButton = document.getElementById(`${platform}-download-button`);
+
+        if (input && downloadButton) {
+            input.addEventListener('keypress', (event) => {
+                if (event.key === 'Enter') {
+                    downloadButton.click();
+                }
+            });
+        }
+    });
 
     // Add event listeners for download buttons
     document.getElementById('youtube-download-button').addEventListener('click', handleYoutubeVideoDownload);
@@ -2040,8 +2617,6 @@ window.electronAPI.receive('generic-video-info', (data) => {
 });
 
 
-// Initialize the video tab when the DOM is loaded
-document.addEventListener('DOMContentLoaded', initializeVideoTab);
 function initializeMusicTab() {
     // Tab switch functionality
     const tabButtons = document.querySelectorAll('.tab-button');
@@ -2056,6 +2631,21 @@ function initializeMusicTab() {
             document.getElementById(button.dataset.tab).classList.add('active');
         });
     });
+    const platformBoxes = ['youtube', 'qobuz', 'tidal', 'spotify', 'deezer', 'appleMusic'];
+
+    platformBoxes.forEach(platform => {
+        const input = document.getElementById(`${platform}-url`);
+        const downloadButton = document.getElementById(`${platform}-download-button`);
+
+        if (input && downloadButton) {
+            input.addEventListener('keypress', (event) => {
+                if (event.key === 'Enter') {
+                    downloadButton.click();
+                }
+            });
+        }
+    });
+
     document.querySelectorAll('.dropdown-btn').forEach(button => {
         button.addEventListener('click', () => {
             const dropdownContent = button.nextElementSibling;
@@ -2068,8 +2658,8 @@ function initializeMusicTab() {
     });
     document.querySelectorAll('.batch-download-btn').forEach(button => {
         button.addEventListener('click', (event) => {
-            const order = event.target.dataset.order;  // Assuming the button has a dataset attribute for the batch order
-            showBatchDownloadNotification(order);      // Call the function when batch download is clicked
+            const order = event.target.dataset.order;
+            showBatchDownloadNotification(order);
         });
     });
 
@@ -2283,7 +2873,6 @@ function handleTidalDownload() {
     }
 }
 
-// Updated handleDeezerDownload function
 function handleDeezerDownload() {
     const url = document.getElementById('deezer-url').value;
     const qualityDropdown = document.getElementById('deezer-quality');
@@ -2636,3 +3225,17 @@ document.getElementById('downloadsBtn').addEventListener('click', () => loadPage
 document.getElementById('searchBtn').addEventListener('click', () => loadPage('search'));
 document.getElementById('settingsBtn').addEventListener('click', () => loadPage('settings'));
 document.getElementById('helpBtn').addEventListener('click', () => loadPage('help'));
+document.getElementById('hamburger-menu').addEventListener('click', () => {
+    const navbar = document.querySelector('.navbar');
+    navbar.classList.toggle('collapsed');
+    localStorage.setItem('navbarCollapsed', navbar.classList.contains('collapsed'));
+});
+
+// Restore navbar state on page load
+document.addEventListener('DOMContentLoaded', () => {
+    const navbar = document.querySelector('.navbar');
+    const isCollapsed = localStorage.getItem('navbarCollapsed') === 'true';
+    if (isCollapsed) {
+        navbar.classList.add('collapsed');
+    }
+});
