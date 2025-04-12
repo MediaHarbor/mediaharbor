@@ -101,15 +101,16 @@
         <h2>Spotify</h2>
         <input type="text" id="spotify-url" placeholder="Enter Spotify URL">
         <div class="dropdown" id="spotify-quality">
-            <button data-value="vorbis-high" class="dropdown-btn">320 kbps</button>
+            <button data-value="auto" class="dropdown-btn">Best</button>
             <div class="dropdown-content">
-                <a href="#" data-value="vorbis-high">320 kbps</a>
-                <a href="#" data-value="vorbis-medium">160 Kbps</a>
-                <a href="#" data-value="vorbis-low">96 kbps</a>
+                <a href="#" data-value="auto">Best</a>
+                <a href="#" data-value="very_high">Very High</a>
+                <a href="#" data-value="high">High</a>
+                <a href="#" data-value="normal">Normal</a>
             </div>
         </div>
         <button id="spotify-download-button">Download</button>
-        <button id="spotifyDownloadBatch_btn" onclick="startSpotifyDownloadBatch()" title="Select .txt file instead"><span class="fas fa-file-lines"></span></button>
+        <button id="spotifyDownloadBatch_btn" onclick="showNotification('Spotify downloader changed to Zotify, which not supports batch downloads in app. wait for next update')" title="Select .txt file instead"><span class="fas fa-file-lines"></span></button>
     </div>
 
     <div id="appleMusic" class="tab-content">
