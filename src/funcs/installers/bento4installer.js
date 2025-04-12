@@ -36,9 +36,6 @@ function getDownloadInfo(platform, arch, version) {
     return { downloadUrl, defaultInstallDir };
 }
 
-/**
- * Logs messages to the UI or console.
- */
 function createLogger(mainWin) {
     return (message) => {
         if (mainWin && typeof mainWin.webContents.send === 'function') {
@@ -49,17 +46,12 @@ function createLogger(mainWin) {
     };
 }
 
-/**
- * Adds Bento4 'bin' directory to system PATH.
- */
 async function addBento4ToPath(binDir, platform, log, mainWin) {
     if (platform === 'darwin') {
-
         const files = fs.readdirSync(binDir);
         for (const file of files) {
             const filePath = path.join(binDir, file);
             try {
-
                 fs.chmodSync(filePath, '755');
                 log(`Set executable permissions for ${file}`);
             } catch (error) {
@@ -122,7 +114,7 @@ async function addBento4ToPath(binDir, platform, log, mainWin) {
 
     if (platform === 'win32') {
         return new Promise((resolve, reject) => {
-            const normalizedBinDir = binDir.replace(/\
+            const normalizedBinDir = binDir.replace(/\//g, '\\');
             const psCommand = `
                 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
                 $binDir = '${normalizedBinDir}'
@@ -179,7 +171,6 @@ async function addBento4ToPath(binDir, platform, log, mainWin) {
             });
         });
     } else {
-
         const shell = process.env.SHELL || '/bin/bash';
         let rcFile;
         if (shell.includes('zsh')) {
@@ -206,6 +197,7 @@ async function addBento4ToPath(binDir, platform, log, mainWin) {
         }
     }
 }
+
 
 async function downloadFile(url, destPath, log, mainWin) {
     log(`Starting download from ${url}`);
@@ -284,9 +276,6 @@ async function extractZip(zipPath, extractTo, log, mainWin) {
     log(`Extraction completed to ${extractTo}`);
 }
 
-/**
- * Main function to download and install Bento4.
- */
 async function downloadAndInstallBento4(mainWin, options = {}) {
     const log = createLogger(mainWin);
 
@@ -365,7 +354,6 @@ async function downloadAndInstallBento4(mainWin, options = {}) {
 
         if (platform === 'darwin') {
             log('Setting up permissions for macOS...');
-
             fs.chmodSync(finalBinDir, '755');
             log('Set permissions for bin directory');
         }
