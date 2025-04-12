@@ -1,6 +1,6 @@
 {
   "name": "mediaharbor",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -19,7 +19,9 @@
     "protocols": [
       {
         "name": "MediaHarbor Protocol",
-        "schemes": ["mediaharbor"]
+        "schemes": [
+          "mediaharbor"
+        ]
       }
     ],
     "appId": "AtomDev.MediaHarbor",
@@ -111,10 +113,14 @@
     "@iarna/toml": "^2.2.5",
     "axios": "^1.7.7",
     "cheerio": "^1.0.0",
+    "cross-spawn": "^7.0.6",
     "decompress": "^4.2.1",
     "decompress-targz": "^4.1.1",
     "decompress-unzip": "^4.0.1",
+    "electron-prompt": "^1.7.0",
+    "electron-prompts": "^0.9.13",
     "electron-store": "^10.0.0",
+    "express": "^4.21.2",
     "fix-path": "^4.0.0",
     "lzma-native": "^8.0.6",
     "node-fetch": "^3.3.2",
@@ -122,8 +128,9 @@
     "sqlite3": "^5.1.7",
     "strip-ansi": "^7.1.0",
     "sudo-prompt": "^9.2.1",
-    "sweetalert2": "^11.14.4",
     "tar": "^7.4.3",
+    "tar-fs": "^3.0.8",
+    "undici": "^7.7.0",
     "unzipper": "^0.12.3",
     "xml2js": "^0.6.2"
   }
