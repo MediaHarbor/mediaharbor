@@ -4,7 +4,7 @@ import argparse
 import requests
 import os
 from base64 import b64encode
-
+import sys
 class TidalAPI:
     API_URL = "https://openapi.tidal.com/v2"
     TOKEN_URL = "https://auth.tidal.com/v1/oauth2/token"
@@ -87,7 +87,29 @@ class TidalAPI:
         return self.make_request("GET", f"tracks/{track_id}", params=params)
 
     def get_album(self, album_id: str, country_code: str):
-        return self.make_request("GET", f"albums/{album_id}", params={"countryCode": country_code})
+        # Fetch album details
+        album_response = self.make_request(
+            "GET",
+            f"albums/{album_id}",
+            params={"countryCode": country_code, "include": "items"}
+        )
+
+        # Check if album_response contains artist details or artistId
+        if album_response and "artist" not in album_response:
+            # Fetch artist details if needed
+            artist_id = album_response.get("artistId")
+            if artist_id:
+                artist_response = self.make_request(
+                    "GET",
+                    f"artists/{artist_id}",
+                    params={"countryCode": country_code}
+                )
+                # Add artist name to the album response
+                if artist_response:
+                    album_response["artistName"] = artist_response.get("name", "Unknown Artist")
+
+        return album_response
+
 
     def search_tracks(self, query: str, country_code: str, limit: int = 30):
         self.authenticate()
@@ -199,6 +221,7 @@ def main():
     parser.add_argument('--country-code', default='US', help='Country code (default: US)')
     parser.add_argument('--get-track', help='Track ID to get details for')
     parser.add_argument('--get-album', help='Album ID to get details for')
+    parser.add_argument('--get-track-list', help="Album URL or ID to fetch track list (redirects to --get-album)")
     parser.add_argument('--search-track', help='Track name to search for')
     parser.add_argument('--search-album', help='Album name to search for')
     parser.add_argument('--get-stream', help='Track ID to get stream URL for')
@@ -219,6 +242,16 @@ def main():
 
         if args.get_album:
             album_details = tidal_api.get_album(album_id=args.get_album, country_code=args.country_code)
+            print(json.dumps(album_details, indent=4))
+
+        # Handle --get-track-list as a redirect to --get-album
+        if args.get_track_list:
+            # Extract the album ID from the input (supports URLs like "album/{albumId}")
+            if "album/" in args.get_track_list:
+                album_id = args.get_track_list.split("album/")[-1].split("/")[0]
+            else:
+                album_id = args.get_track_list
+            album_details = tidal_api.get_album(album_id=album_id, country_code=args.country_code)
             print(json.dumps(album_details, indent=4))
 
         if args.search_track:
@@ -250,7 +283,6 @@ def main():
             )
             print("Stream URL Data:")
             print(json.dumps(stream_url_data, indent=4))
-
 
     except requests.exceptions.RequestException as e:
         print(f"Error: {e}")

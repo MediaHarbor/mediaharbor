@@ -5,6 +5,84 @@ from ytmusicapi import YTMusic
 # Initialize the YTMusic API
 ytmusic = YTMusic()
 
+def get_track_list(content_id, content_type):
+    """
+    Get track list for an album or playlist.
+
+    Parameters:
+        content_id (str): The ID of the album or playlist
+        content_type (str): Either 'album' or 'playlist'
+
+    Returns:
+        dict: Album information and track list in a format matching the app structure
+    """
+    try:
+        if content_type == 'album':
+            content = ytmusic.get_album(content_id)
+
+            total_duration = sum(
+                sum(int(t) * (60 ** i) for i, t in enumerate(reversed(track.get('duration', '0:00').split(':'))))
+                for track in content.get('tracks', [])
+            )
+
+            album_info = {
+                "title": content.get('title', 'Unknown Album'),
+                "artist": content.get('artists', [{'name': 'Unknown Artist'}])[0]['name'],
+                "coverUrl": content.get('thumbnails', [])[-1]['url'] if content.get('thumbnails') else '',
+                "description": content.get('description', ''),
+                "duration": total_duration
+            }
+
+            tracks = [{
+                "id": track.get('videoId', ''),
+                "number": index + 1,
+                "title": track.get('title', 'Unknown Title'),
+                "duration": sum(int(t) * (60 ** i) for i, t in enumerate(reversed(track.get('duration', '0:00').split(':')))),
+                "quality": '256Kbps',
+                "playUrl": f"https://music.youtube.com/watch?v={track.get('videoId')}" if track.get('videoId') else None
+            } for index, track in enumerate(content.get('tracks', []))]
+
+            return {
+                "album": album_info,
+                "tracks": tracks
+            }
+
+        elif content_type == 'playlist':
+            content = ytmusic.get_playlist(content_id)
+
+            total_duration = sum(
+                sum(int(t) * (60 ** i) for i, t in enumerate(reversed(track.get('duration', '0:00').split(':'))))
+                for track in content.get('tracks', [])
+            )
+
+            playlist_info = {
+                "title": content.get('title', 'Unknown Playlist'),
+                "artist": content.get('author', {}).get('name', 'Unknown Creator'),
+                "releaseDate": '',
+                "coverUrl": content.get('thumbnails', [])[-1]['url'] if content.get('thumbnails') else '',
+                "description": content.get('description', ''),
+                "duration": total_duration
+            }
+
+            tracks = [{
+                "id": track.get('videoId', ''),
+                "number": index + 1,
+                "title": track.get('title', 'Unknown Title'),
+                "duration": sum(int(t) * (60 ** i) for i, t in enumerate(reversed(track.get('duration', '0:00').split(':')))),
+                "quality": 'HIGH',
+                "playUrl": f"https://music.youtube.com/watch?v={track.get('videoId')}" if track.get('videoId') else None
+            } for index, track in enumerate(content.get('tracks', []))]
+
+            return {
+                "album": playlist_info,
+                "tracks": tracks
+            }
+
+        else:
+            raise ValueError("Invalid content type. Must be 'album' or 'playlist'")
+    except Exception as e:
+        raise Exception(f"Error fetching {content_type} tracks: {str(e)}")
+
 def search_youtube_music(query, search_type="songs", raw_response=False):
     """
     Search YouTube Music for tracks, albums, playlists, podcasts, or artists.
@@ -56,7 +134,8 @@ def search_youtube_music(query, search_type="songs", raw_response=False):
                 "AlbumCover": result['thumbnails'][-1]['url'] if result.get('thumbnails') else 'N/A',
                 "ArtistName": result['artists'][0].get('name', 'Unknown Artist') if result.get('artists') else 'Unknown Artist',
                 "AlbumURL": f"https://music.youtube.com/browse/{result['browseId']}" if 'browseId' in result else 'N/A',
-                "Explicit": result.get('isExplicit', False)
+                "Explicit": result.get('isExplicit', False),
+                "BrowseId": result.get('browseId', 'N/A')
             })
     elif search_type == 'playlist':
         for result in search_results:
@@ -64,7 +143,8 @@ def search_youtube_music(query, search_type="songs", raw_response=False):
                 "PlaylistTitle": result.get('title', 'Unknown Playlist'),
                 "PlaylistCover": result['thumbnails'][-1]['url'] if result.get('thumbnails') else 'N/A',
                 "Author": result.get('author', 'Unknown Author'),
-                "PlaylistURL": f"https://music.youtube.com/browse/{result['browseId']}" if 'browseId' in result else 'N/A'
+                "PlaylistURL": f"https://music.youtube.com/browse/{result['browseId']}" if 'browseId' in result else 'N/A',
+                "BrowseId": result.get('browseId', 'N/A')
             })
     elif search_type == 'artist':
         for result in search_results:
@@ -92,16 +172,26 @@ def search_youtube_music(query, search_type="songs", raw_response=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Search YouTube Music for songs, albums, playlists, podcasts, or artists.")
-    parser.add_argument('-q', '--query', required=True, help="The search query")
+    parser.add_argument('-q', '--query', help="The search query")
     parser.add_argument('-t', '--type', choices=['song', 'album', 'playlist', 'artist', 'podcast', 'episode'],
                         default='song', help="The type of content to search for")
     parser.add_argument('-r', '--raw', action='store_true',
                         help="Return raw API response for podcasts and episodes")
+    parser.add_argument('--get-track-list', help="Get track list for album/ID or playlist/ID (format: 'album/ID' or 'playlist/ID')")
 
     args = parser.parse_args()
 
     try:
-        results = search_youtube_music(args.query, args.type, args.raw)
+        if args.get_track_list:
+            content_type, content_id = args.get_track_list.split('/')
+            if content_type not in ['album', 'playlist']:
+                raise ValueError("Track list can only be retrieved for albums or playlists")
+            results = get_track_list(content_id, content_type)
+        elif args.query:
+            results = search_youtube_music(args.query, args.type, args.raw)
+        else:
+            parser.error("Either --query or --get-track-list must be specified")
+
         if results:
             print(json.dumps(results, indent=4))
         else:
