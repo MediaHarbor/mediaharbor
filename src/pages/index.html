@@ -11,16 +11,21 @@
 </head>
 <body>
 <nav class="navbar">
-    <h1>MediaHarbor</h1>
+    <div class="navbar-header">
+        <button id="hamburger-menu" class="hamburger-menu">
+            <i class="fas fa-bars"></i>
+        </button>
+        <h1>MediaHarbor</h1>
+    </div>
     <div class="main-nav">
-        <a href="#" id="musicBtn" class="active"><i class="fas fa-music"></i>Music</a>
-        <a href="#" id="videoBtn"><i class="fas fa-film"></i>Video</a>
-        <a href="#" id="downloadsBtn"><i class="fas fa-download"></i>Downloads</a>
-        <a href="#" id="searchBtn"><i class="fa-solid fa-magnifying-glass"></i>Search</a>
+        <a href="#" id="musicBtn" class="active"><i class="fas fa-music"></i><span>Music</span></a>
+        <a href="#" id="videoBtn"><i class="fas fa-film"></i><span>Video</span></a>
+        <a href="#" id="downloadsBtn"><i class="fas fa-download"></i><span>Downloads</span></a>
+        <a href="#" id="searchBtn"><i class="fa-solid fa-magnifying-glass"></i><span>Search</span></a>
     </div>
     <div class="secondary-nav">
-        <a href="#" id="settingsBtn"><i class="fas fa-cogs"></i>Settings</a>
-        <a href="#" id="helpBtn"><i class="fas fa-question-circle"></i>Help</a>
+        <a href="#" id="settingsBtn"><i class="fas fa-cogs"></i><span>Settings</span></a>
+        <a href="#" id="helpBtn"><i class="fas fa-question-circle"></i><span>Help</span></a>
     </div>
 </nav>
 <div class="main-content" id="content"></div>
