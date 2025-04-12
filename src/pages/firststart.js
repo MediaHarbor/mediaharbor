@@ -35,6 +35,7 @@ window.electronAPI.handleDependencyStatus((event, status) => {
             }
         }
     });
+    validateRequiredDependencies();
 });
 
 document.querySelectorAll('.install-btn').forEach(button => {
@@ -52,6 +53,20 @@ document.querySelectorAll('.install-btn').forEach(button => {
         } finally {
             hideProgress();
         }
+    });
+});
+
+document.querySelectorAll('.install-btn').forEach(button => {
+    button.addEventListener('mousedown', function() {
+        this.style.transform = 'scale(0.95)';
+    });
+
+    button.addEventListener('mouseup', function() {
+        this.style.transform = 'scale(1)';
+    });
+
+    button.addEventListener('mouseleave', function() {
+        this.style.transform = 'scale(1)';
     });
 });
 
@@ -80,7 +95,17 @@ const navigateTo = (targetPageIndex) => {
     currentPage.addEventListener('transitionend', onTransitionEnd);
 };
 
-const nextPage = () => navigateTo(currentPageIndex + 1);
+const nextPage = () => {
+    // check if required dependencies are installed
+    if (currentPageIndex === 1) {
+        if (!validateRequiredDependencies()) {
+            displayError("Please install all required dependencies before proceeding.");
+            return;
+        }
+    }
+
+    navigateTo(currentPageIndex + 1);
+};
 const prevPage = () => navigateTo(currentPageIndex - 1);
 
 const showPage = (pageIndex, immediate = false) => {
@@ -130,10 +155,98 @@ const displayError = (message) => {
     alert(message);
 };
 
-window.electronAPI.onProgress((event, { percent, status }) => {
-    updateProgress(percent, status);
+window.electronAPI.onProgress((event, rawData) => {
+    console.log('Raw progress data received:', rawData);
+    
+    try {
+        // Parse the JSON string
+        const data = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+        console.log('Parsed progress data:', data);
+        
+        if (data && typeof data === 'object') {
+            const { percent, status } = data;
+            updateProgress(
+                percent || 0, 
+                status || 'Installing...'
+            );
+        } else {
+            console.error('Invalid progress data format:', data);
+        }
+    } catch (error) {
+        console.error('Error processing progress data:', error);
+        console.error('Received data:', rawData);
+    }
 });
 
 window.electronAPI.onError((event, message) => {
     displayError(message);
+});
+
+function openManualInstallModal() {
+    const modal = document.getElementById('manual-install-modal');
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeManualInstallModal() {
+    const modal = document.getElementById('manual-install-modal');
+    modal.style.display = 'none';
+    document.body.style.overflow = 'auto';
+}
+
+function validateRequiredDependencies() {
+    const requiredDeps = ['python', 'git', 'ffmpeg', 'ytdlp'];
+    let allInstalled = true;
+
+    requiredDeps.forEach(dep => {
+        const depElement = document.getElementById(`${dep}-dep`);
+        if (depElement && !depElement.classList.contains('success')) {
+            allInstalled = false;
+        }
+    });
+
+    const nextButton = document.querySelector('#dependencies-page .next-btn');
+    if (nextButton) {
+        nextButton.disabled = !allInstalled;
+
+        if (!allInstalled) {
+            nextButton.title = "Please install all required dependencies first";
+        } else {
+            nextButton.title = "";
+        }
+    }
+
+    return allInstalled;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const warningDiv = document.querySelector('.warning-div');
+    if (!warningDiv) return;
+    const manualInstallLink = warningDiv.querySelector('a');
+    const manualInstallBtn = document.createElement('button');
+    manualInstallBtn.classList.add('manual-install-btn');
+    manualInstallBtn.textContent = 'Manual Installation Guide';
+    manualInstallBtn.addEventListener('click', openManualInstallModal);
+    warningDiv.innerHTML = '';
+    const warningText = document.createElement('h3');
+    warningText.classList.add('warning');
+    warningText.textContent = 'Having trouble with automatic installation? Use our detailed manual guide:';
+    warningDiv.appendChild(warningText);
+    warningDiv.appendChild(manualInstallBtn);
+
+    const modal = document.getElementById('manual-install-modal');
+    if (!modal) return;
+
+    const closeBtn = modal.querySelector('.close-modal');
+    const closeModalBtn = modal.querySelector('.close-modal-btn');
+    closeBtn.addEventListener('click', closeManualInstallModal);
+    closeModalBtn.addEventListener('click', closeManualInstallModal);
+
+    window.addEventListener('click', function(event) {
+        if (event.target === modal) {
+            closeManualInstallModal();
+        }
+    });
+
+    validateRequiredDependencies();
 });

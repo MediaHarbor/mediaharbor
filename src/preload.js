@@ -2,7 +2,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // Combine all electronAPI methods into a single object
 contextBridge.exposeInMainWorld('electronAPI', {
+    copyText: (text) => ipcRenderer.invoke('copy-handler', text),
     // Download-related methods
+    getAlbumDetails: (platform, albumId) => ipcRenderer.invoke('get-album-details', platform, albumId),
+    getPlaylistDetails: (platform, playlistId) => ipcRenderer.invoke('get-playlist-details', platform, playlistId),
     getDownloads: () => ipcRenderer.invoke('load-downloads'),
 
     // Existing channel handlers
@@ -68,12 +71,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // Progress updates
     onProgress: (callback) => {
-        ipcRenderer.on('installation-progress', callback);
+        ipcRenderer.on('installation-progress', (_event, data) => {
+            callback(null, data);
+        });
     },
 
     // Error handling
     onError: (callback) => {
-        ipcRenderer.on('installation-error', callback);
+        ipcRenderer.on('installation-message', (_event, data) => {
+            callback(null, typeof data === 'string' ? data : JSON.stringify(data));
+        });
     },
 
     // Settings
@@ -82,6 +89,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 });
 contextBridge.exposeInMainWorld(
     'api', {
+        getQobuzTrackList: (data) => ipcRenderer.invoke('get-qobuz-track-list', data),
         // First launch
         refreshApp: () => {return ipcRenderer.send('refresh-app')},
         getDefaultSettings: () => ipcRenderer.invoke('get-default-settings'),
@@ -115,7 +123,7 @@ contextBridge.exposeInMainWorld("electron", {
         send: (channel, data) => ipcRenderer.send(channel, data),
         on: (channel, func) => ipcRenderer.on(channel, (event, ...args) => func(...args)),
     },
-
+    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
 });
 contextBridge.exposeInMainWorld('errorNotifier', {
     onError: (callback) => {

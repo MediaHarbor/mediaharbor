@@ -1,4 +1,3 @@
-
 *, *::before, *::after {
     box-sizing: border-box;
 }
@@ -84,6 +83,17 @@ h1 {
     font-size: 1.25rem;
 }
 
+.dependency-group.required .dependency-item:not(.success) {
+    border-left: 4px solid #e74c3c;
+    padding-left: 10px;
+    background-color: rgba(231, 76, 60, 0.05);
+}
+
+.dependency-group.required h2:after {
+    content: " ★";
+    color: #e74c3c;
+}
+
 .dependency-item {
     display: flex;
     align-items: center;
@@ -150,6 +160,18 @@ h1 {
 
 .next-btn:hover, .finish-btn:hover {
     background-color: var(--color-secondary-dark);
+}
+
+.next-btn:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.next-btn:disabled:hover {
+    background-color: #cccccc;
+    box-shadow: none;
+    transform: none;
 }
 
 .prev-btn {
@@ -221,5 +243,236 @@ h1 {
 }
 
 .warning-div {
-    background-color: antiquewhite;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+    margin-top: 20px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.warning-div .warning {
+    margin: 0;
+    font-size: 14px;
+    color: #555;
+    flex: 1;
+    min-width: 250px;
+}
+
+
+.progress-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+}
+
+.progress-overlay.active {
+    display: flex;
+}
+
+.progress-container {
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    width: 80%;
+    max-width: 400px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 20px;
+    background-color: #f0f0f0;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+.progress-fill {
+    width: 0%;
+    height: 100%;
+    background-color: #4CAF50;
+    transition: width 0.3s ease-in-out;
+}
+
+.progress-status {
+    text-align: center;
+    color: #333;
+    font-size: 14px;
+}
+
+/* Modal Styles */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.6);
+}
+
+.modal-content {
+    background-color: #fff;
+    margin: 3% auto;
+    padding: 25px;
+    border-radius: 10px;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+    width: 85%;
+    max-width: 950px;
+    max-height: 90vh;
+    overflow-y: auto;
+    animation: modalFadeIn 0.3s ease;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.close-modal-btn {
+    padding: 12px 25px;
+    background-color: #3498db;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.close-modal-btn:hover {
+    background-color: #2980b9;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.close-modal:hover,
+.close-modal:focus {
+    color: black;
+    text-decoration: none;
+}
+
+.modal-intro {
+    margin-bottom: 20px;
+    font-size: 16px;
+}
+
+.modal-section {
+    margin-bottom: 30px;
+}
+
+.modal-section h2 {
+    margin-bottom: 15px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #eee;
+}
+
+.installation-table {
+    display: table;
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+}
+
+.table-row {
+    display: table-row;
+}
+
+.table-row.header {
+    background-color: #f5f5f5;
+    font-weight: bold;
+}
+
+.table-cell {
+    display: table-cell;
+    padding: 10px;
+    border: 1px solid #ddd;
+    vertical-align: middle;
+}
+
+.table-row:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+.table-row:hover {
+    background-color: #f1f1f1;
+}
+
+.table-cell code {
+    background-color: #f7f7f7;
+    padding: 3px 6px;
+    border-radius: 3px;
+    font-family: monospace;
+}
+
+.modal-buttons {
+    text-align: center;
+    margin-top: 20px;
+}
+
+.close-modal-btn {
+    padding: 10px 20px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.close-modal-btn:hover {
+    background-color: #45a049;
+}
+
+.manual-install-btn {
+    background-color: #3498db;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-left: 10px;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    display: inline-flex;
+    align-items: center;
+    font-weight: 500;
+}
+
+.manual-install-btn:hover {
+    background-color: #2980b9;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.manual-install-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.manual-install-btn:before {
+    content: "📄";
+    margin-right: 8px;
+    font-size: 16px;
 }

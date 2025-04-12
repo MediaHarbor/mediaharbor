@@ -76,7 +76,8 @@
                 </div>
             </div>
             <div class="warning-div">
-                <h3 class="warning">If you get any issues while installing these with MediaHarbor, install them manually. <a href="https://github.com/MediaHarbor/mediaharbor/blob/main/MANUELINSTALL.MD" target="_blank">More info</a></h3>
+                <h3 class="warning">Having trouble with automatic installation? Use our detailed manual guide:</h3>
+                <button class="manual-install-btn">Manual Installation Guide</button>
             </div>
         </div>
         <div id="progress-overlay">
@@ -99,6 +100,108 @@
         <p>Don't forget to enter your credentials in the settings after launch.</p>
         <div class="nav-buttons">
             <button class="finish-btn" onclick="finishSetup()">Start Media Harbor</button>
+        </div>
+    </div>
+</div>
+<div id="manual-install-modal" class="modal">
+    <div class="modal-content">
+        <h1>Manual Installation Guide</h1>
+        <p class="modal-intro">If you're experiencing issues with automatic installation, follow the steps below to install components manually.</p>
+
+        <div class="modal-section">
+            <h2>Required Components</h2>
+            <div class="installation-table">
+                <div class="table-row header">
+                    <div class="table-cell">Component</div>
+                    <div class="table-cell">Source</div>
+                    <div class="table-cell">Installation</div>
+                </div>
+
+                <div class="table-row">
+                    <div class="table-cell"><strong>Python</strong> (3.9 - 3.12)</div>
+                    <div class="table-cell"><a href="https://www.python.org/" target="_blank">python.org</a></div>
+                    <div class="table-cell">Download and install from official website</div>
+                </div>
+
+                <div class="table-row">
+                    <div class="table-cell"><strong>FFmpeg</strong></div>
+                    <div class="table-cell"><a href="https://ffmpeg.org/" target="_blank">ffmpeg.org</a></div>
+                    <div class="table-cell">Follow installation instructions on official website</div>
+                </div>
+
+                <div class="table-row">
+                    <div class="table-cell"><strong>Git</strong></div>
+                    <div class="table-cell"><a href="https://git-scm.com/" target="_blank">git-scm.com</a></div>
+                    <div class="table-cell">Download and install from official website</div>
+                </div>
+
+                <div class="table-row">
+                    <div class="table-cell"><strong>yt-dlp</strong> (YouTube)</div>
+                    <div class="table-cell"><a href="https://github.com/yt-dlp/yt-dlp" target="_blank">yt-dlp GitHub</a></div>
+                    <div class="table-cell"><code>pip install yt-dlp</code></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-section">
+            <h2>Optional Components</h2>
+            <div class="installation-table">
+                <div class="table-row header">
+                    <div class="table-cell">Component</div>
+                    <div class="table-cell">Source</div>
+                    <div class="table-cell">Installation</div>
+                </div>
+
+                <div class="table-row">
+                    <div class="table-cell"><strong>youtubemusicapi</strong> (YTMusic)</div>
+                    <div class="table-cell"><a href="https://github.com/sigma67/youtube-music-api" target="_blank">youtubemusicapi GitHub</a></div>
+                    <div class="table-cell"><code>pip install youtubemusicapi</code></div>
+                </div>
+
+                <div class="table-row">
+                    <div class="table-cell"><strong>custom_streamrip</strong> (Qobuz, Deezer, Tidal)</div>
+                    <div class="table-cell"><a href="https://github.com/mediaharbor/custom_streamrip" target="_blank">custom_streamrip GitHub</a></div>
+                    <div class="table-cell"><code>pip install git+https://github.com/mediaharbor/custom_streamrip.git</code></div>
+                </div>
+
+                <div class="table-row">
+                    <div class="table-cell"><strong>custom_votify</strong> (Spotify)</div>
+                    <div class="table-cell"><a href="https://github.com/mediaharbor/custom_votify" target="_blank">custom_votify GitHub</a></div>
+                    <div class="table-cell"><code>pip install git+https://github.com/mediaharbor/custom_votify.git</code></div>
+                </div>
+
+                <div class="table-row">
+                    <div class="table-cell"><strong>custom_gamdl</strong> (Apple Music)</div>
+                    <div class="table-cell"><a href="https://github.com/mediaharbor/custom_gamdl" target="_blank">custom_gamdl GitHub</a></div>
+                    <div class="table-cell"><code>pip install git+https://github.com/mediaharbor/custom_gamdl.git</code></div>
+                </div>
+
+                <div class="table-row">
+                    <div class="table-cell"><strong>pyapplemusicapi</strong> (Apple Music Search)</div>
+                    <div class="table-cell"><a href="https://github.com/queengooborg/pyapplemusicapi" target="_blank">pyapplemusicapi GitHub</a></div>
+                    <div class="table-cell"><code>pip install pyapplemusicapi</code></div>
+                </div>
+
+                <div class="table-row">
+                    <div class="table-cell"><strong>Bento4</strong> (MP4Decrypt)</div>
+                    <div class="table-cell"><a href="https://www.bok.net/Bento4/binaries/?C=M;O=D" target="_blank">Bento4 Binaries</a></div>
+                    <div class="table-cell">Download and extract, then add to system path</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-section">
+            <h2>Why custom_ packages?</h2>
+            <p>The original downloaders don't support new line progress bars. We've modified them to provide better integration with Media Harbor. If they add new line progress bars to their CLI (like yt-dlp), we can use the original versions.</p>
+        </div>
+
+        <div class="modal-section">
+            <h2>Having Issues?</h2>
+            <p>If you're still experiencing problems after manual installation, please create a new issue on our GitHub repository with details about your operating system and the specific error messages you're encountering.</p>
+        </div>
+
+        <div class="modal-buttons">
+            <button class="close-modal-btn">Close</button>
         </div>
     </div>
 </div>
