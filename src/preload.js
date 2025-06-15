@@ -1,14 +1,25 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Combine all electronAPI methods into a single object
 contextBridge.exposeInMainWorld('electronAPI', {
     copyText: (text) => ipcRenderer.invoke('copy-handler', text),
     // Download-related methods
     getAlbumDetails: (platform, albumId) => ipcRenderer.invoke('get-album-details', platform, albumId),
     getPlaylistDetails: (platform, playlistId) => ipcRenderer.invoke('get-playlist-details', platform, playlistId),
     getDownloads: () => ipcRenderer.invoke('load-downloads'),
+    getDownloadLocation: () => ipcRenderer.invoke('get-download-location'),
+    scanDirectory: (directory) => ipcRenderer.invoke('scan-directory', directory),
 
-    // Existing channel handlers
+    onScanProgress: (callback) => {
+        ipcRenderer.on('scan-progress', (event, progress) => callback(progress));
+    },
+
+    onScanComplete: (callback) => {
+        ipcRenderer.on('scan-complete', (event, data) => callback(data));
+    },
+
+    onScanError: (callback) => {
+        ipcRenderer.on('scan-error', (event, error) => callback(error));
+    },
     send: (channel, data) => {
         const validChannels = [
             'start-yt-music-download',

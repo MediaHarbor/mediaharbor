@@ -10,6 +10,12 @@ const execPromise = util.promisify(exec);
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
+const mm = require('music-metadata');
+
+const { Worker } = require('worker_threads');
+
+const { MediaScanner } = require('./funcs/mediaScanner');
+const mediaScanner = new MediaScanner();
 const UpdateChecker = require('./funcs/updatechecker')
 const { saveDownloadToDatabase, loadDownloadsFromDatabase, deleteFromDatabase, deleteDataBase} = require('./funcs/db');
 const {getDefaultSettings} = require('./funcs/defaults.js');
@@ -88,7 +94,47 @@ ipcMain.on('updateDep', (event, selectedPackages) => {
     event.reply('toggleLoading', true); // Show loading overlay
     updateDependencies(selectedPackages, event);
 });
+ipcMain.handle('get-download-location', async () => {
+    try {
+        // Load settings to get the default download location
+        const settings = loadTheSettings();
+        let downloadPath = settings.downloadLocation;
 
+        // If no download location is set in settings, prompt user to select one
+        if (!downloadPath) {
+            const { canceled, filePaths } = await dialog.showOpenDialog({
+                properties: ['openDirectory', 'createDirectory'],
+                title: 'Select Download Location'
+            });
+
+            if (canceled) {
+                throw new Error('Download location selection was cancelled');
+            }
+
+            downloadPath = filePaths[0];
+
+            // Update settings with new download location
+            settings.download_location = downloadPath;
+            await fs.promises.writeFile(settingsFilePath, JSON.stringify(settings, null, 2));
+        }
+
+        // Verify the directory exists and is writable
+        try {
+            await fs.promises.access(downloadPath, fs.constants.W_OK);
+        } catch (error) {
+            throw new Error(`Download location is not accessible or writable: ${error.message}`);
+        }
+
+        return downloadPath;
+    } catch (error) {
+        console.error('Error getting download location:', error);
+        throw error;
+    }
+});
+
+ipcMain.handle('scan-directory', async (event, directory) => {
+    return await mediaScanner.scanDirectory(directory, event);
+});
 ipcMain.handle('get-default-settings', async () => {
     return getDefaultSettings();
 });
@@ -1556,6 +1602,7 @@ echo 'export PATH="${pythonPath}:$PATH"' >> ~/.bashrc && source ~/.bashrc`;
         executeCommand(currentCommand);
     });
 }
+// Call example of protocol: mediah
 function handleProtocolUrl(url) {
     try {
         const urlObj = new URL(url);
@@ -1565,6 +1612,7 @@ function handleProtocolUrl(url) {
         const params = urlObj.searchParams;
         const mediaUrl = params.get('url');
         let platform = params.get('platform');
+        let title = params.get('title') || 'Unknown Title'; // Add title parameter
 
         if (!mediaUrl) {
             throw new Error('No media URL provided.');
@@ -1582,13 +1630,14 @@ function handleProtocolUrl(url) {
                 throw new Error('Unable to determine platform from the URL.');
             }
         }
+
         const mainWindow = BrowserWindow.getAllWindows()[0];
         if (!mainWindow) return;
 
         mainWindow.webContents.send('protocol-action', {
             url: mediaUrl,
             platform: platform,
-            title: platform,
+            title: title, // Pass the title from URL params
         });
     } catch (error) {
         console.error('Protocol URL handling error:', error);
@@ -1598,6 +1647,7 @@ function handleProtocolUrl(url) {
         );
     }
 }
+
 function inferPlatformFromUrl(url) {
     const parsedUrl = new URL(url);
     const hostname = parsedUrl.hostname.toLowerCase();
@@ -1617,6 +1667,6 @@ function inferPlatformFromUrl(url) {
     } else if (hostname.includes('apple.com') || hostname.includes('itunes.apple.com') || hostname.includes('music.apple.com') || hostname.includes('music.*.apple.com')) {
         return 'applemusic';
     } else {
-        return null;
+        return 'generic';
     }
 }

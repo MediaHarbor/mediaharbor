@@ -75,7 +75,8 @@ const pages = {
     downloads: 'downloads.html',
     settings: 'settings.html',
     help: 'help.html',
-    search: 'search.html'
+    search: 'search.html',
+    library: 'library.html'
 };
 
 
@@ -179,6 +180,9 @@ async function loadPage(pageName) {
         }
         else if (pageName === 'search') {
             await initializeSearchPage()
+        }
+        else if (pageName === 'library') {
+            await initializeLibraryPage()
         }
     } catch (error) {
         contentDiv.innerHTML = '<p>Error loading the page: ' + error.message + '</p>';
@@ -769,6 +773,151 @@ function initializeSearchPage() {
     // Set up event listeners for search results and stream ready events
     window.api.onSearchResults(handleSearchResults);
     window.api.onError(handleError);
+}
+
+// renderer.js (updated)
+async function initializeLibraryPage() {
+    let mediaItems = [];
+
+    function showScanProgress(progress) {
+        if (!progress || typeof progress.progress !== 'number') return;
+
+        const container = document.getElementById('library-container');
+        container.innerHTML = `
+            <div class="scan-progress sexy-fade-in">
+                <div class="progress-bar">
+                    <div class="progress" style="width: ${progress.progress}%"></div>
+                </div>
+                <div class="progress-text">
+                    <strong>Scanning</strong>: ${progress.progress}%<br>
+                    <span>Current:</span> ${progress.currentFile}<br>
+                    <span>Processed:</span> ${progress.processed} / ${progress.total}
+                </div>
+            </div>
+        `;
+    }
+
+    async function loadLibrary() {
+        const container = document.getElementById('library-container');
+        container.innerHTML = '<div class="loading sexy-pulse">🔄 Initializing scan...</div>';
+
+        const downloadLocation = await window.electronAPI.getDownloadLocation();
+
+        window.electronAPI.onScanProgress((_event, progress) => {
+            console.log('Scan progress update:', progress);
+            showScanProgress(progress);
+        });
+
+        window.electronAPI.onScanError((_event, error) => {
+            container.innerHTML = `<div class="error sexy-shake">❌ Scan error: ${error}</div>`;
+        });
+
+        try {
+            mediaItems = await window.electronAPI.scanDirectory(downloadLocation);
+            renderLibrary();
+            document.getElementById('library-container').addEventListener('click', (e) => {
+                const albumItem = e.target.closest('[data-album-id]');
+                if (!albumItem) return;
+
+                const albumId = albumItem.getAttribute('data-album-id');
+                const trackSection = document.getElementById(albumId);
+                if (trackSection) {
+                    trackSection.style.display = trackSection.style.display === 'none' ? 'block' : 'none';
+                }
+            });
+        } catch (error) {
+            container.innerHTML = `<div class="error sexy-shake">⚠️ Failed to scan library: ${error}</div>`;
+        }
+    }
+
+    function createMediaItem(item) {
+        if (item.type === 'music' && item.tracks) {
+            const id = `album-${item.album}-${item.artist}`.replace(/\W+/g, '-');
+
+            const trackList = item.tracks.map(track => `
+                <div class="media-subitem">🎶 ${track.title} <span class="track-size">(${track.size})</span></div>
+            `).join('');
+
+            return `
+                <div class="media-item album sexy-zoom" data-album-id="${id}">
+                    <div class="media-thumbnail">
+                        ${item.thumbnail
+                ? `<img src="data:${item.thumbnail.format};base64,${item.thumbnail.data}" class="media-thumbnail-img">`
+                : '🎵'}
+                    </div>
+                    <div class="media-info">
+                        <div class="media-title">${item.album}</div>
+                        <div class="media-metadata">${item.artist} • ${item.year} • ${item.tracks.length} tracks</div>
+                    </div>
+                </div>
+                <div class="album-tracks" id="${id}" style="display: none;">
+                    ${trackList}
+                </div>
+            `;
+        }
+
+        const thumbnailHtml = item.thumbnail
+            ? `<img src="data:${item.thumbnail.format};base64,${item.thumbnail.data}" class="media-thumbnail-img">`
+            : `${item.type === 'video' ? '▶️' : '🎵'}`;
+
+        const metadataHtml = item.type === 'music'
+            ? `<div class="media-metadata-details">
+                    Artist: ${item.metadata.artist}<br>
+                    Album: ${item.metadata.album}<br>
+                    Year: ${item.metadata.year}
+               </div>`
+            : '';
+
+        return `
+            <div class="media-item sexy-zoom">
+                <div class="media-thumbnail">${thumbnailHtml}</div>
+                <div class="media-info">
+                    <div class="media-title">${item.title}</div>
+                    <div class="media-metadata">${item.size} • ${new Date(item.date).toLocaleDateString()}</div>
+                    ${metadataHtml}
+                </div>
+            </div>
+        `;
+    }
+
+    function renderLibrary() {
+        const container = document.getElementById('library-container');
+        if (mediaItems.length > 10000) {
+            container.innerHTML = `<div class="error sexy-shake">Too many media files to display (${mediaItems.length})</div>`;
+            return;
+        }
+        container.innerHTML = mediaItems.map(createMediaItem).join('');
+        document.getElementById('item-count').textContent = mediaItems.length;
+        const totalSize = mediaItems.reduce((acc, item) => acc + parseFloat(item.size), 0);
+        document.getElementById('storage-used').textContent = totalSize.toFixed(1) + ' GB';
+    }
+
+    await loadLibrary();
+
+    document.querySelector('input[type="search"]').addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase();
+        const filtered = mediaItems.filter(item => item.title.toLowerCase().includes(searchTerm));
+        const container = document.getElementById('library-container');
+        container.innerHTML = filtered.map(createMediaItem).join('');
+    });
+
+    document.getElementById('type-filter').addEventListener('change', (e) => {
+        const filterValue = e.target.value;
+        const filtered = filterValue === 'all'
+            ? mediaItems
+            : mediaItems.filter(item => item.type === filterValue);
+        const container = document.getElementById('library-container');
+        container.innerHTML = filtered.map(createMediaItem).join('');
+    });
+
+    document.getElementById('view-filter').addEventListener('change', (e) => {
+        const container = document.getElementById('library-container');
+        if (e.target.value === 'list') {
+            container.style.gridTemplateColumns = '1fr';
+        } else {
+            container.style.gridTemplateColumns = 'repeat(auto-fill, minmax(200px, 1fr))';
+        }
+    });
 }
 
 function initializeDropdown(dropdown) {
@@ -1768,6 +1917,9 @@ const qualityOptions = {
     appleMusic: [
         { value: "aac-legacy", label: "256 kbps" },
         { value: "aac-he-legacy", label: "64 kbps" }
+    ],
+    generic: [
+        { value: "bv*+ba/b", label: "Best Quality (Video)" },
     ]
 };
 
@@ -1843,7 +1995,7 @@ function handlePopupDownload(url, platform, quality) {
                 window.electronAPI.send('start-yt-video-download', { url, quality, isPlaylist: false });
                 break;
             default:
-                throw new Error(`Unsupported platform: ${platform}`);
+                window.electronAPI.send('start-generic-video-download', { url, quality });
         }
     } catch (error) {
         console.error(`Error starting download on ${platform}:`, error);
@@ -3223,6 +3375,7 @@ document.getElementById('musicBtn').addEventListener('click', () => loadPage('mu
 document.getElementById('videoBtn').addEventListener('click', () => loadPage('video'));
 document.getElementById('downloadsBtn').addEventListener('click', () => loadPage('downloads'));
 document.getElementById('searchBtn').addEventListener('click', () => loadPage('search'));
+document.getElementById('libraryBtn').addEventListener('click', () => loadPage('library'));
 document.getElementById('settingsBtn').addEventListener('click', () => loadPage('settings'));
 document.getElementById('helpBtn').addEventListener('click', () => loadPage('help'));
 document.getElementById('hamburger-menu').addEventListener('click', () => {

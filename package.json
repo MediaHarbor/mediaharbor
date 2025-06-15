@@ -123,6 +123,7 @@
     "express": "^4.21.2",
     "fix-path": "^4.0.0",
     "lzma-native": "^8.0.6",
+    "music-metadata": "^7.14.0",
     "node-fetch": "^3.3.2",
     "progress": "^2.0.3",
     "sqlite3": "^5.1.7",
