@@ -6,18 +6,16 @@ I apologize for the first start problems, please create a new issue with details
 
 | Component                                | Official Website / Repository                            | Example Installation                                                      |
 |------------------------------------------|----------------------------------------------------------|---------------------------------------------------------------------------|
-| **Python** (3.9 - 3.12)                  | [python.org](https://www.python.org/)                    | Download and install from [python.org](https://www.python.org/)           |
+| **Python** (3.10+)                  | [python.org](https://www.python.org/)                    | Download and install from [python.org](https://www.python.org/)           |
 | **FFmpeg**                               | [ffmpeg.org](https://ffmpeg.org/)                        | Follow installation instructions on [ffmpeg.org](https://ffmpeg.org/)     |
 | **Git**                                  | [git-scm.com](https://git-scm.com/)                      | Download and install from [git-scm.com](https://git-scm.com/)             |
 | **yt-dlp** (YouTube)                     | [yt-dlp GitHub](https://github.com/yt-dlp/yt-dlp)         | `pip install yt-dlp`                                                      |
 | **youtubemusicapi**  (YTMusic Search)    | [youtubemusicapi GitHub](https://github.com/sigma67/youtube-music-api) | `pip install youtubemusicapi`                                               |
-| **custom_streamrip** (Qobuz)             | [custom_streamrip](https://github.com/mediaharbor/custom_streamrip.git) | `pip install git+https://github.com/mediaharbor/custom_streamrip.git`     |
-| **custom_streamrip** (Deezer)            | [custom_streamrip](https://github.com/mediaharbor/custom_streamrip.git) | `pip install git+https://github.com/mediaharbor/custom_streamrip.git`     |
-| **custom_streamrip** (Tidal)             | [custom_streamrip](https://github.com/mediaharbor/custom_streamrip.git) | `pip install git+https://github.com/mediaharbor/custom_streamrip.git`     |
+| **Qobuz / Deezer / Tidal**               | Built-in                                                 | No installation required — native support built into the app              |
 | **custom_votify** (Spotify)              | [custom_votify GitHub](https://github.com/mediaharbor/custom_votify)  | `pip install git+https://github.com/mediaharbor/custom_votify.git`        |
 | **custom_gamdl** (Apple Music)           | [custom_gamdl GitHub](https://github.com/mediaharbor/custom_gamdl)  | `pip install git+https://github.com/mediaharbor/custom_gamdl.git`         |
 | **pyapplemusicapi** (Apple Music Search) | [pyapplemusicapi GitHub](https://github.com/queengooborg/pyapplemusicapi) | `pip install pyapplemusicapi`                                              |
 | **Bento4** (MP4Decrypt)              | [Bento4 Binaries](https://www.bok.net/Bento4/binaries/?C=M;O=D) | Download and extract manually, then add to system path                                             |
 
 ## Why custom_?
-Because their downloaders don't support new line downloaders, I modified them. If they add new line progress bars to their CLI (like yt-dlp), we can use them.
+Because their downloaders don't support new line progress bars, I modified them. If they add new line progress bars to their CLI (like yt-dlp), we can use them directly. Qobuz, Tidal, and Deezer are now handled natively without any Python dependency.
