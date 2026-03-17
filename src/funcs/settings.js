@@ -1,14 +1,90 @@
 const fs = require("fs");
-const TOML = require("@iarna/toml");
 const path = require("path");
 const { app } = require("electron");
-const { spawn } = require("child_process");
 const { getDefaultSettings } = require("./defaults");
-const stream = require("node:stream");
 
 const settingsFilePath = path.join(app.getPath('userData'), 'mh-settings.json');
-const spotifyConfigPath = path.join(app.getPath('userData'), 'zotify_config.json'); // Renamed, otherwise could make some problems.
-const appleConfigPath = path.join(app.getPath('userData'), 'apple_config.json');
+const spotifyConfigPath = path.join(app.getPath('userData'), 'votify_config.ini');
+const appleConfigPath = path.join(app.getPath('userData'), 'gamdl_config.ini');
+
+const APPLE_TO_GAMDL_KEY_MAP = {
+    'cookies_path': 'cookies_path',
+    'output_path': 'output_path',
+    'temp_path': 'temp_path',
+    'download_mode': 'download_mode',
+    'remux_mode': 'music_video_remux_mode',
+    'cover_format': 'cover_format',
+    'cover_size': 'cover_size',
+    'save_cover': 'save_cover',
+    'synced_lyrics_format': 'synced_lyrics_format',
+    'synced_lyrics_only': 'synced_lyrics_only',
+    'no_synced_lyrics': 'no_synced_lyrics',
+    'template_folder_album': 'album_folder_template',
+    'template_folder_compilation': 'compilation_folder_template',
+    'template_file_single_disc': 'single_disc_file_template',
+    'template_file_multi_disc': 'multi_disc_file_template',
+    'template_folder_no_album': 'no_album_folder_template',
+    'template_file_no_album': 'no_album_file_template',
+    'template_file_playlist': 'playlist_file_template',
+    'date_tag_template': 'date_tag_template',
+    'save_playlist': 'save_playlist',
+    'overwrite': 'overwrite',
+    'language': 'language',
+    'truncate': 'truncate',
+    'exclude_tags': 'exclude_tags',
+    'log_level': 'log_level',
+    'use_album_date': 'use_album_date',
+    'fetch_extra_tags': 'fetch_extra_tags',
+    'no_exceptions': 'no_exceptions',
+    'mv_codec_priority': 'music_video_codec_priority',
+    'mv_remux_format': 'music_video_remux_format',
+    'mv_resolution': 'music_video_resolution',
+    'uploaded_video_quality': 'uploaded_video_quality',
+    'nm3u8dlre_path': 'nm3u8dlre_path',
+    'mp4decrypt_path': 'mp4decrypt_path',
+    'ffmpeg_path': 'ffmpeg_path',
+    'mp4box_path': 'mp4box_path',
+    'wvd_path': 'wvd_path',
+    'use_wrapper': 'use_wrapper',
+    'wrapper_account_url': 'wrapper_account_url',
+    'wrapper_decrypt_ip': 'wrapper_decrypt_ip',
+};
+
+const SPOTIFY_TO_VOTIFY_KEY_MAP = {
+    'cookies_path': 'cookies_path',
+    'output_path': 'output',
+    'audio_quality': 'audio_quality',
+    'audio_download_mode': 'audio_download_mode',
+    'audio_remux_mode': 'audio_remux_mode',
+    'video_format': 'video_format',
+    'video_resolution': 'video_resolution',
+    'video_remux_mode': 'video_remux_mode',
+    'cover_size': 'cover_size',
+    'wvd_path': 'wvd_path',
+    'no_drm': 'no_drm',
+    'wait_interval': 'wait_interval',
+    'overwrite': 'overwrite',
+    'no_synced_lyrics_file': 'no_synced_lyrics_file',
+    'save_playlist_file': 'save_playlist_file',
+    'save_cover_file': 'save_cover_file',
+    'synced_lyrics_only': 'synced_lyrics_only',
+    'album_folder_template': 'album_folder_template',
+    'compilation_folder_template': 'compilation_folder_template',
+    'podcast_folder_template': 'podcast_folder_template',
+    'no_album_folder_template': 'no_album_folder_template',
+    'single_disc_file_template': 'single_disc_file_template',
+    'multi_disc_file_template': 'multi_disc_file_template',
+    'podcast_file_template': 'podcast_file_template',
+    'no_album_file_template': 'no_album_file_template',
+    'playlist_file_template': 'playlist_file_template',
+    'date_tag_template': 'date_tag_template',
+    'truncate': 'truncate',
+    'exclude_tags': 'exclude_tags',
+    'log_level': 'log_level',
+    'no_exceptions': 'no_exceptions',
+    'artist_media_option': 'artist_media_option',
+    'prefer_video': 'prefer_video',
+};
 
 
 const mergeServiceSettings = (settings, serviceConfig, servicePrefix) => {
@@ -16,7 +92,9 @@ const mergeServiceSettings = (settings, serviceConfig, servicePrefix) => {
 
     Object.entries(serviceConfig).forEach(([key, value]) => {
         const settingKey = `${servicePrefix}_${key}`;
-        merged[settingKey] = value;
+        if (!merged[settingKey] && merged[settingKey] !== false && merged[settingKey] !== 0) {
+            merged[settingKey] = value;
+        }
     });
 
     return merged;
@@ -27,7 +105,6 @@ function loadTheSettings() {
         const settingsData = fs.readFileSync(settingsFilePath, 'utf8');
         return JSON.parse(settingsData);
     } catch (err) {
-        console.log('No user settings found, using default settings.');
         return getDefaultSettings();
     }
 }
@@ -40,7 +117,7 @@ async function saveServiceConfig(configPath, settings, servicePrefix) {
         .filter(([key, value]) =>
             key.startsWith(servicePrefix) &&
             defaultKeys.includes(key) &&
-            value !== null && value !== undefined && value !== ''
+            value !== null && value !== undefined && value !== '' && value !== 'null'
         )
         .reduce((obj, [key, value]) => {
             obj[key.replace(servicePrefix + '_', '')] = value;
@@ -48,13 +125,57 @@ async function saveServiceConfig(configPath, settings, servicePrefix) {
         }, {});
 
     try {
-        await fs.promises.writeFile(
-            configPath,
-            JSON.stringify(serviceSettings, null, 4),
-            'utf8'
-        );
+        if (servicePrefix === 'apple') {
+            let ini = '[gamdl]\n';
+            for (const [appKey, value] of Object.entries(serviceSettings)) {
+                const gamdlKey = APPLE_TO_GAMDL_KEY_MAP[appKey];
+                if (!gamdlKey) continue;
+                if (typeof value === 'boolean') {
+                    ini += `${gamdlKey} = ${value ? 'true' : 'false'}\n`;
+                } else {
+                    ini += `${gamdlKey} = ${value}\n`;
+                }
+            }
+            await fs.promises.writeFile(configPath, ini, 'utf8');
+        } else if (servicePrefix === 'spotify') {
+            const existingExtra = {};
+            const mappedIniKeys = new Set(Object.values(SPOTIFY_TO_VOTIFY_KEY_MAP));
+            try {
+                const existing = await fs.promises.readFile(configPath, 'utf8');
+                for (const line of existing.split('\n')) {
+                    const trimmed = line.trim();
+                    if (!trimmed || trimmed.startsWith('[') || trimmed.startsWith('#')) continue;
+                    const eqIdx = trimmed.indexOf('=');
+                    if (eqIdx === -1) continue;
+                    const key = trimmed.substring(0, eqIdx).trim();
+                    if (!mappedIniKeys.has(key)) {
+                        existingExtra[key] = trimmed.substring(eqIdx + 1).trim();
+                    }
+                }
+            } catch (e) {}
+
+            let ini = '[votify]\n';
+            for (const [appKey, value] of Object.entries(serviceSettings)) {
+                const votifyKey = SPOTIFY_TO_VOTIFY_KEY_MAP[appKey];
+                if (!votifyKey) continue;
+                if (typeof value === 'boolean') {
+                    ini += `${votifyKey} = ${value ? 'true' : 'false'}\n`;
+                } else {
+                    ini += `${votifyKey} = ${value}\n`;
+                }
+            }
+            for (const [key, value] of Object.entries(existingExtra)) {
+                ini += `${key} = ${value}\n`;
+            }
+            await fs.promises.writeFile(configPath, ini, 'utf8');
+        } else {
+            await fs.promises.writeFile(
+                configPath,
+                JSON.stringify(serviceSettings, null, 4),
+                'utf8'
+            );
+        }
     } catch (err) {
-        console.error(`Error saving service config to ${configPath}:`, err);
         throw err;
     }
 }
@@ -62,363 +183,112 @@ async function saveServiceConfig(configPath, settings, servicePrefix) {
 async function loadServiceConfig(configPath) {
     try {
         const data = await fs.promises.readFile(configPath, 'utf8');
+        if (configPath.endsWith('.ini')) {
+            const isVotify = data.includes('[votify]');
+            const keyMap = isVotify ? SPOTIFY_TO_VOTIFY_KEY_MAP : APPLE_TO_GAMDL_KEY_MAP;
+            const result = {};
+            const reverseMap = {};
+            for (const [appKey, configKey] of Object.entries(keyMap)) {
+                reverseMap[configKey] = appKey;
+            }
+            const lines = data.split('\n');
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith('[') || trimmed.startsWith('#')) continue;
+                const eqIdx = trimmed.indexOf('=');
+                if (eqIdx === -1) continue;
+                const key = trimmed.substring(0, eqIdx).trim();
+                let val = trimmed.substring(eqIdx + 1).trim();
+                const appKey = reverseMap[key];
+                if (!appKey) continue;
+                if (val === 'true') val = true;
+                else if (val === 'false') val = false;
+                result[appKey] = val;
+            }
+            return result;
+        }
         return JSON.parse(data);
     } catch (err) {
-        console.log(`No config found at ${configPath}, will be created on next save`);
         return {};
     }
 }
 
-async function saveSettings(event, settings) {
+async function saveSettings(settings) {
     const defaultKeys = Object.keys(getDefaultSettings());
-    const cleanedSettings = Object.fromEntries(
-        Object.entries(settings).filter(([key]) => defaultKeys.includes(key))
-    );
-    try {
-        await fs.promises.writeFile(
-            settingsFilePath,
-            JSON.stringify(cleanedSettings, null, 4)
-        );
-    } catch (err) {
-        console.error('Error saving main settings:', err);
-        event.reply('settings-error', 'Failed to save application settings');
-        return;
-    }
 
-    // Update output paths
-    let spotifyOutputPath, appleOutputPath;if (settings.createPlatformSubfolders) {
+    let spotifyOutputPath, appleOutputPath;
+    if (settings.createPlatformSubfolders) {
         spotifyOutputPath = path.join(settings.downloadLocation, "Spotify");
         appleOutputPath = path.join(settings.downloadLocation, "Apple Music");
     } else {
         spotifyOutputPath = settings.downloadLocation;
         appleOutputPath = settings.downloadLocation;
     }
-
     settings.spotify_output_path = spotifyOutputPath;
     settings.apple_output_path = appleOutputPath;
 
-    // Save service configs
-    try {
-        await Promise.all([
-            saveServiceConfig(spotifyConfigPath, settings, 'spotify'),
-            saveServiceConfig(appleConfigPath, settings, 'apple')
-        ]);
-    } catch (err) {
-        console.error('Error saving service configs:', err);
-        event.reply('settings-error', 'Failed to save service configurations');
-        return;
-    }
+    const cleanedSettings = Object.fromEntries(
+        Object.entries(settings).filter(([key]) => defaultKeys.includes(key))
+    );
 
-    // Handle streamrip config
-    getStreamripPaths(async (paths) => {
-        if (!paths?.configPath) {
-            console.warn('custom_rip is not installed or not available, skipping streamrip config update');
-            event.reply('settings-saved', 'Settings saved successfully (without streamrip config)');
-            return;
-        }
+    await fs.promises.writeFile(
+        settingsFilePath,
+        JSON.stringify(cleanedSettings, null, 4)
+    );
 
-        try {
-            const normalizedConfigPath = path.normalize(paths.configPath);
-            console.log('Attempting to read from normalized path:', normalizedConfigPath);
-
-            const data = await fs.promises.readFile(normalizedConfigPath, 'utf8');
-            let config = {};
-
-            try {
-                config = TOML.parse(data);
-            } catch (parseErr) {
-                console.error('Error parsing existing TOML:', parseErr);
-            }
-
-            // Update streamrip config
-            config.downloads = {
-                folder: settings.downloadLocation,
-                source_subdirectories: settings.createPlatformSubfolders,
-                disc_subdirectories: settings.disc_subdirectories,
-                concurrency: settings.concurrency,
-                max_connections: parseInt(settings.max_connections),
-                requests_per_minute: parseInt(settings.requests_per_minute),
-                verify_ssl: true
-            };
-
-            config.qobuz = {
-                quality: settings.qobuz_quality,
-                download_booklets: settings.qobuz_download_booklets,
-                use_auth_token: settings.qobuz_token_or_email,
-                email_or_userid: settings.qobuz_email_or_userid,
-                password_or_token: settings.qobuz_password_or_token,
-                app_id: settings.qobuz_app_id,
-                secrets: Array.isArray(settings.qobuz_secrets)
-                    ? settings.qobuz_secrets
-                    : settings.qobuz_secrets.trim() === ""
-                        ? []
-                        : settings.qobuz_secrets.split(/[\s,]+/).map(secret => secret.trim())
-            };
-
-            config.tidal = {
-                quality: settings.tidal_quality,
-                user_id: settings.tidal_user_id,
-                country_code: settings.tidal_country_code,
-                access_token: settings.tidal_access_token,
-                refresh_token: settings.tidal_refresh_token,
-                token_expiry: settings.tidal_token_expiry,
-                download_videos: settings.tidal_download_videos
-            };
-
-            config.deezer = {
-                quality: settings.deezer_quality,
-                deezloader_warnings: settings.deezloader_warnings,
-                use_deezloader: settings.deezer_use_deezloader,
-                arl: settings.deezer_arl
-            };
-
-            config.database = {
-                downloads_enabled: settings.downloads_database_check,
-                downloads_path: settings.downloads_database_path,
-                failed_downloads_enabled: settings.failed_downloads_database_check,
-                failed_downloads_path: settings.failed_downloads_database
-            };
-
-            config.conversion = {
-                enabled: settings.conversion_check,
-                codec: settings.conversion_codec,
-                sampling_rate: parseInt(settings.conversion_sampling_rate),
-                bit_depth: parseInt(settings.conversion_bit_depth || 16),
-                lossy_bitrate: parseInt(settings.conversion_lossy_bitrate || 320)
-            };
-            config.qobuz_filters = {
-                extras: false,
-                repeats: false,
-                non_albums: false,
-                features: false,
-                non_studio_albums: false,
-                non_remaster: false
-            }
-
-            config.artwork = {
-                embed: true,
-                embed_size :"large",
-                embed_max_width: -1,
-                save_artwork: true,
-                saved_max_width: -1,
-            }
-
-            config.metadata = {
-                set_playlist_to_album: settings.meta_album_name_playlist_check,
-                renumber_playlist_tracks: settings.meta_album_order_playlist_check,
-                exclude: Array.isArray(settings.excluded_tags)
-                    ? settings.excluded_tags
-                    : settings.excluded_tags.trim() === ""
-                        ? []
-                        : settings.excluded_tags.split(/\s+/)
-            };
-            // Config Fixes
-            config.filepaths = {
-                add_singles_to_folder: settings.filepaths_add_singles_to_folder,
-                folder_format: settings.filepaths_folder_format,
-                track_format: settings.filepaths_track_format,
-                restrict_characters: settings.filepaths_restrict_characters,
-                truncate_to: settings.filepaths_truncate_to,
-            };
-            config.soundcloud = {
-                quality: settings.soundcloud_quality,
-                client_id: settings.soundcloud_client_id,
-                app_version: settings.soundcloud_app_version,
-
-            };
-            config.youtube = {
-                quality: settings.youtube_quality,
-                download_videos: settings.youtube_download_videos,
-                video_downloads_folder: settings.youtube_video_downloads_folder,
-            };
-            config.lastfm = {
-                source: settings.lastfm_source,
-                fallback_source: settings.lastfm_fallback_source,
-            };
-
-            config.cli = {
-                text_output: settings.cli_text_output,
-                progress_bars: settings.cli_progress_bars,
-                max_search_results: settings.cli_max_search_results,
-            };
-            config.misc = {
-                version: '2.0.6',
-                check_for_updates: 'false'
-            };
-            const tomlString = TOML.stringify(config);
-            await fs.promises.writeFile(normalizedConfigPath, tomlString, 'utf8');
-            event.reply('settings-saved', 'Settings saved successfully');
-        } catch (err) {
-            console.error('Error handling streamrip config:', err);
-            console.error('Attempted path:', paths.configPath);
-            event.reply('settings-error', `Failed to update streamrip configuration: ${err.message}`);
-        }
-    });
+    await Promise.all([
+        saveServiceConfig(spotifyConfigPath, settings, 'spotify'),
+        saveServiceConfig(appleConfigPath, settings, 'apple')
+    ]);
 }
 
-function loadSettings(event) {
-    fs.readFile(settingsFilePath, 'utf8', async (err, data) => {
-        let settings;
+async function loadSettings() {
+    let settings;
+    try {
+        const data = await fs.promises.readFile(settingsFilePath, 'utf8');
+        settings = JSON.parse(data);
+    } catch {
+        settings = getDefaultSettings();
+    }
 
+    const [spotifyConfig, appleConfig] = await Promise.all([
+        loadServiceConfig(spotifyConfigPath),
+        loadServiceConfig(appleConfigPath)
+    ]);
+
+    settings = mergeServiceSettings(settings, spotifyConfig, 'spotify');
+    settings = mergeServiceSettings(settings, appleConfig, 'apple');
+
+    fs.promises.writeFile(settingsFilePath, JSON.stringify(settings, null, 4)).catch(() => {});
+
+    return settings;
+}
+
+function setupSettingsHandlers(ipcMain) {
+    ipcMain.on('load-settings', async (event) => {
         try {
-            if (err) {
-                console.log('Using default settings');
-                settings = getDefaultSettings();
-            } else {
-                settings = JSON.parse(data);
-            }
-
-            // Load service configs
-            const [spotifyConfig, appleConfig] = await Promise.all([
-                loadServiceConfig(spotifyConfigPath),
-                loadServiceConfig(appleConfigPath)
-            ]);
-
-            // Merge all settings together
-            settings = mergeServiceSettings(settings, spotifyConfig, 'spotify');
-            settings = mergeServiceSettings(settings, appleConfig, 'apple');
-
-            // Load streamrip settings
-            getStreamripPaths((paths) => {
-                if (paths?.configPath) {
-                    fs.readFile(paths.configPath, 'utf8', (tomlErr, tomlData) => {
-                        if (!tomlErr) {
-                            try {
-                                const streamripConfig = TOML.parse(tomlData);
-
-                                // Merge streamrip settings
-                                settings = {
-                                    ...settings,
-                                    downloads_database_path: paths.downloadsDbPath,
-                                    failed_downloads_database_path: paths.failedDownloadsDbPath,
-                                    downloadLocation: settings.downloadLocation || streamripConfig.downloads?.folder,
-                                    source_subdirectories: streamripConfig.downloads?.source_subdirectories || false,
-                                    disc_subdirectories: streamripConfig.downloads?.disc_subdirectories || true,
-                                    max_connections: streamripConfig.downloads?.max_connections || 6,
-                                    concurrency: streamripConfig.downloads?.concurrency || true,
-                                    qobuz_quality: streamripConfig.qobuz?.quality || 3,
-                                    qobuz_download_booklets: streamripConfig.qobuz?.download_booklets || true,
-                                    qobuz_token_or_email: streamripConfig.qobuz?.use_auth_token || true,
-                                    qobuz_email_or_userid: streamripConfig.qobuz?.email_or_userid || "",
-                                    qobuz_password_or_token: streamripConfig.qobuz?.password_or_token || "",
-                                    qobuz_app_id: streamripConfig.qobuz?.app_id || "",
-                                    qobuz_secrets: streamripConfig.qobuz?.secrets,
-                                    tidal_quality: streamripConfig.tidal?.quality || 3,
-                                    tidal_user_id: streamripConfig.tidal?.user_id || '',
-                                    tidal_country_code: streamripConfig.tidal?.country_code || "US",
-                                    tidal_access_token: streamripConfig.tidal?.access_token || "",
-                                    tidal_refresh_token: streamripConfig.tidal?.refresh_token || "",
-                                    tidal_token_expiry: streamripConfig.tidal?.token_expiry || "",
-                                    deezer_quality: streamripConfig.deezer?.quality || "1",
-                                    deezloader_warnings: streamripConfig.deezer?.deezloader_warnings || false,
-                                    tidal_download_videos: streamripConfig.tidal?.download_videos,
-                                    deezer_use_deezloader: streamripConfig.deezer?.use_deezloader,
-                                    deezer_arl: streamripConfig.deezer?.arl || '',
-                                    downloads_database_check: streamripConfig.database?.downloads_enabled,
-                                    failed_downloads_database_check: streamripConfig.database?.failed_downloads_enabled,
-                                    downloads_database: streamripConfig.database?.downloads_path,
-                                    failed_downloads_database: streamripConfig.database?.failed_downloads_path,
-                                    conversion_check: streamripConfig.conversion?.enabled,
-                                    conversion_codec: streamripConfig.conversion?.codec || "ALAC",
-                                    conversion_sampling_rate: streamripConfig.conversion?.sampling_rate || 48000,
-                                    conversion_lossy_bitrate: streamripConfig.conversion?.lossy_bitrate || 320,
-                                    meta_album_name_playlist_check: streamripConfig.metadata?.set_playlist_to_album,
-                                    meta_album_order_playlist_check: streamripConfig.metadata?.renumber_playlist_tracks,
-                                    excluded_tags: streamripConfig.metadata?.exclude || [],
-                                };
-                            } catch (tomlParseErr) {
-                                console.error('Error parsing streamrip config:', tomlParseErr);
-                            }
-                        }
-
-                        // Save the complete merged settings
-                        fs.writeFile(settingsFilePath, JSON.stringify(settings, null, 4), (writeErr) => {
-                            if (writeErr) console.error('Error saving merged settings:', writeErr);
-                        });
-
-                        event.reply('settings-data', settings);
-                    });
-                } else {
-                    console.warn('custom_rip is not installed or not available, skipping streamrip settings load');
-                    event.reply('settings-data', settings);
-                }
-            });
+            const data = await loadSettings();
+            event.reply('settings-data', data);
         } catch (err) {
-            console.error('Error in loadSettings:', err);
             event.reply('settings-error', 'Failed to load settings');
             event.reply('settings-data', getDefaultSettings());
         }
     });
-}
-
-function getStreamripPaths(callback) {
-    const streamripProcess = spawn('custom_rip', ['config', 'path']);
-    let stdout = '';
-    let stderr = '';
-
-    streamripProcess.stdout.on('data', (data) => {
-        stdout += data.toString();
-    });
-
-    streamripProcess.stderr.on('data', (data) => {
-        stderr += data.toString();
-    });
-
-    streamripProcess.on('error', (err) => {
-        console.warn('custom_rip is not installed:', err);
-        callback(null);
-    });
-
-    streamripProcess.on('close', (code) => {
-        if (code !== 0) {
-            console.warn(`custom_rip exited with code ${code}: ${stderr}`);
-            callback(null);
-            return;
-        }
-
-        const configPathMatch = stdout.match(/Config path: '([^']+)'/);
-        if (configPathMatch && configPathMatch[1]) {
-
-            const rawPath = configPathMatch[1]
-                .replace(/\n/g, '')
-                .replace(/\r/g, '')
-                .replace(/\\+/g, '/')
-                .replace(/\s+/g, ' ')
-                .trim();
-
-            const configPath = path.normalize(rawPath);
-            const configDir = path.dirname(configPath);
-            console.log('Raw matched path:', configPathMatch[1]);
-            console.log('Cleaned path:', rawPath);
-            console.log('Normalized config path:', configPath);
-
-            const paths = {
-                configPath: configPath,
-                downloadsDbPath: path.join(configDir, 'downloads.db'),
-                failedDownloadsDbPath: path.join(configDir, 'failed_downloads.db')
-            };
-
-            callback(paths);
-        } else {
-            console.warn('Could not find config path in custom_rip output:', stdout);
-            callback(null);
-        }
-    });
-}
-
-
-function setupSettingsHandlers(ipcMain) {
-    ipcMain.on('load-settings', (event) => {
-        loadSettings(event);
-    });
 
     ipcMain.on('save-settings', async (event, settings) => {
-        await saveSettings(event, settings);
+        try {
+            await saveSettings(settings);
+            event.reply('settings-saved', 'Settings saved successfully');
+        } catch (err) {
+            event.reply('settings-error', `Failed to save settings: ${err.message || err}`);
+        }
     });
 }
 
 module.exports = {
     setupSettingsHandlers,
     loadSettings,
-    saveSettings
+    saveSettings,
+    saveServiceConfig,
+    spotifyConfigPath
 };

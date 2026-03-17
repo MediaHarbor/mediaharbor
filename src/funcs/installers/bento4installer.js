@@ -2,7 +2,6 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const axios = require("axios");
-const ProgressBar = require("progress");
 const unzipper = require("unzipper");
 const { spawn } = require("child_process");
 
@@ -391,4 +390,16 @@ async function downloadAndInstallBento4(mainWin, options = {}) {
     }
 }
 
-module.exports = { downloadAndInstallBento4 };
+function getBento4BinDir() {
+    if (os.platform() === 'darwin') return path.join('/Applications', 'Bento4', 'bin');
+    return path.join(os.homedir(), 'Bento4', 'bin');
+}
+
+function getBento4ToolPath(toolName) {
+    const binDir = getBento4BinDir();
+    const binName = os.platform() === 'win32' ? toolName + '.exe' : toolName;
+    const fullPath = path.join(binDir, binName);
+    return fs.existsSync(fullPath) ? fullPath : toolName;
+}
+
+module.exports = { downloadAndInstallBento4, getBento4BinDir, getBento4ToolPath };

@@ -4,428 +4,454 @@ const fs = require('fs');
 const axios = require('axios');
 const decompress = require('decompress');
 const decompressUnzip = require('decompress-unzip');
-const { spawn, execSync } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const xml2js = require('xml2js');
 
-// Add the extractTarXz function from one.js
+const HTTP_TIMEOUT = 60_000;
+const DOWNLOAD_TIMEOUT = 600_000;
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2_000;
+
+const DOWNLOAD_URLS = {
+    win32: {
+        x64: 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip',
+    },
+    linux: {
+        x64: 'https://johnvansickle.com/ffmpeg/builds/ffmpeg-git-amd64-static.tar.xz',
+        arm64: 'https://johnvansickle.com/ffmpeg/builds/ffmpeg-git-arm64-static.tar.xz',
+        arm: 'https://johnvansickle.com/ffmpeg/builds/ffmpeg-git-armhf-static.tar.xz',
+    },
+};
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRetry(fn, retries = MAX_RETRIES, delay = RETRY_DELAY_MS) {
+    let lastError;
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            if (attempt < retries) {
+                await sleep(delay);
+            }
+        }
+    }
+    throw lastError;
+}
+
+function formatBytes(bytes, decimals = 2) {
+    if (!bytes || bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = Math.max(0, decimals);
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
+
+async function getFileSize(url) {
+    try {
+        const headResponse = await axios.head(url, { timeout: HTTP_TIMEOUT });
+        const contentLength = headResponse.headers['content-length'];
+        return contentLength ? parseInt(contentLength, 10) : null;
+    } catch {
+        return null;
+    }
+}
+
+function sendProgress(mainWin, percent, status) {
+    mainWin.webContents.send('installation-progress', { percent, status });
+}
+
+function sendError(mainWin, message) {
+    mainWin.webContents.send('installation-error', message);
+}
+
 async function extractTarXz(filePath, destination) {
     return new Promise((resolve, reject) => {
-        console.log(`Extracting ${filePath} to ${destination}`);
         const tarProcess = spawn('tar', ['-xJf', filePath, '-C', destination]);
-
         let stderr = '';
 
         tarProcess.stderr.on('data', (data) => {
             stderr += data.toString();
-            console.log('Tar stderr:', stderr);
+        });
+
+        tarProcess.on('error', (err) => {
+            reject(new Error(`Failed to spawn tar: ${err.message}`, { cause: err }));
         });
 
         tarProcess.on('close', (code) => {
-            console.log(`Tar process exited with code ${code}`);
             if (code === 0) {
                 resolve();
             } else {
-                reject(new Error(`Tar extraction failed: ${stderr}`));
+                reject(new Error(`Tar extraction failed (exit code ${code}): ${stderr}`));
             }
         });
     });
 }
 
-async function getLatestFFmpegVersion() {
-    try {
-        const response = await axios.get('https://evermeet.cx/ffmpeg/rss.xml');
-        const parser = new xml2js.Parser();
-        const result = await parser.parseStringPromise(response.data);
-        const latestItem = result.rss.channel[0].item[0];
-        return {
-            version: latestItem.title[0].replace('.zip', ''),
-            url: latestItem.link[0]
+async function downloadFile(url, destPath, onProgress) {
+    const totalLength = await getFileSize(url);
+    let downloadedLength = 0;
+
+    const response = await axios({
+        method: 'GET',
+        url,
+        responseType: 'stream',
+        timeout: DOWNLOAD_TIMEOUT,
+    });
+
+    const writer = fs.createWriteStream(destPath);
+
+    return new Promise((resolve, reject) => {
+        const cleanup = (err) => {
+            response.data.destroy();
+            writer.destroy();
+            reject(err);
         };
-    } catch (error) {
-        throw new Error('Failed to fetch latest FFmpeg version');
-    }
+
+        response.data.on('error', cleanup);
+        writer.on('error', cleanup);
+
+        response.data.on('data', (chunk) => {
+            downloadedLength += chunk.length;
+            if (totalLength) {
+                onProgress(downloadedLength / totalLength);
+            }
+        });
+
+        writer.on('finish', resolve);
+
+        response.data.pipe(writer);
+    });
 }
 
-async function getLatestFFprobeVersion() {
-    try {
-        const response = await axios.get('https://evermeet.cx/ffmpeg/ffprobe-rss.xml');
-        const parser = new xml2js.Parser();
-        const result = await parser.parseStringPromise(response.data);
-        const latestItem = result.rss.channel[0].item[0];
-        return {
-            version: latestItem.title[0].replace('.zip', ''),
-            url: latestItem.link[0]
-        };
-    } catch (error) {
-        throw new Error('Failed to fetch latest FFprobe version');
-    }
+async function fetchLatestFromRSS(feedUrl, label) {
+    return withRetry(async () => {
+        try {
+            const response = await axios.get(feedUrl, { timeout: HTTP_TIMEOUT });
+            const parser = new xml2js.Parser();
+            const result = await parser.parseStringPromise(response.data);
+
+            const channel = result?.rss?.channel?.[0];
+            const latestItem = channel?.item?.[0];
+
+            if (!latestItem?.title?.[0] || !latestItem?.link?.[0]) {
+                throw new Error(`Malformed RSS response for ${label}`);
+            }
+
+            return {
+                version: latestItem.title[0].replace('.zip', ''),
+                url: latestItem.link[0],
+            };
+        } catch (error) {
+            throw new Error(`Failed to fetch latest ${label} version`, { cause: error });
+        }
+    });
 }
 
-async function getFileSize(url) {
-    try {
-        const headResponse = await axios.head(url);
-        const contentLength = headResponse.headers['content-length'];
-        return contentLength ? parseInt(contentLength, 10) : null;
-    } catch (error) {
-        console.warn('HEAD request failed, cannot determine file size:', error.message);
-        return null;
-    }
+function getLatestFFmpegVersion() {
+    return fetchLatestFromRSS('https://evermeet.cx/ffmpeg/rss.xml', 'FFmpeg');
 }
 
-// Update system PATH permanently (platform-specific)
-async function updateSystemPath(ffmpegPath, mainWin) {
+function getLatestFFprobeVersion() {
+    return fetchLatestFromRSS('https://evermeet.cx/ffmpeg/ffprobe-rss.xml', 'FFprobe');
+}
+
+function escapePowerShellSingleQuote(str) {
+    return str.replace(/'/g, "''");
+}
+
+async function updateSystemPath(ffmpegDir, mainWin) {
     const platform = os.platform();
-
-    // Update current process.env.PATH (session only)
-    process.env.PATH = `${ffmpegPath}${path.delimiter}${process.env.PATH}`;
-    console.log(`Updated current process PATH: ${process.env.PATH}`);
+    process.env.PATH = `${ffmpegDir}${path.delimiter}${process.env.PATH}`;
 
     try {
         if (platform === 'win32') {
-            // Windows: update using PowerShell
-            const currentPath = execSync('powershell -command "[Environment]::GetEnvironmentVariable(\'Path\', \'User\')"').toString().trim();
-            if (!currentPath.includes(ffmpegPath)) {
-                const newPath = `${ffmpegPath}${path.delimiter}${currentPath}`;
-                execSync(`powershell -command "[Environment]::SetEnvironmentVariable('Path', '${newPath}', 'User')"`); 
-                console.log('Updated Windows User PATH environment variable');
+            const currentPath = execFileSync('powershell.exe', [
+                '-NoProfile',
+                '-Command',
+                "[Environment]::GetEnvironmentVariable('Path', 'User')",
+            ]).toString().trim();
+
+            if (!currentPath.includes(ffmpegDir)) {
+                const newPath = `${ffmpegDir}${path.delimiter}${currentPath}`;
+                const safeNewPath = escapePowerShellSingleQuote(newPath);
+
+                execFileSync('powershell.exe', [
+                    '-NoProfile',
+                    '-Command',
+                    `[Environment]::SetEnvironmentVariable('Path', '${safeNewPath}', 'User')`,
+                ]);
             }
         } else {
-            // For macOS and Linux update the shell profile(s)
             const homeDir = os.homedir();
-            // For macOS using zsh, update both .zshrc and .zprofile
-            const shellConfigs = ['.zshrc', '.zprofile', '.bashrc', '.bash_profile', '.profile'];
-            const exportLine = `\n# FFmpeg PATH\nexport PATH="${ffmpegPath}:$PATH"\n`;
+            const shell = process.env.SHELL || '';
+            const safePath = ffmpegDir.replace(/"/g, '\\"');
+            const exportLine = `\nexport PATH="${safePath}:$PATH"\n`;
 
-            shellConfigs.forEach(configFile => {
-                const configPath = path.join(homeDir, configFile);
-                if (fs.existsSync(configPath)) {
-                    const content = fs.readFileSync(configPath, 'utf8');
-                    if (!content.includes(ffmpegPath)) {
-                        fs.appendFileSync(configPath, exportLine);
-                        console.log(`Updated ${configFile} with FFmpeg PATH`);
-                    }
-                } else {
-                    // If the file does not exist, create it with our export line.
-                    fs.writeFileSync(configPath, exportLine);
-                    console.log(`Created ${configFile} with FFmpeg PATH`);
+            let configFile;
+            if (shell.includes('zsh')) {
+                configFile = path.join(homeDir, '.zshrc');
+            } else if (shell.includes('bash')) {
+                configFile = path.join(homeDir, '.bashrc');
+                if (platform === 'darwin' && !fs.existsSync(configFile)) {
+                    configFile = path.join(homeDir, '.bash_profile');
                 }
-            });
+            } else if (shell.includes('fish')) {
+                const fishConfigDir = path.join(homeDir, '.config', 'fish');
+                fs.mkdirSync(fishConfigDir, { recursive: true });
+                configFile = path.join(fishConfigDir, 'config.fish');
+                const fishLine = `\nset -gx PATH "${safePath}" $PATH\n`;
+                const existing = fs.existsSync(configFile)
+                    ? fs.readFileSync(configFile, 'utf8')
+                    : '';
+                if (!existing.includes(ffmpegDir)) {
+                    fs.appendFileSync(configFile, fishLine);
+                }
+                return true;
+            } else {
+                configFile = path.join(homeDir, '.profile');
+            }
+
+            const content = fs.existsSync(configFile)
+                ? fs.readFileSync(configFile, 'utf8')
+                : '';
+
+            if (!content.includes(ffmpegDir)) {
+                fs.appendFileSync(configFile, exportLine);
+            }
         }
 
         return true;
     } catch (error) {
-        console.error('Failed to update system PATH:', error);
-        mainWin.webContents.send('installation-progress', {
-            percent: 85,
-            status: `PATH update issue: ${error.message}. FFmpeg will work after restart.`
-        });
+        sendProgress(
+            mainWin,
+            85,
+            `PATH update issue: ${error.message}. FFmpeg will work after restart.`
+        );
         return false;
     }
 }
 
-// Test if FFmpeg is accessible with the current PATH
 function testFFmpegAccess(ffmpegDir) {
     try {
-        // Clone current process.env and add ffmpegDir to PATH
-        const env = { ...process.env };
-        env.PATH = `${ffmpegDir}${path.delimiter}${env.PATH}`;
-
-        // Try to run ffmpeg -version with the updated PATH
-        execSync('ffmpeg -version', { env, stdio: 'pipe' });
+        const env = { ...process.env, PATH: `${ffmpegDir}${path.delimiter}${process.env.PATH}` };
+        execFileSync('ffmpeg', ['-version'], { env, stdio: 'pipe' });
         return true;
-    } catch (error) {
-        console.log('FFmpeg not accessible via PATH:', error.message);
+    } catch {
         return false;
+    }
+}
+
+function getDownloadUrl(platform, arch) {
+    const platformUrls = DOWNLOAD_URLS[platform];
+    if (!platformUrls) return null;
+    return platformUrls[arch] || platformUrls.x64 || null;
+}
+
+function resolveArch() {
+    const arch = os.arch();
+    if (arch === 'x64' || arch === 'x86_64') return 'x64';
+    if (arch === 'arm64' || arch === 'aarch64') return 'arm64';
+    if (arch === 'arm') return 'arm';
+    return arch;
+}
+
+async function installMacOS(ffmpegDir, mainWin) {
+    const ffmpegLatest = await getLatestFFmpegVersion();
+    const ffmpegTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ffmpeg-'));
+
+    try {
+        const ffmpegFileName = path.basename(ffmpegLatest.url);
+        const ffmpegTempFile = path.join(ffmpegTempDir, ffmpegFileName);
+
+        await downloadFile(ffmpegLatest.url, ffmpegTempFile, (fraction) => {
+            sendProgress(mainWin, Math.round(fraction * 25), `Downloading FFmpeg… ${Math.round(fraction * 100)}%`);
+        });
+
+        sendProgress(mainWin, 25, 'Extracting FFmpeg…');
+
+        await decompress(ffmpegTempFile, ffmpegDir, { plugins: [decompressUnzip()] });
+
+        const ffmpegBin = path.join(ffmpegDir, 'ffmpeg');
+        if (!fs.existsSync(ffmpegBin)) {
+            throw new Error('FFmpeg binary not found after extraction');
+        }
+        fs.chmodSync(ffmpegBin, 0o755);
+    } finally {
+        fs.rmSync(ffmpegTempDir, { recursive: true, force: true });
+    }
+
+    const ffprobeLatest = await getLatestFFprobeVersion();
+    const ffprobeTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ffprobe-'));
+
+    try {
+        const ffprobeFileName = path.basename(ffprobeLatest.url);
+        const ffprobeTempFile = path.join(ffprobeTempDir, ffprobeFileName);
+
+        await downloadFile(ffprobeLatest.url, ffprobeTempFile, (fraction) => {
+            const percent = 25 + Math.round(fraction * 25);
+            sendProgress(mainWin, percent, `Downloading FFprobe… ${Math.round(fraction * 100)}%`);
+        });
+
+        sendProgress(mainWin, 50, 'Extracting FFprobe…');
+
+        await decompress(ffprobeTempFile, ffmpegDir, { plugins: [decompressUnzip()] });
+
+        const ffprobeBin = path.join(ffmpegDir, 'ffprobe');
+        if (!fs.existsSync(ffprobeBin)) {
+            throw new Error('FFprobe binary not found after extraction');
+        }
+        fs.chmodSync(ffprobeBin, 0o755);
+    } finally {
+        fs.rmSync(ffprobeTempDir, { recursive: true, force: true });
+    }
+}
+
+async function installWindows(downloadUrl, ffmpegDir, mainWin) {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ffmpeg-'));
+
+    try {
+        const fileName = path.basename(downloadUrl);
+        const tempFilePath = path.join(tempDir, fileName);
+
+        await downloadFile(downloadUrl, tempFilePath, (fraction) => {
+            sendProgress(mainWin, Math.round(fraction * 50), `Downloading FFmpeg… ${Math.round(fraction * 100)}%`);
+        });
+
+        sendProgress(mainWin, 50, 'Extracting FFmpeg…');
+
+        await decompress(tempFilePath, tempDir, { plugins: [decompressUnzip()] });
+
+        const extractedFiles = fs.readdirSync(tempDir);
+        let binDir = null;
+
+        for (const file of extractedFiles) {
+            const fullPath = path.join(tempDir, file);
+            if (fs.statSync(fullPath).isDirectory()) {
+                const children = fs.readdirSync(fullPath);
+                if (children.includes('bin')) {
+                    binDir = path.join(fullPath, 'bin');
+                    break;
+                }
+            }
+        }
+
+        if (!binDir) {
+            throw new Error('Could not find bin directory in extracted FFmpeg archive');
+        }
+
+        for (const exe of ['ffmpeg.exe', 'ffprobe.exe']) {
+            const src = path.join(binDir, exe);
+            const dest = path.join(ffmpegDir, exe);
+            if (!fs.existsSync(src)) {
+                throw new Error(`Expected binary ${exe} not found in archive`);
+            }
+            fs.copyFileSync(src, dest);
+        }
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+}
+
+async function installLinux(downloadUrl, ffmpegDir, mainWin) {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ffmpeg-'));
+
+    try {
+        const fileName = path.basename(downloadUrl);
+        const tempFilePath = path.join(tempDir, fileName);
+
+        await downloadFile(downloadUrl, tempFilePath, (fraction) => {
+            sendProgress(mainWin, Math.round(fraction * 50), `Downloading FFmpeg… ${Math.round(fraction * 100)}%`);
+        });
+
+        sendProgress(mainWin, 50, 'Extracting FFmpeg…');
+
+        await extractTarXz(tempFilePath, tempDir);
+
+        const extractedFiles = fs.readdirSync(tempDir);
+        const ffmpegFolder = extractedFiles.find((f) => f.includes('ffmpeg') && f !== fileName);
+        if (!ffmpegFolder) {
+            throw new Error('FFmpeg folder not found after extraction');
+        }
+
+        const extractedDir = path.join(tempDir, ffmpegFolder);
+        for (const binary of ['ffmpeg', 'ffprobe']) {
+            const src = path.join(extractedDir, binary);
+            const dest = path.join(ffmpegDir, binary);
+            if (!fs.existsSync(src)) {
+                throw new Error(`Expected binary "${binary}" not found in archive`);
+            }
+            fs.copyFileSync(src, dest);
+            fs.chmodSync(dest, 0o755);
+        }
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
     }
 }
 
 async function downloadAndInstallFFmpeg(mainWin) {
     try {
         const platform = os.platform();
-        let downloadUrl;
+        const arch = resolveArch();
 
-        if (platform === 'win32') {
-            downloadUrl = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip';
-        } else if (platform === 'linux') {
-            downloadUrl = 'https://johnvansickle.com/ffmpeg/builds/ffmpeg-git-amd64-static.tar.xz';
-        }
+        sendProgress(mainWin, 0, 'Starting FFmpeg download…');
 
-        // Send initial progress update
-        mainWin.webContents.send('installation-progress', {
-            percent: 0,
-            status: 'Starting FFmpeg download...'
-        });
-
-        // Define installation directory (for all platforms)
         const homeDir = os.homedir();
         let ffmpegDir;
 
         if (platform === 'win32') {
             ffmpegDir = path.join(homeDir, 'ffmpeg', 'bin');
         } else {
-            // macOS/Linux: Use ~/.local/bin which is often in PATH
             ffmpegDir = path.join(homeDir, '.local', 'bin');
         }
 
-        console.log('Creating directory:', ffmpegDir);
         fs.mkdirSync(ffmpegDir, { recursive: true });
 
         if (platform === 'darwin') {
-            // Download and extract FFmpeg binary
-            const ffmpegLatest = await getLatestFFmpegVersion();
-            const ffmpegDownloadUrl = ffmpegLatest.url;
-            console.log('FFmpeg download URL:', ffmpegDownloadUrl);
-
-            // Download FFmpeg
-            const ffmpegTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ffmpeg-'));
-            const ffmpegFileName = path.basename(ffmpegDownloadUrl);
-            const ffmpegTempFilePath = path.join(ffmpegTempDir, ffmpegFileName);
-
-            const totalLength = await getFileSize(ffmpegDownloadUrl);
-            let downloadedLength = 0;
-
-            const ffmpegWriter = fs.createWriteStream(ffmpegTempFilePath);
-            const ffmpegResponse = await axios({
-                method: 'GET',
-                url: ffmpegDownloadUrl,
-                responseType: 'stream'
-            });
-
-            // Listen for data events to track progress
-            ffmpegResponse.data.on('data', (chunk) => {
-                downloadedLength += chunk.length;
-                // Map the fraction of download completion into the 0-30% range
-                const downloadPercent = Math.round((downloadedLength / totalLength) * 30);
-                mainWin.webContents.send('installation-progress', {
-                    percent: downloadPercent,
-                    status: `Downloading FFmpeg... ${downloadPercent}%`
-                });
-            });
-
-            ffmpegResponse.data.pipe(ffmpegWriter);
-            await new Promise((resolve, reject) => {
-                ffmpegWriter.on('finish', resolve);
-                ffmpegWriter.on('error', reject);
-            });
-
-            mainWin.webContents.send('installation-progress', {
-                percent: 30,
-                status: 'Extracting FFmpeg...'
-            });
-
-            await decompress(ffmpegTempFilePath, ffmpegDir, {
-                plugins: [decompressUnzip()]
-            });
-            const ffmpegPath = path.join(ffmpegDir, 'ffmpeg');
-            if (!fs.existsSync(ffmpegPath)) {
-                throw new Error('FFmpeg binary not found after extraction');
-            }
-            fs.chmodSync(ffmpegPath, 0o755);
-            fs.rmSync(ffmpegTempDir, { recursive: true, force: true });
-
-            // Download and extract FFprobe binary
-            const ffprobeLatest = await getLatestFFprobeVersion();
-            const ffprobeDownloadUrl = ffprobeLatest.url;
-            console.log('FFprobe download URL:', ffprobeDownloadUrl);
-
-            const ffprobeTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ffprobe-'));
-            const ffprobeFileName = path.basename(ffprobeDownloadUrl);
-            const ffprobeTempFilePath = path.join(ffprobeTempDir, ffprobeFileName);
-
-            const ffprobeTotalLength = await getFileSize(ffprobeDownloadUrl);
-            let ffprobeDownloadedLength = 0;
-
-            const ffprobeWriter = fs.createWriteStream(ffprobeTempFilePath);
-            const ffprobeResponse = await axios({
-                method: 'GET',
-                url: ffprobeDownloadUrl,
-                responseType: 'stream'
-            });
-
-            ffprobeResponse.data.on('data', (chunk) => {
-                ffprobeDownloadedLength += chunk.length;
-                // Map the fraction of download completion into the 30-50% range.
-                let base = 30; // start progress for FFprobe download
-                const downloadPercent = base + Math.round((ffprobeDownloadedLength / ffprobeTotalLength) * 20);
-                mainWin.webContents.send('installation-progress', {
-                    percent: downloadPercent,
-                    status: `Downloading FFprobe... ${downloadPercent}%`
-                });
-            });
-
-            ffprobeResponse.data.pipe(ffprobeWriter);
-            await new Promise((resolve, reject) => {
-                ffprobeWriter.on('finish', resolve);
-                ffprobeWriter.on('error', reject);
-            });
-
-            mainWin.webContents.send('installation-progress', {
-                percent: 50,
-                status: 'Extracting FFprobe...'
-            });
-
-            await decompress(ffprobeTempFilePath, ffmpegDir, {
-                plugins: [decompressUnzip()]
-            });
-            const ffprobePath = path.join(ffmpegDir, 'ffprobe');
-            if (!fs.existsSync(ffprobePath)) {
-                throw new Error('FFprobe binary not found after extraction');
-            }
-            fs.chmodSync(ffprobePath, 0o755);
-            fs.rmSync(ffprobeTempDir, { recursive: true, force: true });
-
+            await installMacOS(ffmpegDir, mainWin);
         } else if (platform === 'win32' || platform === 'linux') {
-            // Common download code for Windows and Linux
-            const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ffmpeg-'));
-            const fileName = path.basename(downloadUrl);
-            const tempFilePath = path.join(tempDir, fileName);
-
-            // Download file
-            const totalLength = await getFileSize(downloadUrl);
-            let downloadedLength = 0;
-
-            const writer = fs.createWriteStream(tempFilePath);
-            const response = await axios({
-                method: 'GET',
-                url: downloadUrl,
-                responseType: 'stream'
-            });
-
-            // Listen for data events to track progress
-            response.data.on('data', (chunk) => {
-                downloadedLength += chunk.length;
-                const downloadPercent = Math.round((downloadedLength / totalLength) * 30);
-                mainWin.webContents.send('installation-progress', {
-                    percent: downloadPercent,
-                    status: `Downloading FFmpeg... ${downloadPercent}%`
-                });
-            });
-
-            response.data.pipe(writer);
-            await new Promise((resolve, reject) => {
-                writer.on('finish', resolve);
-                writer.on('error', reject);
-            });
-
-            mainWin.webContents.send('installation-progress', {
-                percent: 30,
-                status: 'Extracting FFmpeg...'
-            });
+            const downloadUrl = getDownloadUrl(platform, arch);
+            if (!downloadUrl) {
+                throw new Error(
+                    `Unsupported platform/architecture combination: ${platform}/${arch}`
+                );
+            }
 
             if (platform === 'win32') {
-                await decompress(tempFilePath, tempDir, {
-                    plugins: [decompressUnzip()]
-                });
-
-                // Windows FFmpeg zip has a nested directory structure
-                const extractedFiles = fs.readdirSync(tempDir);
-                console.log('Extracted files:', extractedFiles);
-
-                // Find the bin directory that contains ffmpeg.exe
-                let binDir = null;
-                for (const file of extractedFiles) {
-                    const fullPath = path.join(tempDir, file);
-                    if (fs.statSync(fullPath).isDirectory()) {
-                        // Look for nested bin directory
-                        const nestedDirs = fs.readdirSync(fullPath);
-                        const hasBin = nestedDirs.includes('bin');
-                        if (hasBin) {
-                            binDir = path.join(fullPath, 'bin');
-                            break;
-                        }
-                    }
-                }
-
-                if (!binDir) {
-                    throw new Error('Could not find bin directory in extracted FFmpeg');
-                }
-
-                // Copy the executables
-                const exes = ['ffmpeg.exe', 'ffprobe.exe'];
-                for (const exe of exes) {
-                    const sourcePath = path.join(binDir, exe);
-                    const targetPath = path.join(ffmpegDir, exe);
-                    if (fs.existsSync(sourcePath)) {
-                        fs.copyFileSync(sourcePath, targetPath);
-                        console.log(`Copied ${exe} to ${targetPath}`);
-                    } else {
-                        console.warn(`${exe} not found in extracted files`);
-                    }
-                }
-            } else if (platform === 'linux') {
-                console.log('Extracting on Linux...');
-                await extractTarXz(tempFilePath, tempDir);
-
-                // Find the extracted directory
-                const extractedFiles = fs.readdirSync(tempDir);
-                console.log('Extracted files:', extractedFiles);
-
-                // Find the ffmpeg directory (it usually contains 'ffmpeg' in the name)
-                const ffmpegFolder = extractedFiles.find(f => f.includes('ffmpeg'));
-                if (!ffmpegFolder) {
-                    throw new Error('FFmpeg folder not found after extraction');
-                }
-
-                const extractedDir = path.join(tempDir, ffmpegFolder);
-                console.log('Extracted directory:', extractedDir);
-
-                // Copy FFmpeg executables to bin directory
-                const binaries = ['ffmpeg', 'ffprobe'];
-                for (const binary of binaries) {
-                    const sourcePath = path.join(extractedDir, binary);
-                    const targetPath = path.join(ffmpegDir, binary);
-
-                    console.log(`Copying ${sourcePath} to ${targetPath}`);
-                    fs.copyFileSync(sourcePath, targetPath);
-                    fs.chmodSync(targetPath, 0o755); // Ensure executable permissions
-                    console.log(`Set permissions for ${targetPath}`);
-                }
+                await installWindows(downloadUrl, ffmpegDir, mainWin);
+            } else {
+                await installLinux(downloadUrl, ffmpegDir, mainWin);
             }
-
-            // Clean up temp directory
-            fs.rmSync(tempDir, { recursive: true, force: true });
+        } else {
+            throw new Error(`Unsupported platform: ${platform}`);
         }
 
-        // Update PATH to include FFmpeg directory
-        mainWin.webContents.send('installation-progress', {
-            percent: 80,
-            status: 'Updating system PATH...'
-        });
-
+        sendProgress(mainWin, 80, 'Updating system PATH…');
         await updateSystemPath(ffmpegDir, mainWin);
 
-        // Verify the installation using the updated PATH
-        console.log('Verifying installation...');
-        const ffmpegAccessible = testFFmpegAccess(ffmpegDir);
+        sendProgress(mainWin, 90, 'Verifying installation…');
+        const accessible = testFFmpegAccess(ffmpegDir);
 
-        if (!ffmpegAccessible) {
-            console.log('FFmpeg not immediately accessible, but was installed to:', ffmpegDir);
-            mainWin.webContents.send('installation-progress', {
-                percent: 95,
-                status: 'FFmpeg installed but not in current PATH. It will be available after terminal restart.'
-            });
-        } else {
-            console.log('FFmpeg successfully installed and accessible via PATH!');
+        if (!accessible) {
+            sendProgress(
+                mainWin,
+                95,
+                'FFmpeg installed but not yet in current PATH. It will be available after terminal restart.'
+            );
         }
 
-        mainWin.webContents.send('installation-progress', {
-            percent: 100,
-            status: 'FFmpeg installed successfully! Please restart your terminal if FFmpeg commands are not working.'
-        });
-
+        sendProgress(
+            mainWin,
+            100,
+            'FFmpeg installed successfully! Please restart your terminal if FFmpeg commands are not working.'
+        );
     } catch (error) {
-        mainWin.webContents.send('installation-error', error.message);
-        console.error('Installation failed:', error);
+        sendError(mainWin, error.message);
     }
-}
-
-function formatBytes(bytes, decimals = 2) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024,
-        dm = decimals < 0 ? 0 : decimals,
-        sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'],
-        i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
 module.exports = { downloadAndInstallFFmpeg };

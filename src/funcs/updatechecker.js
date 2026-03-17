@@ -17,7 +17,6 @@ module.exports = class UpdateChecker {
             const latestRelease = await this.getLatestRelease();
 
             if (!latestRelease) {
-                console.log('No releases found');
                 return;
             }
 
@@ -26,16 +25,12 @@ module.exports = class UpdateChecker {
 
             if (this.compareVersions(latestVersion, currentVersion) > 0) {
                 if (autoUpdate) {
-                    console.log('Auto-update enabled. Downloading and installing update...');
                     await this.downloadAndInstall(latestRelease);
                 } else {
                     await this.showUpdateDialog(latestRelease);
                 }
-            } else {
-                console.log('Application is up to date');
             }
         } catch (error) {
-            console.error('Error checking for updates:', error);
         }
     }
 
@@ -99,7 +94,6 @@ module.exports = class UpdateChecker {
         const asset = release.assets.find(a => a.name.endsWith('.exe') || a.name.endsWith('.dmg') || a.name.endsWith('.AppImage'));
 
         if (!asset) {
-            console.error('No compatible update file found.');
             return;
         }
 
@@ -111,9 +105,10 @@ module.exports = class UpdateChecker {
 
             file.on('finish', () => {
                 file.close(() => {
-                    console.log('Update downloaded. Installing now...');
-                    if (process.platform === 'darwin' || process.platform === 'linux') {
+                    if (process.platform === 'darwin') {
                         exec(`open "${downloadPath}"`);
+                    } else if (process.platform === 'linux') {
+                        exec(`xdg-open "${downloadPath}"`);
                     } else if (process.platform === 'win32') {
                         exec(`start "" "${downloadPath}"`);
                     }
@@ -121,7 +116,7 @@ module.exports = class UpdateChecker {
                 });
             });
         }).on('error', (err) => {
-            fs.unlink(downloadPath, () => console.error('Download failed:', err));
+            fs.unlink(downloadPath, () => {});
         });
     }
 }

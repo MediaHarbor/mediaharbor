@@ -5,6 +5,30 @@ const { exec } = require('child_process');
 const os = require('os');
 const axios = require('axios');
 
+async function fetchLatestGitWindowsUrl() {
+    return new Promise((resolve, reject) => {
+        const req = https.get(
+            'https://api.github.com/repos/git-for-windows/git/releases/latest',
+            { headers: { 'User-Agent': 'MediaHarbor/1.0' } },
+            (res) => {
+                let data = '';
+                res.on('data', c => data += c);
+                res.on('end', () => {
+                    try {
+                        const json = JSON.parse(data);
+                        const arch = os.arch() === 'arm64' ? 'arm64' : '64-bit';
+                        const asset = json.assets.find(a => a.name.endsWith(`-${arch}.exe`));
+                        if (asset) resolve(asset.browser_download_url);
+                        else reject(new Error('Git installer asset not found'));
+                    } catch (e) { reject(e); }
+                });
+            }
+        );
+        req.on('error', reject);
+        req.setTimeout(10000, () => { req.destroy(); reject(new Error('timeout')); });
+    });
+}
+
 async function downloadAndInstallGit(win) {
     const platform = os.platform();
     const tempDir = os.tmpdir();
@@ -13,14 +37,11 @@ async function downloadAndInstallGit(win) {
 
     try {
         if (platform === 'win32') {
-            downloadUrl = 'https://github.com/git-for-windows/git/releases/download/v2.47.0.windows.2/Git-2.47.0.2-64-bit.exe';
+            win.webContents.send('installation-progress', { percent: 0, status: 'Fetching latest Git release info…' });
+            downloadUrl = await fetchLatestGitWindowsUrl();
             installerPath = path.join(tempDir, 'git-installer.exe');
 
-            // Download with progress tracking
-            win.webContents.send('installation-progress', {
-                percent: 0,
-                status: 'Starting Git download...'
-            });
+            win.webContents.send('installation-progress', { percent: 5, status: 'Starting Git download…' });
 
             const writer = fs.createWriteStream(installerPath);
             const response = await axios({
@@ -36,7 +57,7 @@ async function downloadAndInstallGit(win) {
                 downloaded += chunk.length;
                 const progress = Math.floor((downloaded / totalLength) * 100);
                 win.webContents.send('installation-progress', {
-                    percent: Math.floor(progress * 0.4), // 40% of total progress
+                    percent: Math.floor(progress * 0.4),
                     status: `Downloading Git: ${progress}%`
                 });
             });
@@ -47,7 +68,6 @@ async function downloadAndInstallGit(win) {
                 writer.on('error', reject);
             });
 
-            // Installation
             win.webContents.send('installation-progress', {
                 percent: 50,
                 status: 'Installing Git...'
@@ -131,7 +151,6 @@ async function downloadAndInstallGit(win) {
             }
         }
 
-        // Verify installation
         win.webContents.send('installation-progress', {
             percent: 90,
             status: 'Verifying installation...'
@@ -148,7 +167,6 @@ async function downloadAndInstallGit(win) {
         win.webContents.send('installation-error', error.message);
         throw error;
     } finally {
-        // Cleanup
         if (installerPath && fs.existsSync(installerPath)) {
             fs.unlinkSync(installerPath);
         }

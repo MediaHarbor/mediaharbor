@@ -5,12 +5,7 @@ const path = require('path');
 const { exec, spawn } = require('child_process');
 const os = require('os');
 const { URL } = require('url');
-const sudo = require('sudo-prompt'); // Added sudo-prompt
 
-/**
- * Fetch available Python versions from the official Python API.
- * This allows dynamic retrieval of versions instead of hardcoding.
- */
 async function fetchPythonVersions() {
     return new Promise((resolve, reject) => {
         const url = 'https://www.python.org/api/v2/downloads/release/?is_published=true&format=json';
@@ -21,7 +16,7 @@ async function fetchPythonVersions() {
                 try {
                     const releases = JSON.parse(data);
                     const versionMap = {};
-                    
+
                     for (const release of releases) {
                         const versionMatch = release.name.match(/Python (\d+)\.(\d+)\.\d+$/);
                         if (versionMatch) {
@@ -29,13 +24,11 @@ async function fetchPythonVersions() {
                             const minor = parseInt(versionMatch[2]);
                             const version = release.name.replace('Python ', '');
 
-                            // Only include Python 3.10 and above
                             if (major === 3 && minor >= 10) {
-                                // Check if installer exists before adding to map
                                 const { downloadUrl } = getDownloadDetails(version);
                                 if (await checkUrlExists(downloadUrl)) {
                                     const majorMinor = `${major}.${minor}`;
-                                    if (!versionMap[majorMinor] || 
+                                    if (!versionMap[majorMinor] ||
                                         (release.release_date > versionMap[majorMinor].release_date)) {
                                         versionMap[majorMinor] = release;
                                     }
@@ -51,20 +44,15 @@ async function fetchPythonVersions() {
 
                     resolve(finalVersionMap);
                 } catch (error) {
-                    console.error('Parse error:', error);
                     reject(new Error(`Failed to parse Python versions: ${error.message}`));
                 }
             });
         }).on('error', (err) => {
-            console.error('Network error:', err);
             reject(new Error(`Failed to fetch Python versions: ${err.message}`));
         });
     });
 }
 
-/**
- * Display a dialog for the user to select a Python version to install.
- */
 async function selectPythonVersion(win, pythonVersions) {
     const versionKeys = Object.keys(pythonVersions).sort((a, b) => {
         const [aMajor, aMinor] = a.split('.').map(Number);
@@ -87,13 +75,9 @@ async function selectPythonVersion(win, pythonVersions) {
 
     const selectedVersionKey = versionKeys[response];
     const fullVersion = pythonVersions[selectedVersionKey];
-    console.log(`Selected Python version: ${fullVersion}`);
     return { selectedVersionKey, fullVersion };
 }
 
-/**
- * Determine the download URL and installer path based on the OS and Python version.
- */
 function getDownloadDetails(fullVersion) {
     const platform = os.platform();
     const arch = os.arch();
@@ -128,9 +112,6 @@ function compareVersions(v1, v2) {
     return 0;
 }
 
-/**
- * Download a file with progress updates.
- */
 function downloadFile(url, dest, win) {
     return new Promise((resolve, reject) => {
         const file = fs.createWriteStream(dest);
@@ -160,7 +141,7 @@ function downloadFile(url, dest, win) {
                 downloaded += chunk.length;
                 const progress = Math.floor((downloaded / totalSize) * 100);
                 win.webContents.send('installation-progress', {
-                    percent: Math.floor(progress * 0.4), // 40% allocated to download
+                    percent: Math.floor(progress * 0.4),
                     status: `Downloading Python: ${progress}%`
                 });
             });
@@ -180,9 +161,6 @@ function downloadFile(url, dest, win) {
     });
 }
 
-/**
- * Execute the installer based on the platform.
- */
 function runInstaller(installerPath, platform, win) {
     return new Promise((resolve, reject) => {
         win.webContents.send('installation-progress', {
@@ -195,13 +173,8 @@ function runInstaller(installerPath, platform, win) {
             const options = { shell: true };
             const installerProcess = spawn(installerPath, args, options);
 
-            installerProcess.stdout.on('data', (data) => {
-                console.log(`Installer stdout: ${data}`);
-            });
-
-            installerProcess.stderr.on('data', (data) => {
-                console.error(`Installer stderr: ${data}`);
-            });
+            installerProcess.stdout.on('data', () => {});
+            installerProcess.stderr.on('data', () => {});
 
             installerProcess.on('close', (code) => {
                 if (code === 0) {
@@ -216,17 +189,13 @@ function runInstaller(installerPath, platform, win) {
             });
         } else if (platform === 'darwin') {
             const command = `installer -pkg "${installerPath}" -target /`;
-            const options = {
-                name: 'Python Installer',
-            };
-            sudo.exec(command, options, (error, stdout, stderr) => {
+            const script = `do shell script "${command.replace(/"/g, '\\"')}" with administrator privileges`;
+            exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
                 if (error) {
-                    console.error('Installer error:', error);
                     reject(new Error(`Installer failed: ${stderr || error.message}`));
                     return;
                 }
 
-                // Since sudo-prompt doesn't provide real-time progress, we send a fixed progress update
                 win.webContents.send('installation-progress', {
                     percent: 80,
                     status: 'Installation completed, configuring system...'
@@ -239,10 +208,6 @@ function runInstaller(installerPath, platform, win) {
     });
 }
 
-/**
- * Update the system PATH environment variable to include Python.
- * Handles all platforms and ensures both system and user script paths are included.
- */
 function updatePath(versionKey, fullVersion, platform, win) {
     return new Promise((resolve, reject) => {
         try {
@@ -258,12 +223,8 @@ function updatePath(versionKey, fullVersion, platform, win) {
                 const pythonPath = `/Library/Frameworks/Python.framework/Versions/${versionKey}/bin`;
                 const userBinPath = path.join(os.homedir(), 'Library', 'Python', versionKey, 'bin');
 
-                console.log(`Adding to PATH: ${pythonPath}:${userBinPath}`);
-
-                // Create directories if they don't exist
                 fs.mkdirSync(userBinPath, { recursive: true });
 
-                // Determine shell profile file
                 const shell = process.env.SHELL || '/bin/bash';
                 let profilePath;
 
@@ -271,52 +232,39 @@ function updatePath(versionKey, fullVersion, platform, win) {
                     profilePath = path.join(os.homedir(), '.zshrc');
                 } else {
                     profilePath = path.join(os.homedir(), '.bash_profile');
-                    // If .bash_profile doesn't exist, try .profile
                     if (!fs.existsSync(profilePath)) {
                         profilePath = path.join(os.homedir(), '.profile');
                     }
                 }
 
-                // Check if path already exists in profile to avoid duplication
                 let profileContent = '';
                 try {
                     if (fs.existsSync(profilePath)) {
                         profileContent = fs.readFileSync(profilePath, 'utf8');
                     }
-                } catch (readErr) {
-                    console.warn(`Could not read profile file ${profilePath}:`, readErr);
-                }
+                } catch (readErr) {}
 
                 const exportCommand = `\n# Added by Python installer\nexport PATH="${pythonPath}:${userBinPath}:$PATH"\n`;
 
                 if (!profileContent.includes(pythonPath) && !profileContent.includes(userBinPath)) {
                     fs.appendFile(profilePath, exportCommand, (err) => {
                         if (err) {
-                            console.error(`Error updating ${profilePath}:`, err);
                             reject(new Error(`Failed to update shell profile: ${err.message}`));
                             return;
                         }
 
-                        // Also update current process PATH
                         process.env.PATH = `${pythonPath}:${userBinPath}:${process.env.PATH}`;
-                        console.log(`Updated ${profilePath} with Python paths`);
                         resolve();
                     });
                 } else {
-                    console.log('Python paths already exist in shell profile');
                     resolve();
                 }
             } else if (platform === 'linux') {
-                // For Linux, we'll update .bashrc
                 const pythonPath = `/usr/local/bin`;
                 const userBinPath = path.join(os.homedir(), '.local', 'bin');
 
-                console.log(`Adding to PATH: ${pythonPath}:${userBinPath}`);
-
-                // Create user bin directory if it doesn't exist
                 fs.mkdirSync(userBinPath, { recursive: true });
 
-                // Choose profile file based on shell
                 const shell = process.env.SHELL || '/bin/bash';
                 let profilePath;
 
@@ -326,55 +274,43 @@ function updatePath(versionKey, fullVersion, platform, win) {
                     profilePath = path.join(os.homedir(), '.bashrc');
                 }
 
-                // Check if path already exists in profile
                 let profileContent = '';
                 try {
                     if (fs.existsSync(profilePath)) {
                         profileContent = fs.readFileSync(profilePath, 'utf8');
                     }
-                } catch (readErr) {
-                    console.warn(`Could not read profile file ${profilePath}:`, readErr);
-                }
+                } catch (readErr) {}
 
                 const exportCommand = `\n# Added by Python installer\nexport PATH="${userBinPath}:${pythonPath}:$PATH"\n`;
 
                 if (!profileContent.includes(userBinPath)) {
                     fs.appendFile(profilePath, exportCommand, (err) => {
                         if (err) {
-                            console.error(`Error updating ${profilePath}:`, err);
                             reject(new Error(`Failed to update shell profile: ${err.message}`));
                             return;
                         }
 
-                        // Update current process PATH
                         process.env.PATH = `${userBinPath}:${pythonPath}:${process.env.PATH}`;
-                        console.log(`Updated ${profilePath} with Python paths`);
                         resolve();
                     });
                 } else {
-                    console.log('Python paths already exist in shell profile');
                     resolve();
                 }
             } else {
                 reject(new Error(`Unsupported platform: ${platform}`));
             }
 
-            // Notify completion once PATH is updated
             win.webContents.send('installation-progress', {
                 percent: 100,
                 status: 'Python installation completed successfully!'
             });
 
         } catch (error) {
-            console.error('Exception in updatePath:', error);
             reject(new Error(`Failed to update PATH: ${error.message}`));
         }
     });
 }
 
-/**
- * Relaunch the Electron application to apply PATH changes.
- */
 function relaunchAppIfPossible(app) {
     if (app && typeof app.relaunch === 'function') {
         app.relaunch();
@@ -382,9 +318,6 @@ function relaunchAppIfPossible(app) {
     }
 }
 
-/**
- * New helper function to check if a URL exists.
- */
 async function checkUrlExists(url) {
     return new Promise((resolve) => {
         const options = new URL(url);
@@ -397,21 +330,16 @@ async function checkUrlExists(url) {
     });
 }
 
-/**
- * Main function to handle the download and installation of Python with fallback to previous minor version.
- */
 async function downloadAndInstallPython(win, app) {
     try {
         const pythonVersions = await fetchPythonVersions();
 
-        // Get sorted version keys (sorted descending)
         const versionKeys = Object.keys(pythonVersions).sort((a, b) => {
             const [aMajor, aMinor] = a.split('.').map(Number);
             const [bMajor, bMinor] = b.split('.').map(Number);
             return bMajor !== aMajor ? bMajor - aMajor : bMinor - aMinor;
         });
 
-        // Show dialog and get selected version key
         const { selectedVersionKey, fullVersion } = await selectPythonVersion(win, pythonVersions);
         let currentIndex = versionKeys.indexOf(selectedVersionKey);
         if (currentIndex === -1) {
@@ -422,7 +350,6 @@ async function downloadAndInstallPython(win, app) {
         let currentFullVersion = pythonVersions[currentVersionKey];
         let { downloadUrl, installerPath, platform } = getDownloadDetails(currentFullVersion);
 
-        // Loop to fallback if installer URL is not available
         while (!(await checkUrlExists(downloadUrl))) {
             currentIndex++;
             if (currentIndex >= versionKeys.length) {
@@ -430,7 +357,6 @@ async function downloadAndInstallPython(win, app) {
             }
             currentVersionKey = versionKeys[currentIndex];
             currentFullVersion = pythonVersions[currentVersionKey];
-            console.log(`Installer for Python ${downloadUrl} not found. Falling back to Python ${currentFullVersion}`);
             ({ downloadUrl, installerPath, platform } = getDownloadDetails(currentFullVersion));
         }
 
@@ -439,15 +365,9 @@ async function downloadAndInstallPython(win, app) {
             status: 'Starting Python installation...'
         });
 
-        console.log(`Downloading from: ${downloadUrl}`);
         await downloadFile(downloadUrl, installerPath, win);
-        console.log(`Downloaded installer to ${installerPath}`);
-
         await runInstaller(installerPath, platform, win);
-        console.log('Python installation initiated.');
-
         await updatePath(currentVersionKey, currentFullVersion, platform, win);
-        console.log('Updated system PATH.');
 
         await dialog.showMessageBox(win, {
             type: 'info',
@@ -469,7 +389,6 @@ async function downloadAndInstallPython(win, app) {
         }, 1000);
 
     } catch (error) {
-        console.error('Error in downloadAndInstallPython:', error);
         dialog.showErrorBox('Installation Error', `An error occurred: ${error.message}`);
     }
 }
