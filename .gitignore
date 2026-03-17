@@ -1,11 +1,48 @@
+# IDE
 .idea
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# Dependencies
 node_modules
-# Default ignored files
+/.pnp
+.pnp.js
+
+# Production builds
+/dist
+/dist-react
+/build
+/out
+
+# Testing
+/coverage
+
+# Environment variables
+.env
+.env*.local
+
+# Credentials (security)
+src/funcs/apis/apis.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# OS
+.DS_Store
+Thumbs.db
+*.pem
+
+# Editor files
 /shelf/
 /workspace.xml
-# Editor-based HTTP Client requests
 /httpRequests/
-
-src/funcs/apis/apis.json
-/dist/*
-/build/*
