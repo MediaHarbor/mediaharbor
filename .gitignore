@@ -24,8 +24,9 @@ node_modules
 .env
 .env*.local
 
-# Credentials (security)
-src/funcs/apis/apis.json
+# Rust build artifacts
+src/core/target/
+src/app/target/
 
 # Logs
 npm-debug.log*
@@ -46,3 +47,17 @@ Thumbs.db
 /shelf/
 /workspace.xml
 /httpRequests/
+
+# AUR packaging build artifacts (makepkg output)
+packaging/aur/pkg/
+packaging/aur/src/
+packaging/aur/*.tar.gz
+
+# Snap pre-built binaries
+packaging/snap/*.deb
+
+# Local data / secrets
+src/funcs/
+
+# Misc local notes
+MediaHarbor Bug Fixes.md
