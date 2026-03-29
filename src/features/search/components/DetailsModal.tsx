@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
+  DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Download, Play, Loader2, Music } from 'lucide-react';
@@ -24,7 +26,7 @@ interface DetailsModalProps {
   id: string;
   platform: Platform;
   title: string;
-  onDownload: (url: string) => void;
+  onDownload: (info: TrackInfo | string) => void;
   onPlay: (track: TrackInfo) => void;
   onPlayAll?: (tracks: TrackInfo[]) => void;
 }
@@ -32,7 +34,7 @@ interface DetailsModalProps {
 function getTrackInfo(track: any, platform: Platform, fallbackThumbnail?: string): TrackInfo | null {
   let url: string | undefined;
   let title = track.title || track.name || track.trackName || 'Unknown Track';
-  let artist = track.artist || '';
+  let artist = (typeof track.artist === 'string' ? track.artist : track.artist?.name) || '';
   let thumbnail: string | undefined = fallbackThumbnail;
 
   switch (platform) {
@@ -67,7 +69,7 @@ function getTrackInfo(track: any, platform: Platform, fallbackThumbnail?: string
     case 'youtubemusic':
       url = track.playUrl || track.url || track.webpage_url || (track.id ? `https://youtube.com/watch?v=${track.id}` : undefined);
       artist = artist || track.channel || track.uploader || 'Unknown';
-      thumbnail = track.thumbnail || thumbnail;
+      thumbnail = track.thumbnail_url || track.thumbnail || thumbnail;
       break;
 
     case 'applemusic':
@@ -141,7 +143,8 @@ export function DetailsModal({
     details?.album?.title || details?.playlist?.title || title;
 
   const headerArtist: string =
-    details?.album?.artist ||
+    (typeof details?.album?.artist === 'string' ? details.album.artist : details?.album?.artist?.name) ||
+    (typeof details?.artist === 'string' ? details.artist : details?.artist?.name) ||
     details?.playlist?.creator ||
     details?.playlist?.artist ||
     '';
@@ -178,7 +181,7 @@ export function DetailsModal({
       addNotification({ type: 'error', title: 'Download Failed', message: 'No URL found for this track' });
       return;
     }
-    onDownload(info.url);
+    onDownload(info);
   };
 
   const handlePlayAll = () => {
@@ -209,6 +212,10 @@ export function DetailsModal({
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl p-0 overflow-hidden flex flex-col max-h-[85vh] gap-0">
+        <DialogTitle className="sr-only">{headerTitle || title}</DialogTitle>
+        <DialogDescription className="sr-only">
+          {type === 'album' ? 'Album' : type === 'podcast' ? 'Podcast' : 'Playlist'} details
+        </DialogDescription>
         <div className="flex items-start gap-4 p-6 pb-4 border-b shrink-0">
           <div className="w-24 h-24 rounded-md overflow-hidden shrink-0 bg-muted flex items-center justify-center">
             {coverUrl ? (
@@ -271,9 +278,9 @@ export function DetailsModal({
             <p className="text-muted-foreground text-center py-8">No tracks found</p>
           ) : (
             tracks.map((track: any, index: number) => {
-              const duration = track.duration || (track.duration_ms && Math.floor(track.duration_ms / 1000));
+              const duration = track.duration || track.duration_secs || (track.duration_ms && Math.floor(track.duration_ms / 1000));
               const trackArtist =
-                track.artist ||
+                track.artist?.name || track.artist ||
                 track.artists?.[0]?.name ||
                 track.performer?.name ||
                 track.artistName ||

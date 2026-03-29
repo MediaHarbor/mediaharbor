@@ -699,8 +699,9 @@ function TidalTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
     setAuthState('loading');
     setErrorMsg('');
     try {
-      const { codeVerifier: cv } = await window.electron.tidalAuth.startAuth();
+      const { codeVerifier: cv, authUrl } = await window.electron.tidalAuth.startAuth();
       setCodeVerifier(cv);
+      if (authUrl) await window.electron.updates.openRelease(authUrl);
       setAuthState('waiting');
     } catch (e: any) {
       setErrorMsg(e.message || 'Failed to open Tidal login');
@@ -719,7 +720,7 @@ function TidalTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
       setAuthState('success');
       setRedirectUrl('');
     } catch (e: any) {
-      setErrorMsg(e.message || 'Failed to exchange code');
+      setErrorMsg(typeof e === 'string' ? e : (e?.message || 'Failed to exchange code'));
       setAuthState('error');
     }
   }
@@ -810,15 +811,18 @@ function SpotifyTab({ s, set, browseFile }: { s: Partial<Settings>; set: Setting
   const [loginMessage, setLoginMessage] = useState('');
 
   useEffect(() => {
+    if (!s.spotify_cookies_path) return;
     window.electron?.spotifyAccount?.getStatus().then((status: any) => {
       if (status?.loggedIn && status?.profile) {
         setLoginStatus('success');
-        setLoginMessage(`Connected as ${status.profile.name || status.profile.id}`);
+        setLoginMessage(`Connected as ${status.profile.name || status.profile.id || 'Spotify user'}`);
+      } else if (loginStatus !== 'loading') {
+        setLoginStatus('idle');
       }
     }).catch((err: any) => {
       logWarning('settings', 'Spotify status check failed', err instanceof Error ? (err.stack || err.message) : String(err));
     });
-  }, []);
+  }, [s.spotify_cookies_path]);
 
   const handleLogin = async () => {
     setLoginStatus('loading');

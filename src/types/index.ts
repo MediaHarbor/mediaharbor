@@ -23,10 +23,8 @@ export interface Track {
   hires?: boolean;
   bitDepth?: number;
   sampleRate?: number;
-  /** Tidal quality tier — LOSSLESS | HIRES_LOSSLESS | MQA | DOLBY_ATMOS | SONY_360RA */
   mediaTag?: string;
   genre?: string;
-  /** YouTube view count */
   views?: number;
 }
 

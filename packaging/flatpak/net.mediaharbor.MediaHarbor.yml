@@ -1,0 +1,72 @@
+app-id: net.mediaharbor.MediaHarbor
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+command: mediaharbor
+
+# GNOME 47 ships WebKit2GTK 2.46 which satisfies Tauri's libwebkit2gtk-4.1 requirement.
+# The pre-built binary from the DEB is used directly; no Rust compilation happens here.
+
+finish-args:
+  # Display
+  - --share=ipc
+  - --socket=wayland
+  - --socket=x11
+  - --device=dri
+  # Audio
+  - --socket=pulseaudio
+  # Network (streaming, API calls, yt-dlp downloads)
+  - --share=network
+  # Filesystem — media library lives in home
+  - --filesystem=home
+  # Notifications
+  - --talk-name=org.freedesktop.Notifications
+  # MPRIS (media keys / taskbar integration)
+  - --own-name=org.mpris.MediaPlayer2.mediaharbor
+  - --talk-name=org.mpris.MediaPlayer2
+
+modules:
+  - name: mediaharbor
+    buildsystem: simple
+
+    sources:
+      # mediaharbor.deb is staged into this directory by the CI job before
+      # flatpak-builder runs.  For a local build, copy the DEB here first:
+      #   cp /path/to/MediaHarbor_*.deb packaging/flatpak/mediaharbor.deb
+      - type: file
+        path: mediaharbor.deb
+
+    build-commands:
+      # Extract the DEB archive
+      - ar x mediaharbor.deb
+      - tar xf data.tar.*
+
+      # Install binary
+      - install -Dm755 usr/bin/mediaharbor /app/bin/mediaharbor
+
+      # Install desktop entry (rename to match app-id for Flatpak conventions)
+      - |
+        if [ -f usr/share/applications/mediaharbor.desktop ]; then
+          install -Dm644 usr/share/applications/mediaharbor.desktop \
+            /app/share/applications/net.mediaharbor.MediaHarbor.desktop
+          # Fix the Icon= field to use the Flatpak app-id
+          sed -i 's|^Icon=.*|Icon=net.mediaharbor.MediaHarbor|g' \
+            /app/share/applications/net.mediaharbor.MediaHarbor.desktop
+        fi
+
+      # Install icons — Tauri places them in hicolor/{size}/apps/
+      - |
+        find usr/share/icons -type f | while read -r icon; do
+          rel="${icon#usr/}"
+          dir="/app/$(dirname "$rel")"
+          mkdir -p "$dir"
+          # Rename the icon file to the app-id so the desktop entry finds it
+          cp "$icon" "${dir}/net.mediaharbor.MediaHarbor.$(echo "$icon" | sed 's/.*\.//')"
+        done
+
+      # Fallback: copy a top-level icon in case the hicolor tree is absent
+      - |
+        if [ -f usr/share/pixmaps/mediaharbor.png ]; then
+          install -Dm644 usr/share/pixmaps/mediaharbor.png \
+            /app/share/pixmaps/net.mediaharbor.MediaHarbor.png
+        fi

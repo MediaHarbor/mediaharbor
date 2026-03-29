@@ -1,0 +1,93 @@
+[package]
+name = "mediaharbor-core"
+version = "0.1.0"
+edition = "2021"
+description = "MediaHarbor backend library – async Rust port of the Electron backend"
+
+[lib]
+name = "mediaharbor_core"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+
+reqwest = { version = "0.12", features = ["json", "stream", "cookies", "gzip", "deflate", "rustls-tls"], default-features = false }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+ctr = "0.9"
+ecb = "0.1"
+blowfish = "0.9"
+md-5 = "0.10"
+sha1 = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+pbkdf2 = "0.12"
+base64 = "0.22"
+
+notify = { version = "6", features = ["serde"] }
+
+lofty = "0.22"
+
+image = { version = "0.25", features = ["jpeg", "png", "webp"] }
+
+scraper = "0.20"
+
+quick-xml = { version = "0.36", features = ["serialize"] }
+
+axum = { version = "0.7", features = ["tokio"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors"] }
+
+rayon = "1"
+
+dirs = "5"
+
+zip = "2"
+tar = "0.4"
+flate2 = "1"
+xz2 = "0.1"
+
+semver = "1"
+
+tempfile = "3"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+regex = "1"
+
+url = "2"
+
+dashmap = "6"
+
+bytes = "1"
+
+futures = "0.3"
+futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["io", "codec"] }
+async-trait = "0.1"
+
+thiserror = "1"
+anyhow = "1"
+
+chrono = { version = "0.4", features = ["serde"] }
+
+uuid = { version = "1", features = ["v4"] }
+
+hex = "0.4"
+
+once_cell = "1"
+
+opener = "0.7"
+
+[build-dependencies]
+cc = { version = "1", features = ["parallel"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+wiremock = "0.6"

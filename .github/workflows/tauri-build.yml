@@ -1,0 +1,315 @@
+name: Tauri Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── 1. Build the React frontend once, shared across all platform jobs ─────
+  frontend:
+    name: Build React Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build:react
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-react
+          path: dist-react/
+          retention-days: 1
+
+  # ── 2. Tauri binary for every platform ───────────────────────────────────
+  tauri:
+    name: Tauri – ${{ matrix.name }}
+    needs: frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Linux ──────────────────────────────────────────────────────────
+          # Produces: .deb  .rpm  .AppImage
+          - name: Linux x64
+            os: ubuntu-22.04
+            rust_target: ''
+            artifact: linux-x64
+
+          # ── Windows ────────────────────────────────────────────────────────
+          # Produces: .msi  .exe (NSIS)  + .msix (Microsoft Store, needs secret)
+          - name: Windows x64
+            os: windows-latest
+            rust_target: ''
+            artifact: windows-x64
+
+          # ── macOS ──────────────────────────────────────────────────────────
+          # Produces: .dmg for each arch
+          - name: macOS Intel
+            os: macos-13
+            rust_target: x86_64-apple-darwin
+            artifact: macos-x64
+
+          - name: macOS Apple Silicon
+            os: macos-latest
+            rust_target: aarch64-apple-darwin
+            artifact: macos-arm64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Node (needed for npm ci) ──────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # ── Pre-built frontend (skip rebuilding on every platform) ────────────
+      - name: Download pre-built frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-react
+          path: dist-react/
+
+      # ── Rust toolchain ────────────────────────────────────────────────────
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      # ── cargo-tauri CLI (binstall = downloads pre-compiled, ~30 s) ────────
+      - uses: cargo-bins/cargo-binstall@main
+
+      - name: Install tauri-cli
+        run: cargo binstall --no-confirm tauri-cli@^2
+
+      # ── Linux system deps ─────────────────────────────────────────────────
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev
+
+      # ── npm ci (tauri build.rs / plugin macros need node at times) ────────
+      - run: npm ci
+
+      # ── Tauri build ───────────────────────────────────────────────────────
+      - name: Build (Linux / Windows)
+        if: matrix.rust_target == ''
+        working-directory: src/app
+        run: cargo tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # linuxdeploy ships as an AppImage; Ubuntu runners lack FUSE2, so tell it
+          # to self-extract instead of mounting via FUSE.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+
+      - name: Build (macOS – cross target)
+        if: matrix.rust_target != ''
+        working-directory: src/app
+        run: cargo tauri build --target ${{ matrix.rust_target }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Apple signing/notarisation (all optional — skip to get unsigned DMGs)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      # ── Windows: create MSIX for Microsoft Store ──────────────────────────
+      # Requires repo secret: MS_STORE_PUBLISHER  (e.g. CN=AtomDev,O=AtomDev,C=US)
+      # Tauri doesn't produce MSIX natively; we assemble it with makeappx.exe
+      # (part of the Windows SDK that ships on every GitHub-hosted Windows runner).
+      - name: Create MSIX (Microsoft Store)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true   # skip gracefully if secret not set
+        env:
+          MS_STORE_PUBLISHER: ${{ secrets.MS_STORE_PUBLISHER }}
+        run: |
+          if (-not $env:MS_STORE_PUBLISHER) {
+            Write-Host "MS_STORE_PUBLISHER secret not set — skipping MSIX"; exit 0
+          }
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+
+          # Build the MSIX layout directory
+          New-Item -ItemType Directory -Path msix\Assets -Force | Out-Null
+          Copy-Item src\app\target\release\mediaharbor.exe  msix\
+
+          # Icons — resize properly with ImageMagick if available, else copy as-is
+          $magick = Get-Command magick -ErrorAction SilentlyContinue
+          function Copy-Icon($src, $dst, $size) {
+            if ($magick) { & magick $src -resize "${size}x${size}" $dst }
+            else          { Copy-Item $src $dst }
+          }
+          Copy-Icon src\app\icons\icon.png       msix\Assets\StoreLogo.png          50
+          Copy-Icon src\app\icons\128x128.png    msix\Assets\Square150x150Logo.png  150
+          Copy-Icon src\app\icons\32x32.png      msix\Assets\Square44x44Logo.png    44
+          Copy-Icon src\app\icons\128x128@2x.png msix\Assets\Wide310x150Logo.png    310
+
+          # Stamp the manifest template
+          (Get-Content packaging\windows\AppxManifest.xml -Raw) `
+            -replace '__VERSION__',   "$version.0" `
+            -replace '__PUBLISHER__', $env:MS_STORE_PUBLISHER |
+            Set-Content msix\AppxManifest.xml
+
+          # Find makeappx.exe from the Windows SDK
+          $makeappx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" `
+                        -Recurse -Filter makeappx.exe |
+                      Where-Object { $_.FullName -match 'x64' } |
+                      Sort-Object FullName -Descending |
+                      Select-Object -First 1 -ExpandProperty FullName
+
+          & $makeappx pack /d msix /p "MediaHarbor_${version}_x64.msix" /nv
+          Write-Host "MSIX created: MediaHarbor_${version}_x64.msix"
+
+      # ── Collect everything into one directory ─────────────────────────────
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p out
+          # Linux
+          find src/app/target -path '*/bundle/deb/*.deb'            -exec cp {} out/ \; 2>/dev/null || true
+          find src/app/target -path '*/bundle/rpm/*.rpm'            -exec cp {} out/ \; 2>/dev/null || true
+          find src/app/target -path '*/bundle/appimage/*.AppImage'  -exec cp {} out/ \; 2>/dev/null || true
+          # Windows
+          find src/app/target -path '*/bundle/msi/*.msi'            -exec cp {} out/ \; 2>/dev/null || true
+          find src/app/target -path '*/bundle/nsis/*.exe'           -exec cp {} out/ \; 2>/dev/null || true
+          cp *.msix out/ 2>/dev/null || true
+          # macOS
+          find src/app/target -path '*/bundle/dmg/*.dmg'            -exec cp {} out/ \; 2>/dev/null || true
+          echo "=== artifacts ==="
+          ls -lh out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tauri-${{ matrix.artifact }}
+          path: out/
+          retention-days: 7
+
+  # ── 3. Flatpak ────────────────────────────────────────────────────────────
+  # Extracts the binary from the Linux DEB and wraps it in a Flatpak bundle.
+  # Uses the GNOME 47 runtime which ships WebKit2GTK 4.1 (required by Tauri).
+  flatpak:
+    name: Flatpak
+    needs: tauri
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flatpak-builder and GNOME 47 runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub \
+            https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --noninteractive flathub \
+            org.gnome.Platform//47 \
+            org.gnome.Sdk//47
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tauri-linux-x64
+          path: packaging/flatpak/input/
+
+      - name: Stage DEB for Flatpak manifest
+        run: |
+          cp packaging/flatpak/input/MediaHarbor_*.deb packaging/flatpak/mediaharbor.deb
+
+      - name: Build Flatpak bundle
+        run: |
+          flatpak-builder \
+            --repo=flatpak-repo \
+            --force-clean \
+            flatpak-build-dir \
+            packaging/flatpak/net.mediaharbor.MediaHarbor.yml
+
+          flatpak build-bundle \
+            flatpak-repo \
+            MediaHarbor.flatpak \
+            net.mediaharbor.MediaHarbor
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: MediaHarbor.flatpak
+          retention-days: 7
+
+  # ── 4. GitHub Release ─────────────────────────────────────────────────────
+  release:
+    name: GitHub Release
+    needs: [tauri, flatpak]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Download all Tauri artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tauri-*
+          path: assets/
+          merge-multiple: true
+
+      - name: Download Flatpak
+        uses: actions/download-artifact@v4
+        with:
+          name: flatpak
+          path: assets/
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: MediaHarbor v${{ steps.ver.outputs.v }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          body: |
+            ## Installation
+
+            | Platform | File | How to install |
+            |---|---|---|
+            | **Linux (Debian/Ubuntu)** | `*.deb` | `sudo dpkg -i MediaHarbor_*.deb` |
+            | **Linux (Fedora/RHEL)** | `*.rpm` | `sudo rpm -i MediaHarbor_*.rpm` |
+            | **Linux (universal)** | `*.AppImage` | `chmod +x *.AppImage && ./MediaHarbor_*.AppImage` |
+            | **Linux (Flatpak)** | `MediaHarbor.flatpak` | `flatpak install MediaHarbor.flatpak` |
+            | **Arch Linux / AUR** | — | `paru -S mediaharbor-bin` |
+            | **Windows (installer)** | `*-setup.exe` | Run the setup wizard |
+            | **Windows (MSI)** | `*.msi` | `msiexec /i MediaHarbor_*.msi` |
+            | **Windows (Microsoft Store)** | `*.msix` | Double-click or `Add-AppxPackage` |
+            | **macOS Intel** | `*_x64.dmg` | Open DMG and drag to Applications |
+            | **macOS Apple Silicon** | `*_aarch64.dmg` | Open DMG and drag to Applications |
+          files: assets/**

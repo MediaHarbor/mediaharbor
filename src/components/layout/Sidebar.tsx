@@ -1,42 +1,68 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Download, Library, Settings, HelpCircle, RefreshCw, ScrollText, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Search, Download, Library, Settings, HelpCircle, SwatchBook, ScrollText, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { SiDiscord } from 'react-icons/si';
 import { motion } from 'framer-motion';
 import { cn } from '@/utils/cn';
 import logoUrl from '@/assets/MediaHarbor_Logo.svg';
 
-const TOP_NAV = [
+type NavItemConfig = {
+  path?: string;
+  href?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+};
+
+const TOP_NAV: NavItemConfig[] = [
   { path: '/search',    icon: Search,   label: 'Search' },
   { path: '/downloads', icon: Download, label: 'Downloads' },
   { path: '/library',   icon: Library,  label: 'Library' },
 ];
 
-const BOTTOM_NAV = [
-  { path: '/updates',  icon: RefreshCw,  label: 'Updates' },
+const BOTTOM_NAV: NavItemConfig[] = [
+  { href: 'http://discord.gg/Kc97D86TeZ', icon: SiDiscord, label: 'Discord' },
+  { path: '/updates',  icon: SwatchBook,  label: 'Dependencies' },
   { path: '/logs',     icon: ScrollText, label: 'Logs' },
   { path: '/help',     icon: HelpCircle, label: 'Help' },
   { path: '/settings', icon: Settings,   label: 'Settings' },
 ];
 
-function NavItem({ path, icon: Icon, label, isActive, collapsed }: {
-  path: string;
+function NavItem({ path, href, icon: Icon, label, isActive, collapsed }: {
+  path?: string;
+  href?: string;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   isActive: boolean;
   collapsed: boolean;
 }) {
+  const classes = cn(
+    'relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150',
+    collapsed && 'justify-center px-0',
+    isActive
+      ? 'text-accent-foreground font-medium'
+      : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+  );
+
+  if (href) {
+    return (
+      <a
+        href={href}
+        title={collapsed ? label : undefined}
+        className={classes}
+        target="_blank"
+        rel="noreferrer"
+      >
+        <Icon className="relative z-10 h-4 w-4 shrink-0" />
+        {!collapsed && <span className="relative z-10">{label}</span>}
+      </a>
+    );
+  }
+
   return (
     <Link
-      key={path}
-      to={path}
+      to={path!}
       title={collapsed ? label : undefined}
-      className={cn(
-        'relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150',
-        collapsed && 'justify-center px-0',
-        isActive
-          ? 'text-accent-foreground font-medium'
-          : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
-      )}
+      className={classes}
     >
       {isActive && (
         <motion.div
@@ -101,7 +127,7 @@ export function Sidebar() {
       {/* Bottom nav */}
       <nav className={cn('border-t border-border/40 py-3 space-y-0.5', collapsed ? 'px-1.5' : 'px-2')}>
         {BOTTOM_NAV.map(item => (
-          <NavItem key={item.path} {...item} isActive={isActive(item.path)} collapsed={collapsed} />
+          <NavItem key={item.path ?? item.href} {...item} isActive={item.path ? isActive(item.path) : false} collapsed={collapsed} />
         ))}
       </nav>
     </aside>

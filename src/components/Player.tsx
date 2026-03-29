@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { create } from 'zustand';
 import { PLATFORM_COLORS } from '@/utils/platforms';
 import { logError, logWarning, logInfo } from '@/utils/logger';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 export type MediaType = 'audio' | 'video';
 
@@ -139,7 +140,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 export function toAudioUrl(url: string): string {
   if (!url) return url;
   if (/^https?:\/\/|^blob:/.test(url)) return url;
-  if (url.startsWith('mhfile://')) return url;
 
   let filePath = url;
   if (url.startsWith('file:///')) {
@@ -147,10 +147,8 @@ export function toAudioUrl(url: string): string {
   } else if (url.startsWith('file://')) {
     filePath = decodeURIComponent(url.slice('file://'.length));
   }
-
-  const fwd = filePath.replace(/\\/g, '/');
-  const clean = fwd.startsWith('/') ? fwd.slice(1) : fwd;
-  return 'mhfile:///' + clean;
+  const absPath = (filePath.startsWith('/') ? filePath : '/' + filePath).replace(/\\/g, '/');
+  return convertFileSrc(absPath);
 }
 
 export function Player() {
@@ -184,8 +182,8 @@ export function Player() {
     window.electron?.player.playMedia({
       url: track.url,
       platform: track.platform === 'youtubemusic' ? 'youtubeMusic' : (track.platform ?? ''),
-    }).catch((err: Error) => {
-      const msg = err.message.replace(/^Error invoking remote method '[^']+': Error:\s*/i, '');
+    }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err ?? 'Unknown error');
       logError('playback', `Failed to play "${track.title}"`, msg);
     });
   }, [queueIndex, queue]);
@@ -204,7 +202,6 @@ export function Player() {
     });
     return () => cleanup?.();
   }, []);
-
 
   useEffect(() => {
     const el = mediaRef.current;
