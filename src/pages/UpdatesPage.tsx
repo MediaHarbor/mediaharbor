@@ -119,8 +119,9 @@ const REQUIRED_DEPS = [
 ];
 
 const OPTIONAL_DEPS = [
-  { id: 'apple',    label: 'Apple Music', desc: 'gamdl + Bento4 — Apple Music downloader', pipName: 'gamdl' },
-  { id: 'spotify',  label: 'Spotify',     desc: 'votify — Spotify downloader',              pipName: 'votify' },
+  { id: 'apple',      label: 'Apple Music', desc: 'gamdl + Bento4 — Apple Music downloader',                       pipName: 'gamdl',       parent: null },
+  { id: 'spotify',    label: 'Spotify',     desc: 'votify — Spotify downloader',                                    pipName: 'votify',      parent: null },
+  { id: 'pywidevine', label: 'pywidevine',  desc: 'Widevine MP4 fallback for Spotify — also requires a .wvd file', pipName: 'pywidevine',  parent: 'spotify' },
 ];
 
 const ALL_DEPS = [...REQUIRED_DEPS, ...OPTIONAL_DEPS];
@@ -222,8 +223,9 @@ function SystemDepsSection() {
     const statusTxt = installStatusText[dep.id] ?? '';
     const ver       = versions[dep.id];
 
+    const isChild = 'parent' in dep && dep.parent !== null;
     return (
-      <div key={dep.id} className="flex items-center gap-3 px-4 py-3">
+      <div key={dep.id} className={`flex items-center gap-3 py-3 ${isChild ? 'pl-10 pr-4 bg-muted/20' : 'px-4'}`}>
         <div className="shrink-0">
           {inst === 'installing' ? <Loader2      className="h-4 w-4 animate-spin text-muted-foreground" /> :
            inst === 'done'       ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> :

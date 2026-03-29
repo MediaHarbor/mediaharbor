@@ -55,6 +55,9 @@ export default function SearchPage() {
     open: boolean;
     url: string;
     title: string;
+    artist?: string;
+    album?: string;
+    thumbnail?: string | null;
   } | null>(null);
   const [isLoadingArtist, setIsLoadingArtist] = useState(false);
   const [viewingArtist, setViewingArtist] = useState<ViewingArtist | null>(null);
@@ -135,8 +138,13 @@ export default function SearchPage() {
         return;
       }
 
-      const url = (result as any).url || (result as any).external_urls?.spotify || (result as any).uri;
-      const title = (result as any).title || (result as any).name;
+      const r = result as any;
+      const url = r.url || r.external_urls?.spotify || r.uri;
+      const title = r.title || r.name || r.trackName;
+      const artist = (typeof r.artist === 'string' ? r.artist : r.artist?.name)
+        || r.artists?.[0]?.name || r.artistName || r.uploader || r.channel;
+      const album = r.album?.title || r.album?.name || r.collectionName;
+      const thumbnail = r.thumbnail || r.album?.images?.[0]?.url || r.artworkUrl100?.replace('100x100', '640x640') || null;
 
       if (!url) {
         addNotification({ type: 'error', title: 'Error', message: 'No URL found for download' });
@@ -144,7 +152,7 @@ export default function SearchPage() {
       }
 
       logInfo('download', 'Download requested', `"${title}" on ${selectedPlatform}`);
-      setQualityModal({ open: true, url, title });
+      setQualityModal({ open: true, url, title, artist, album, thumbnail });
     } catch (err) {
       addNotification({
         type: 'error',
@@ -163,6 +171,10 @@ export default function SearchPage() {
         platform: selectedPlatform,
         url: qualityModal.url,
         quality,
+        title: qualityModal.title,
+        artist: qualityModal.artist,
+        album: qualityModal.album,
+        thumbnail: qualityModal.thumbnail,
       });
 
       addNotification({ type: 'success', title: 'Download Started', message: `Downloading ${qualityModal.title}...` });
@@ -241,6 +253,7 @@ export default function SearchPage() {
     else if (searchType === 'playlist') setDetailsModal({ open: true, type: 'playlist', id, title });
     else if (searchType === 'show') setDetailsModal({ open: true, type: 'playlist', id: `show::${id}`, title });
     else if (searchType === 'podcast') setDetailsModal({ open: true, type: 'podcast', id: `podcast::${id}`, title });
+    else if (searchType === 'channel') openArtistDetails(result);
   };
 
   const openArtistDetails = async (result: SearchResult) => {
@@ -500,8 +513,12 @@ export default function SearchPage() {
             id={detailsModal.id}
             platform={selectedPlatform}
             title={detailsModal.title}
-            onDownload={(url: string) => {
-              setQualityModal({ open: true, url, title: detailsModal.title });
+            onDownload={(info) => {
+              const url = typeof info === 'string' ? info : info.url;
+              const title = typeof info === 'string' ? detailsModal.title : (info.title || detailsModal.title);
+              const artist = typeof info === 'string' ? undefined : info.artist;
+              const thumbnail = typeof info === 'string' ? undefined : info.thumbnail;
+              setQualityModal({ open: true, url, title, artist, thumbnail });
             }}
             onPlay={(track: TrackInfo) => {
               setTrack({ streamUrl: '', title: track.title, artist: track.artist, thumbnail: track.thumbnail, mediaType: 'audio', platform: selectedPlatform });

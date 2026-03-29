@@ -24,7 +24,8 @@ import {
 
 function thumbnailSrc(thumb?: { data: string; format: string }): string | null {
   if (!thumb) return null;
-  return `data:${thumb.format};base64,${thumb.data}`;
+  const mimeType = thumb.format.includes('/') ? thumb.format : `image/${thumb.format}`;
+  return `data:${mimeType};base64,${thumb.data}`;
 }
 
 export default function LibraryPage() {
@@ -55,7 +56,6 @@ export default function LibraryPage() {
 
   const cleanupRef     = useRef<(() => void) | null>(null);
   const fileChangeRef  = useRef<(() => void) | null>(null);
-  const setTrack       = usePlayerStore((s) => s.setTrack);
   const setQueue       = usePlayerStore((s) => s.setQueue);
 
   useEffect(() => {
@@ -171,13 +171,14 @@ export default function LibraryPage() {
 
   const handlePlay = (item: AlbumItem | VideoItem, trackIndex = 0) => {
     if (item.type === 'video') {
-      setTrack({
-        streamUrl: item.path,
+      setQueue([{
+        url: item.path,
         title: item.title,
         artist: '',
         thumbnail: thumbnailSrc(item.thumbnail) ?? undefined,
         mediaType: 'video' as MediaType,
-      });
+        platform: 'local',
+      }], 0);
     } else {
       const album = item as AlbumItem;
       if (!album.tracks.length) return;
