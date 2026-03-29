@@ -1255,11 +1255,15 @@ impl BackendState {
                         .or_else(|| a["id"].as_str().map(|s| s.to_string()))
                         .unwrap_or_default();
                     let release_date = a["released_at"].as_i64()
-                        .map(|ts| {
+                        .filter(|&ts| ts > 0)
+                        .and_then(|ts| {
                             use std::time::{UNIX_EPOCH, Duration};
-                            let d = UNIX_EPOCH + Duration::from_secs(ts as u64);
-                            let dt = chrono::DateTime::<chrono::Utc>::from(d);
-                            dt.format("%Y-%m-%d").to_string()
+                            let secs = if ts > 9_999_999_999 { ts / 1000 } else { ts };
+                            UNIX_EPOCH.checked_add(Duration::from_secs(secs as u64))
+                                .map(|d| {
+                                    let dt = chrono::DateTime::<chrono::Utc>::from(d);
+                                    dt.format("%Y-%m-%d").to_string()
+                                })
                         })
                         .or_else(|| a["release_date_original"].as_str().map(|s| s.to_string()));
                     serde_json::json!({
