@@ -27,6 +27,7 @@ node_modules
 # Rust build artifacts
 src/core/target/
 src/app/target/
+/target
 
 # Logs
 npm-debug.log*
