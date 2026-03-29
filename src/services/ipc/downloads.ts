@@ -5,6 +5,10 @@ interface DownloadParams {
   url: string;
   quality?: string | number;
   type?: 'track' | 'album' | 'playlist';
+  title?: string;
+  artist?: string;
+  album?: string;
+  thumbnail?: string | null;
 }
 
 class DownloadService {
@@ -13,40 +17,41 @@ class DownloadService {
       throw new Error('Electron API not available. Please run in Electron mode.');
     }
 
-    const { platform, url, quality } = params;
+    const { platform, url, quality, title, artist, album, thumbnail } = params;
+    const meta = { title, artist, album, thumbnail };
 
     try {
       switch (platform) {
         case 'youtube':
-          window.electron.downloads.startYouTubeVideo({ url, quality: quality || 'best' });
+          window.electron.downloads.startYouTubeVideo({ url, quality: quality || 'best', ...meta });
           break;
 
         case 'youtubemusic':
-          window.electron.downloads.startYouTubeMusic({ url, quality: quality || '320' });
+          window.electron.downloads.startYouTubeMusic({ url, quality: quality || '320', ...meta });
           break;
 
         case 'spotify':
-          window.electron.downloads.startSpotify({ url, quality: quality || 9 });
+          window.electron.downloads.startSpotify({ url, quality: quality || 9, ...meta });
           break;
 
         case 'applemusic':
-          window.electron.downloads.startAppleMusic({ url, quality: quality || 'lossless' });
+          window.electron.downloads.startAppleMusic({ url, quality: quality || 'lossless', ...meta });
           break;
 
         case 'qobuz':
-          window.electron.downloads.startQobuz({ url, quality: quality || 27 });
+          window.electron.downloads.startQobuz({ url, quality: quality || 27, ...meta });
           break;
 
         case 'deezer':
-          window.electron.downloads.startDeezer({ url, quality: quality || 2 });
+          window.electron.downloads.startDeezer({ url, quality: quality || 2, ...meta });
           break;
 
         case 'tidal':
-          window.electron.downloads.startTidal({ url, quality: quality || 3 });
+          window.electron.downloads.startTidal({ url, quality: quality || 3, ...meta });
           break;
 
         case 'generic':
-          window.electron.downloads.startGenericVideo({ url, quality: quality || 'bestvideo+bestaudio' });
+          window.electron.downloads.startGenericVideo({ url, quality: quality || 'bestvideo+bestaudio', ...meta });
           break;
 
         default:

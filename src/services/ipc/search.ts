@@ -382,16 +382,36 @@ class SearchService {
         break;
 
       case 'youtube':
-      case 'youtubemusic':
         normalized.title = item.title || item.channel || item.name;
         normalized.name = normalized.title;
         normalized.artist = item.artist || item.channel || item.uploader || 'Unknown';
         normalized.thumbnail = item.thumbnail || item.thumbnails?.[0]?.url;
         normalized.duration = item.duration;
-        normalized.url = item.url || item.webpage_url || `https://youtube.com/watch?v=${item.id}`;
+        break;
+      case 'youtubemusic': {
+        normalized.title = item.title || item.channel || item.name;
+        normalized.name = normalized.title;
+        normalized.artist = item.artist || item.channel || item.uploader || 'Unknown';
+        normalized.thumbnail = item.thumbnail_url || item.thumbnail || item.thumbnails?.[0]?.url;
+        normalized.duration = item.duration_secs || item.duration;
         normalized.explicit = item.isExplicit ?? item.explicit ?? false;
         normalized.views = item.view_count;
+        const rt = item.result_type;
+        const browseId = item.browse_id || item.id;
+        if (rt === 'album') {
+          normalized.url = `https://music.youtube.com/browse/${browseId}`;
+        } else if (rt === 'playlist') {
+          const listId = item.id?.startsWith?.('VL') ? item.id.slice(2) : item.id;
+          normalized.url = `https://music.youtube.com/playlist?list=${listId}`;
+        } else if (rt === 'artist') {
+          normalized.url = `https://music.youtube.com/channel/${item.id}`;
+        } else if (rt === 'podcast') {
+          normalized.url = `https://music.youtube.com/browse/${item.id}`;
+        } else {
+          normalized.url = item.url || item.webpage_url || (item.id ? `https://youtube.com/watch?v=${item.id}` : undefined);
+        }
         break;
+      }
     }
 
     return normalized;
