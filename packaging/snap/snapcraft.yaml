@@ -1,0 +1,69 @@
+name: mediaharbor
+base: core24
+version: '1.1.9'
+summary: Music streaming and media management
+description: |
+  MediaHarbor — stream music, manage your local library, and download media.
+  Built with Tauri (Rust backend, WebKitGTK frontend).
+
+grade: stable
+confinement: strict
+
+# Icon shown in the Snap Store (must be relative to snapcraft.yaml, within snap dir).
+# Stage it before building: cp src-tauri/mediaharbor/icons/icon.png packaging/snap/
+icon: icon.png
+
+# Plugs that the snap needs
+plugs:
+  desktop:
+  desktop-legacy:
+  wayland:
+  x11:
+  opengl:
+  audio-playback:
+  audio-record:        # needed if mic input is ever used
+  network:
+  network-bind:        # local HTTP proxy for streaming
+  home:
+  removable-media:
+  browser-support:
+    allow-sandbox: false   # WebKitGTK manages its own sandbox; tell Snap not to fight it
+
+apps:
+  mediaharbor:
+    command: bin/mediaharbor
+    extensions: [gnome]    # pulls in GTK3, WebKitGTK 4.1 (core24), glib — all Tauri deps
+    plugs:
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+      - opengl
+      - audio-playback
+      - network
+      - network-bind
+      - home
+      - removable-media
+      - browser-support
+    environment:
+      # Stop WebKitGTK from trying to set up its own namespace sandbox inside Snap's sandbox.
+      WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
+      # Force Wayland if available, fall back to XWayland
+      GDK_BACKEND: wayland,x11
+
+parts:
+  mediaharbor:
+    plugin: dump
+    # Stage the pre-built binary and icons before running snapcraft:
+    #   cp src-tauri/target/release/mediaharbor  packaging/snap/
+    #   cp src-tauri/mediaharbor/icons/icon.png  packaging/snap/
+    #   cp src-tauri/mediaharbor/icons/32x32.png packaging/snap/
+    #   cp src-tauri/mediaharbor/icons/128x128.png packaging/snap/
+    source: .
+    source-type: local
+    organize:
+      mediaharbor: bin/mediaharbor
+    stage-packages:
+      # Only list packages NOT already provided by the gnome extension.
+      # core24 ships libayatana-appindicator3-1 (Ubuntu 24.04 renamed libappindicator3-1)
+      - libayatana-appindicator3-1

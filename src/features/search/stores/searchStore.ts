@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Platform, SearchType } from '@/types';
-import { PLATFORM_SEARCH_TYPES } from '@/utils/platforms';
+import { PLATFORM_SEARCH_TYPES } from '@/utils/platform-data';
 
 interface SearchStore {
   selectedPlatform: Platform;

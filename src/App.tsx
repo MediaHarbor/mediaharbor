@@ -1,12 +1,21 @@
 import { HashRouter as Router, useLocation, useNavigate } from 'react-router-dom';
-import { useEffect, useState, lazy, Suspense } from 'react';
+import { useEffect, useState, useRef, lazy, Suspense } from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Toaster } from '@/components/ui/toaster';
 import { useThemeStore } from '@/stores/useThemeStore';
 import { useDownloadEvents } from '@/hooks/useDownloadEvents';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useNotificationStore } from '@/stores/useNotificationStore';
-import { usePlayerStore } from '@/components/Player';
+import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useLogStore, type LogSource } from '@/stores/useLogStore';
 import { logError, logWarning } from '@/utils/logger';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -75,6 +84,29 @@ function AppInner() {
   const navigate = useNavigate();
   useDownloadEvents();
   useKeyboardShortcuts();
+
+  const [stdinPrompt, setStdinPrompt] = useState<{ downloadId: number; promptLines: string[] } | null>(null);
+  const [stdinInput, setStdinInput] = useState('');
+  const stdinInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!window.electron) return;
+    return window.electron.app.onStdinPrompt((data) => {
+      setStdinInput('');
+      setStdinPrompt(data);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (stdinPrompt) requestAnimationFrame(() => stdinInputRef.current?.focus());
+  }, [stdinPrompt]);
+
+  const handleStdinSubmit = async () => {
+    if (!stdinPrompt || !window.electron) return;
+    const prompt = stdinPrompt;
+    setStdinPrompt(null);
+    await window.electron.app.sendProcessStdin(prompt.downloadId, stdinInput);
+  };
 
   useEffect(() => {
     window.electron?.settings.get().then((data) => {
@@ -149,6 +181,28 @@ function AppInner() {
   return (
     <MainLayout>
       <PersistentRoutes />
+      <Dialog open={!!stdinPrompt} onOpenChange={(open) => { if (!open) setStdinPrompt(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Input Required</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {stdinPrompt?.promptLines.map((line, i) => (
+              <p key={i} className="text-sm font-mono text-muted-foreground">{line}</p>
+            ))}
+            <Input
+              ref={stdinInputRef}
+              value={stdinInput}
+              onChange={(e) => setStdinInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleStdinSubmit()}
+              placeholder="Type your response..."
+            />
+          </div>
+          <DialogFooter>
+            <Button onClick={handleStdinSubmit}>Send</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 }

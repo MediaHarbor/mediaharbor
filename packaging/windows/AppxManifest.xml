@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest template for Microsoft Store submission.
+
+  Placeholders stamped by CI (tauri-build.yml):
+    __VERSION__   → e.g. 1.1.9.0   (must be 4-part)
+    __PUBLISHER__ → value of the MS_STORE_PUBLISHER repo secret
+                    e.g. CN=AtomDev, O=AtomDev, C=US
+                    (must match your Partner Center publisher identity exactly)
+
+  Required icon assets (all PNG, provided by the CI job from icons/):
+    Assets\StoreLogo.png           50 x 50
+    Assets\Square44x44Logo.png     44 x 44
+    Assets\Square150x150Logo.png  150 x 150
+    Assets\Wide310x150Logo.png    310 x 150
+
+  After installing the Windows SDK, you can validate locally with:
+    makeappx.exe pack /d <layout-dir> /p MediaHarbor.msix /nv
+    signtool.exe sign /fd SHA256 /a MediaHarbor.msix
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <Identity
+    Name="AtomDev.MediaHarbor"
+    Publisher="__PUBLISHER__"
+    Version="__VERSION__"
+    ProcessorArchitecture="x64"/>
+
+  <Properties>
+    <DisplayName>MediaHarbor</DisplayName>
+    <PublisherDisplayName>AtomDev</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <!-- Windows 10 1809 (October 2018) minimum — WebView2 is available from here -->
+    <TargetDeviceFamily
+      Name="Windows.Desktop"
+      MinVersion="10.0.17763.0"
+      MaxVersion="10.0.99999.0"/>
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-US"/>
+  </Resources>
+
+  <Applications>
+    <Application
+      Id="App"
+      Executable="mediaharbor.exe"
+      EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="MediaHarbor"
+        Description="Music streaming and media management"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png"/>
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- Full trust is required because Tauri/WebView2 launches child processes -->
+    <rescap:Capability Name="runFullTrust"/>
+    <!-- Network access for streaming and API calls -->
+    <Capability Name="internetClient"/>
+  </Capabilities>
+
+</Package>

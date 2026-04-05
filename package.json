@@ -1,144 +1,30 @@
 {
   "name": "mediaharbor",
   "version": "1.1.9",
-  "main": "src/main.js",
   "scripts": {
     "postinstall": "node scripts/patch-librespot.js",
     "dev": "vite",
-    "dev:electron": "concurrently \"npm run dev\" \"npm run electron:wait\"",
-    "electron:wait": "wait-on http://localhost:5173 && electron .",
     "build:react": "tsc && vite build",
-    "build:preload": "tsc electron/preload.ts --outDir src --skipLibCheck --esModuleInterop",
     "preview": "vite preview",
-    "start": "electron .",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 150",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "test": "vitest",
-    "build": "electron-builder",
-    "build:win": "electron-builder --win",
-    "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux"
+    "tauri:icon": "npx tauri icon D:/Documents/MH-WEB/SVG/MHLogo.svg -o src/app/icons",
+    "tauri:dev": "concurrently \"npx vite dev\" \"cd src/app && cargo tauri dev\"",
+    "tauri:build": "npm run build:react && cd src/app && APPIMAGE_EXTRACT_AND_RUN=1 cargo tauri build",
+    "tauri:build:linux": "npm run build:react && cd src/app && APPIMAGE_EXTRACT_AND_RUN=1 cargo tauri build --bundles deb,rpm,appimage",
+    "tauri:build:win": "npm run build:react && cd src/app && cargo tauri build --bundles msi,nsis",
+    "tauri:build:mac": "npm run build:react && cd src/app && cargo tauri build --bundles dmg,app",
+    "tauri:build:mac:x64": "npm run build:react && cd src/app && cargo tauri build --target x86_64-apple-darwin --bundles dmg",
+    "tauri:build:mac:arm64": "npm run build:react && cd src/app && cargo tauri build --target aarch64-apple-darwin --bundles dmg"
   },
   "keywords": [],
   "author": "CrossyAtom46",
   "license": "GPL-3.0-or-later",
   "description": "MediaHarbor",
   "homepage": "https://mediaharbor.github.io",
-  "build": {
-    "protocols": [
-      {
-        "name": "MediaHarbor Protocol",
-        "schemes": [
-          "mediaharbor"
-        ]
-      }
-    ],
-    "appId": "AtomDev.MediaHarbor",
-    "productName": "MediaHarbor",
-    "asar": true,
-    "asarUnpack": [
-      "src/funcs/apis/apis.json",
-      "node_modules/call-bind-apply-helpers/**/*",
-      "node_modules/call-bind/**/*",
-      "node_modules/es-errors/**/*",
-      "node_modules/es-define-property/**/*",
-      "node_modules/function-bind/**/*",
-      "node_modules/get-intrinsic/**/*",
-      "node_modules/gopd/**/*",
-      "node_modules/has-property-descriptors/**/*",
-      "node_modules/has-proto/**/*",
-      "node_modules/has-symbols/**/*",
-      "node_modules/hasown/**/*",
-      "node_modules/set-function-length/**/*",
-      "node_modules/define-data-property/**/*"
-    ],
-    "files": [
-      "src/**/*",
-      "node_modules/**/*",
-      "package.json"
-    ],
-    "directories": {
-      "buildResources": "resources",
-      "output": "dist"
-    },
-    "win": {
-      "target": [
-        "nsis",
-        "portable",
-        "appx"
-      ],
-      "icon": "resources/icon.png"
-    },
-    "appx": {
-      "applicationId": "AtomDev.MediaHarbor",
-      "backgroundColor": "#464646",
-      "identityName": "AtomDev.MediaHarbor",
-      "publisher": "CN=B799C26F-32FE-4398-8D3A-A8667FA3C70A",
-      "publisherDisplayName": "AtomDev",
-      "languages": [
-        "en-US"
-      ],
-      "displayName": "MediaHarbor",
-      "showNameOnTiles": false,
-      "artifactName": "MediaHarbor-${version}-${arch}.${ext}"
-    },
-    "mac": {
-      "target": [
-        "dmg"
-      ],
-      "icon": "resources/icon.png"
-    },
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb",
-        "snap"
-      ],
-      "maintainer": "AtomDev",
-      "icon": "resources/icons/",
-      "category": "Utility",
-      "executableName": "mediaharbor",
-      "artifactName": "${productName}-${version}.${ext}",
-      "desktop": {
-        "entry": {
-          "Name": "MediaHarbor",
-          "Comment": "MediaHarbor Application",
-          "Categories": "Utility;",
-          "Type": "Application"
-        }
-      },
-      "publish": [
-        "github"
-      ]
-    },
-    "deb": {
-      "afterInstall": "resources/postinst.sh"
-    },
-    "snap": {
-      "grade": "stable",
-      "confinement": "strict",
-      "plugs": [
-        "network",
-        "home",
-        "process-control"
-      ],
-      "environment": {
-        "ELECTRON_ENABLE_LOGGING": "true",
-        "APPARMOR_PROFILE": "/usr/share/apparmor/profiles/mediaharbor"
-      }
-    }
-  },
-  "overrides": {
-    "@tootallnate/once": "^3.0.1",
-    "tar": "^7.5.10",
-    "undici": "^7.22.0",
-    "glob": "^13.0.0",
-    "rimraf": "^5.0.0",
-    "@electron/asar": "^4.0.0",
-    "@electron/get": "^4.0.0",
-    "global-agent": "^4.0.0"
-  },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
     "@types/node": "^20.11.5",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
@@ -149,8 +35,6 @@
     "autoprefixer": "^10.4.17",
     "concurrently": "^8.2.2",
     "cross-env": "^10.1.0",
-    "electron": "^38.2.2",
-    "electron-builder": "^26.8.2",
     "eslint": "^9.0.0",
     "eslint-plugin-react": "^7.33.2",
     "eslint-plugin-react-hooks": "^5.0.0",
@@ -180,6 +64,7 @@
     "@radix-ui/react-toast": "^1.1.5",
     "@tanstack/react-query": "^5.17.19",
     "@tanstack/react-query-devtools": "^5.17.19",
+    "@tauri-apps/api": "^2.10.1",
     "axios": "^1.12.2",
     "cheerio": "^1.1.2",
     "chokidar": "^4.0.3",
@@ -187,9 +72,7 @@
     "clsx": "^2.1.0",
     "decompress": "^4.2.1",
     "decompress-unzip": "^4.0.1",
-    "electron-prompt": "^1.7.0",
     "ffmpeg-static": "^5.2.0",
-    "fix-path": "^5.0.0",
     "framer-motion": "^10.18.0",
     "librespot": "^0.2.22",
     "lucide-react": "^0.312.0",
@@ -198,6 +81,7 @@
     "re-unplayplay": "^1.2.8",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-icons": "^5.6.0",
     "react-router-dom": "^6.21.3",
     "sharp": "^0.34.4",
     "tailwind-merge": "^2.2.0",

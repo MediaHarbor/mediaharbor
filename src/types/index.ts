@@ -7,6 +7,16 @@ export type Platform =
   | 'youtubemusic'
   | 'applemusic';
 
+export type OrpheusPlatform =
+  | 'soundcloud'
+  | 'napster'
+  | 'beatport'
+  | 'nugs'
+  | 'kkbox'
+  | 'bugs'
+  | 'idagio'
+  | 'jiosaavn';
+
 export type SearchType = 'track' | 'album' | 'playlist' | 'artist' | 'video' | 'channel' | 'podcast' | 'show' | 'episode' | 'musicvideo' | 'audiobook';
 
 export interface Track {
@@ -23,10 +33,8 @@ export interface Track {
   hires?: boolean;
   bitDepth?: number;
   sampleRate?: number;
-  /** Tidal quality tier — LOSSLESS | HIRES_LOSSLESS | MQA | DOLBY_ATMOS | SONY_360RA */
   mediaTag?: string;
   genre?: string;
-  /** YouTube view count */
   views?: number;
 }
 

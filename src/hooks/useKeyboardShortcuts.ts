@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { usePlayerStore } from '@/components/Player';
+import { usePlayerStore } from '@/stores/usePlayerStore';
 
 export function useKeyboardShortcuts() {
   useEffect(() => {

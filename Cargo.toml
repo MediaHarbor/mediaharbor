@@ -1,0 +1,3 @@
+[workspace]
+members = ["src/core", "src/app"]
+resolver = "2"
