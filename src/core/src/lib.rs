@@ -3,6 +3,7 @@
 pub mod defaults;
 pub mod download_order;
 pub mod errors;
+pub mod orpheus;
 pub mod fetchers;
 pub mod http_client;
 pub mod ipc_contract;
@@ -34,6 +35,7 @@ pub trait EventEmitter: Send + Sync {
     fn emit_stream_ready(&self, event: &ipc_contract::StreamReadyEvent);
     fn emit_install_progress(&self, event: &ipc_contract::InstallationProgressEvent);
     fn emit_app_error(&self, event: &ipc_contract::AppErrorEvent);
+    fn emit_stdin_prompt(&self, event: &ipc_contract::ProcessStdinPromptEvent);
 }
 
 pub struct NoopEventEmitter;
@@ -44,6 +46,7 @@ impl EventEmitter for NoopEventEmitter {
     fn emit_stream_ready(&self, _: &ipc_contract::StreamReadyEvent) {}
     fn emit_install_progress(&self, _: &ipc_contract::InstallationProgressEvent) {}
     fn emit_app_error(&self, _: &ipc_contract::AppErrorEvent) {}
+    fn emit_stdin_prompt(&self, _: &ipc_contract::ProcessStdinPromptEvent) {}
 }
 
 use std::{
@@ -57,6 +60,7 @@ use tokio::sync::RwLock;
 pub struct BackendState {
     pub settings: Arc<RwLock<Settings>>,
     pub active_downloads: Arc<DashMap<u64, Arc<AtomicBool>>>,
+    pub stdin_senders: Arc<DashMap<u64, tokio::sync::mpsc::Sender<String>>>,
     pub streaming_server: Option<streaming_server::StreamingServer>,
     pub librespot: Arc<RwLock<apis::librespot_service::LibrespotService>>,
     pub apple_music: Arc<RwLock<apis::apple_music_service::AppleMusicService>>,
@@ -103,6 +107,7 @@ impl BackendState {
         let state = BackendState {
             settings: Arc::new(RwLock::new(loaded)),
             active_downloads: Arc::new(DashMap::new()),
+            stdin_senders: Arc::new(DashMap::new()),
             streaming_server,
             librespot: Arc::new(RwLock::new(librespot)),
             apple_music: Arc::new(RwLock::new(apple_music)),
@@ -311,7 +316,8 @@ impl BackendState {
                     let video_url = video_info.url.clone();
                     let audio_url = audio_info.url.clone();
                     tokio::spawn(async move {
-                        let mut child = match tokio::process::Command::new("ffmpeg")
+                        let ffmpeg_bin = venv_manager::resolve_ffmpeg();
+                        let mut child = match tokio::process::Command::new(&ffmpeg_bin)
                             .args([
                                 "-loglevel", "error",
                                 "-i", &video_url,
@@ -441,7 +447,7 @@ impl BackendState {
             }
 
             "tidal" => {
-                let client = streamrip::tidal_client::TidalClient::authenticate(&settings).await?;
+                let client = self.authenticate_tidal(&settings).await?;
                 let track_id = extract_tidal_track_id(&req.url)
                     .ok_or_else(|| MhError::Parse("Could not extract Tidal track ID".into()))?;
 
@@ -550,7 +556,15 @@ impl BackendState {
                     streamrip::orchestrator::Platform::Qobuz,
                     streamrip::orchestrator::ContentType::Track,
                 ).ok_or_else(|| MhError::Parse("Could not extract Qobuz track ID".into()))?;
-                let stream_url = client.get_file_url(&track_id, 27).await?;
+                let cdn_url = client.get_file_url(&track_id, 27).await?;
+                let auth_headers = client.api_headers()?;
+
+                let server = self
+                    .streaming_server
+                    .as_ref()
+                    .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
+                let id = uuid::Uuid::new_v4().to_string();
+                let stream_url = server.register_stream_proxied(&id, cdn_url, auth_headers, "audio/flac");
 
                 Ok(ipc_contract::PlayMediaResponse {
                     stream_url,
@@ -641,9 +655,100 @@ impl BackendState {
 }
 
 impl BackendState {
+    pub async fn start_orpheus_download(
+        &self,
+        req: ipc_contract::StartOrpheusDownloadRequest,
+    ) -> ipc_contract::StartDownloadResponse {
+        let download_id = self.next_download_id();
+        let settings = self.settings.read().await.clone();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        self.active_downloads.insert(download_id, cancel_flag.clone());
+
+        let meta = ipc_contract::DownloadMetadata {
+            title: req.title.clone(),
+            artist: req.artist.clone(),
+            album: req.album.clone(),
+            thumbnail: req.thumbnail.clone(),
+            platform: Some(req.module_id.clone()),
+            quality: None,
+        };
+        self.emitter.emit_download_info(&ipc_contract::DownloadInfoEvent { download_id, meta });
+
+        if !orpheus::is_orpheus_installed() {
+            self.active_downloads.remove(&download_id);
+            self.emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
+                download_id, percent: 0.0, speed: None, eta: None,
+                status: "error: OrpheusDL is not installed. Go to Updates → OrpheusDL and install it.".into(),
+                item_index: None, item_total: None,
+            });
+            return ipc_contract::StartDownloadResponse { download_id, success: false, error: Some("OrpheusDL not installed".into()) };
+        }
+
+        if !orpheus::is_module_installed(&req.module_id) {
+            self.active_downloads.remove(&download_id);
+            self.emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
+                download_id, percent: 0.0, speed: None, eta: None,
+                status: format!("error: OrpheusDL module '{}' is not installed. Go to Updates → Modules.", req.module_id),
+                item_index: None, item_total: None,
+            });
+            return ipc_contract::StartDownloadResponse { download_id, success: false, error: Some(format!("Module {} not installed", req.module_id)) };
+        }
+
+        let emitter = self.emitter.clone();
+        let active = self.active_downloads.clone();
+        let stdin_senders = self.stdin_senders.clone();
+        let url = req.url.clone();
+        let output_dir = req.output_dir.clone();
+        let module_id = req.module_id.clone();
+
+        let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<String>(4);
+        stdin_senders.insert(download_id, stdin_tx);
+
+        tokio::spawn(async move {
+            let _ = orpheus::run_orpheus_download(&url, &output_dir, &module_id, download_id, &settings, cancel_flag, emitter, stdin_rx).await;
+            active.remove(&download_id);
+            stdin_senders.remove(&download_id);
+        });
+
+        ipc_contract::StartDownloadResponse { download_id, success: true, error: None }
+    }
+}
+
+impl BackendState {
+    pub async fn send_process_stdin(&self, req: ipc_contract::SendProcessStdinRequest) -> ipc_contract::SendProcessStdinResponse {
+        if let Some(tx) = self.stdin_senders.get(&req.download_id) {
+            let success = tx.send(req.input).await.is_ok();
+            ipc_contract::SendProcessStdinResponse { success }
+        } else {
+            ipc_contract::SendProcessStdinResponse { success: false }
+        }
+    }
+
+    async fn authenticate_tidal(&self, settings: &Settings) -> MhResult<streamrip::tidal_client::TidalClient> {
+        let old_token = settings.tidal_access_token.clone();
+        let client = streamrip::tidal_client::TidalClient::authenticate(settings).await?;
+        if client.access_token != old_token {
+            let mut s = self.settings.write().await;
+            s.tidal_access_token = client.access_token.clone();
+            s.tidal_token_expiry = client.token_expiry.to_string();
+            settings::save_settings(&s, &self.user_data).await.ok();
+        }
+        Ok(client)
+    }
+}
+
+fn make_log_buffer() -> (std::sync::Arc<std::sync::Mutex<Vec<String>>>, impl Fn(String) + Clone + Send + 'static) {
+    let buf: std::sync::Arc<std::sync::Mutex<Vec<String>>> = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let buf_c = buf.clone();
+    let on_log = move |msg: String| { if let Ok(mut v) = buf_c.lock() { v.push(msg); } };
+    (buf, on_log)
+}
+
+impl BackendState {
     pub async fn cancel_download(&self, download_id: u64) -> bool {
         if let Some(flag) = self.active_downloads.get(&download_id) {
             flag.store(true, Ordering::Relaxed);
+            self.stdin_senders.remove(&download_id);
             true
         } else {
             false
@@ -835,10 +940,8 @@ fn extract_tidal_track_id(url: &str) -> Option<String> {
 }
 
 fn getrandom_bytes(buf: &mut [u8]) -> MhResult<()> {
-    use std::io::Read;
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(buf))
-        .map_err(MhError::Io)
+    getrandom::fill(buf)
+        .map_err(|e| MhError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))
 }
 
 fn url_encode(s: &str) -> String {
@@ -990,7 +1093,7 @@ impl BackendState {
                 }
             }
             ipc_contract::SearchPlatform::Tidal => {
-                let client = streamrip::tidal_client::TidalClient::authenticate(&settings).await?;
+                let client = self.authenticate_tidal(&settings).await?;
                 client.get_album_details_json(album_id).await?
             }
             ipc_contract::SearchPlatform::Deezer => {
@@ -1115,7 +1218,7 @@ impl BackendState {
                 }
             }
             ipc_contract::SearchPlatform::Tidal => {
-                let client = streamrip::tidal_client::TidalClient::authenticate(&settings).await?;
+                let client = self.authenticate_tidal(&settings).await?;
                 client.get_playlist_details_json(playlist_id).await?
             }
             ipc_contract::SearchPlatform::AppleMusic => {
@@ -1183,31 +1286,32 @@ impl BackendState {
                 } else {
                     &settings.tidal_country_code
                 };
-                let raw = client.get_artist_albums(artist_id, cc).await?;
-                let items = raw["data"].as_array().cloned().unwrap_or_default();
+                let user_tok = if settings.tidal_access_token.is_empty() {
+                    None
+                } else {
+                    Some(settings.tidal_access_token.as_str())
+                };
+                let raw = client.get_artist_albums(artist_id, cc, user_tok).await?;
+                let items = raw["items"].as_array().cloned().unwrap_or_default();
                 let albums: Vec<serde_json::Value> = items.iter().map(|a| {
-                    let attr = if a["attributes"].is_object() { &a["attributes"] } else { a };
-                    let img_arr = attr["imageCover"].as_array();
-                    let thumbnail = img_arr.and_then(|arr| {
-                        arr.iter()
-                            .find(|i| i["width"].as_i64().unwrap_or(0) >= 640)
-                            .or_else(|| arr.last())
-                            .and_then(|i| i["href"].as_str())
-                            .map(|s| s.to_string())
-                    });
-                    let album_id = a["id"].as_str().map(|s| s.to_string())
-                        .or_else(|| a["id"].as_i64().map(|n| n.to_string()))
+                    let album_id = a["id"].as_i64().map(|n| n.to_string())
+                        .or_else(|| a["id"].as_str().map(|s| s.to_string()))
                         .unwrap_or_default();
-                    let url = attr["url"].as_str().map(|s| s.to_string())
-                        .unwrap_or_else(|| format!("https://tidal.com/browse/album/{}", album_id));
+                    let thumbnail = a["cover"].as_str().map(|c| {
+                        format!(
+                            "https://resources.tidal.com/images/{}/640x640.jpg",
+                            c.replace('-', "/")
+                        )
+                    });
+                    let url = format!("https://tidal.com/browse/album/{}", album_id);
                     serde_json::json!({
                         "id": album_id,
-                        "title": attr["title"].as_str().or_else(|| a["title"].as_str()),
+                        "title": a["title"].as_str(),
                         "thumbnail": thumbnail,
-                        "releaseDate": attr["releaseDate"].as_str().or_else(|| a["releaseDate"].as_str()),
-                        "trackCount": attr["numberOfItems"].as_i64().or_else(|| attr["numberOfTracks"].as_i64()),
+                        "releaseDate": a["releaseDate"].as_str(),
+                        "trackCount": a["numberOfTracks"].as_i64(),
                         "url": url,
-                        "explicit": attr["explicit"].as_bool().unwrap_or(false),
+                        "explicit": a["explicit"].as_bool().unwrap_or(false),
                     })
                 }).collect();
                 serde_json::json!({ "albums": albums })
@@ -1526,7 +1630,10 @@ impl BackendState {
             let quality = req.quality.as_deref().unwrap_or("best").to_string();
             let mut args = music_args_from_settings(&req.url, &quality, &settings, false);
             let effective_output_dir = if settings.create_platform_subfolders {
-                format!("{}/YouTube Music", req.output_dir)
+                std::path::Path::new(&req.output_dir)
+                    .join("YouTube Music")
+                    .to_string_lossy()
+                    .to_string()
             } else {
                 req.output_dir.clone()
             };
@@ -1620,7 +1727,10 @@ impl BackendState {
             let quality = req.resolution.as_deref().unwrap_or("bestvideo+bestaudio/best").to_string();
             let mut args = video_args_from_settings(&req.url, &quality, &settings, false, false);
             let effective_output_dir = if settings.create_platform_subfolders {
-                format!("{}/YouTube", req.output_dir)
+                std::path::Path::new(&req.output_dir)
+                    .join("YouTube")
+                    .to_string_lossy()
+                    .to_string()
             } else {
                 req.output_dir.clone()
             };
@@ -1860,6 +1970,29 @@ impl BackendState {
             meta: meta.clone(),
         });
 
+        let platform = "qobuz";
+        if settings.orpheus_dl
+            && settings.orpheus_dl_enabled_modules.split(',').any(|m| m.trim() == platform)
+            && orpheus::is_orpheus_installed()
+            && orpheus::is_module_installed(platform)
+        {
+            let emitter = self.emitter.clone();
+            let active = self.active_downloads.clone();
+            let stdin_senders = self.stdin_senders.clone();
+            let url = req.url.clone();
+            let output_dir = req.output_dir.clone();
+            let mut s = settings.clone();
+            if let Some(q) = req.quality { s.qobuz_quality = q; }
+            let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<String>(4);
+            stdin_senders.insert(download_id, stdin_tx);
+            tokio::spawn(async move {
+                let _ = orpheus::run_orpheus_download(&url, &output_dir, platform, download_id, &s, cancel_flag, emitter, stdin_rx).await;
+                active.remove(&download_id);
+                stdin_senders.remove(&download_id);
+            });
+            return ipc_contract::StartDownloadResponse { download_id, success: true, error: None };
+        }
+
         let emitter = self.emitter.clone();
         let active = self.active_downloads.clone();
         tokio::spawn(async move {
@@ -1891,6 +2024,7 @@ impl BackendState {
                 tidal: None,
                 deezer: None,
             };
+            let (log_buf, on_log) = make_log_buffer();
             let result = tokio::select! {
                 r = streamrip::orchestrator::download_url(
                     &req.url,
@@ -1911,6 +2045,7 @@ impl BackendState {
                             });
                         }
                     },
+                    on_log,
                 ) => r,
                 _ = async {
                     loop {
@@ -1921,6 +2056,14 @@ impl BackendState {
             };
 
             active.remove(&download_id);
+            let log_lines = log_buf.lock().map(|v| v.join("\n")).unwrap_or_default();
+            emitter.emit_log(&ipc_contract::BackendLogEvent {
+                level: if result.is_ok() { "info" } else { "error" }.to_string(),
+                source: "streamrip".to_string(),
+                title: "Streamrip: Qobuz".to_string(),
+                message: log_lines,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            });
             if let Err(e) = result {
                 emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
                     download_id,
@@ -1970,6 +2113,31 @@ impl BackendState {
             download_id,
             meta: meta.clone(),
         });
+
+        let platform = "deezer";
+        if settings.orpheus_dl
+            && settings.orpheus_dl_enabled_modules.split(',').any(|m| m.trim() == platform)
+            && orpheus::is_orpheus_installed()
+            && orpheus::is_module_installed(platform)
+        {
+            let emitter = self.emitter.clone();
+            let active = self.active_downloads.clone();
+            let stdin_senders = self.stdin_senders.clone();
+            let url = req.url.clone();
+            let output_dir = req.output_dir.clone();
+            let mut s = settings.clone();
+            if let Some(q) = req.quality {
+                s.deezer_quality = match q { 2 => "FLAC".into(), 1 => "MP3_320".into(), _ => "MP3_128".into() };
+            }
+            let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<String>(4);
+            stdin_senders.insert(download_id, stdin_tx);
+            tokio::spawn(async move {
+                let _ = orpheus::run_orpheus_download(&url, &output_dir, platform, download_id, &s, cancel_flag, emitter, stdin_rx).await;
+                active.remove(&download_id);
+                stdin_senders.remove(&download_id);
+            });
+            return ipc_contract::StartDownloadResponse { download_id, success: true, error: None };
+        }
 
         let emitter = self.emitter.clone();
         let active = self.active_downloads.clone();
@@ -2032,6 +2200,7 @@ impl BackendState {
                 tidal: None,
                 qobuz: None,
             };
+            let (log_buf, on_log) = make_log_buffer();
             let result = tokio::select! {
                 r = streamrip::orchestrator::download_url(
                     &req.url,
@@ -2052,6 +2221,7 @@ impl BackendState {
                             });
                         }
                     },
+                    on_log,
                 ) => r,
                 _ = async {
                     loop {
@@ -2062,6 +2232,14 @@ impl BackendState {
             };
 
             active.remove(&download_id);
+            let log_lines = log_buf.lock().map(|v| v.join("\n")).unwrap_or_default();
+            emitter.emit_log(&ipc_contract::BackendLogEvent {
+                level: if result.is_ok() { "info" } else { "error" }.to_string(),
+                source: "streamrip".to_string(),
+                title: "Streamrip: Deezer".to_string(),
+                message: log_lines,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            });
             if let Err(e) = result {
                 emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
                     download_id,
@@ -2112,11 +2290,36 @@ impl BackendState {
             meta: meta.clone(),
         });
 
+        let platform = "tidal";
+        if settings.orpheus_dl
+            && settings.orpheus_dl_enabled_modules.split(',').any(|m| m.trim() == platform)
+            && orpheus::is_orpheus_installed()
+            && orpheus::is_module_installed(platform)
+        {
+            let emitter = self.emitter.clone();
+            let active = self.active_downloads.clone();
+            let stdin_senders = self.stdin_senders.clone();
+            let url = req.url.clone();
+            let output_dir = req.output_dir.clone();
+            let s = settings.clone();
+            let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<String>(4);
+            stdin_senders.insert(download_id, stdin_tx);
+            tokio::spawn(async move {
+                let _ = orpheus::run_orpheus_download(&url, &output_dir, platform, download_id, &s, cancel_flag, emitter, stdin_rx).await;
+                active.remove(&download_id);
+                stdin_senders.remove(&download_id);
+            });
+            return ipc_contract::StartDownloadResponse { download_id, success: true, error: None };
+        }
+
         let emitter = self.emitter.clone();
         let active = self.active_downloads.clone();
+        let settings_arc = self.settings.clone();
+        let user_data = self.user_data.clone();
         tokio::spawn(async move {
             let mut settings = settings;
             settings.download_location = req.output_dir.clone();
+            let old_token = settings.tidal_access_token.clone();
             let tidal_client = match streamrip::tidal_client::TidalClient::authenticate(&settings).await {
                 Ok(c) => c,
                 Err(e) => {
@@ -2133,6 +2336,12 @@ impl BackendState {
                     return;
                 }
             };
+            if tidal_client.access_token != old_token {
+                let mut s = settings_arc.write().await;
+                s.tidal_access_token = tidal_client.access_token.clone();
+                s.tidal_token_expiry = tidal_client.token_expiry.to_string();
+                settings::save_settings(&s, &user_data).await.ok();
+            }
 
             let cancel_clone = cancel_flag.clone();
             let sr_clients = streamrip::orchestrator::StreamripClients {
@@ -2140,6 +2349,7 @@ impl BackendState {
                 deezer: None,
                 qobuz: None,
             };
+            let (log_buf, on_log) = make_log_buffer();
             let result = tokio::select! {
                 r = streamrip::orchestrator::download_url(
                     &req.url,
@@ -2160,6 +2370,7 @@ impl BackendState {
                             });
                         }
                     },
+                    on_log,
                 ) => r,
                 _ = async {
                     loop {
@@ -2170,6 +2381,14 @@ impl BackendState {
             };
 
             active.remove(&download_id);
+            let log_lines = log_buf.lock().map(|v| v.join("\n")).unwrap_or_default();
+            emitter.emit_log(&ipc_contract::BackendLogEvent {
+                level: if result.is_ok() { "info" } else { "error" }.to_string(),
+                source: "streamrip".to_string(),
+                title: "Streamrip: Tidal".to_string(),
+                message: log_lines,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            });
             if let Err(e) = result {
                 emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
                     download_id,
@@ -2337,7 +2556,7 @@ impl BackendState {
         let ffmpeg_ok = which_binary("ffmpeg");
         let git_ok = which_binary("git");
 
-        let (yt_dlp_ok, votify_ok, gamdl_ok, pywidevine_ok, bento4_ok) = if python_ok {
+        let (yt_dlp_ok, votify_ok, gamdl_ok, bento4_ok) = if python_ok {
             let pip_list = tokio::process::Command::new(venv_manager::get_venv_python())
                 .args(["-m", "pip", "list"])
                 .output()
@@ -2349,11 +2568,10 @@ impl BackendState {
             let yt_dlp = pip_list.contains("yt-dlp");
             let votify = pip_list.contains("votify");
             let gamdl  = pip_list.contains("gamdl");
-            let pywv   = pip_list.contains("pywidevine");
             let bento4 = installers::bento4::get_bento4_bin_dir().exists();
-            (yt_dlp, votify, gamdl, pywv, bento4)
+            (yt_dlp, votify, gamdl, bento4)
         } else {
-            (false, false, false, false, false)
+            (false, false, false, false)
         };
 
         ipc_contract::CheckDepsResponse {
@@ -2363,7 +2581,6 @@ impl BackendState {
             yt_dlp: yt_dlp_ok,
             votify: votify_ok,
             gamdl: gamdl_ok,
-            pywidevine: pywidevine_ok,
             bento4: bento4_ok,
         }
     }
@@ -2417,16 +2634,7 @@ impl BackendState {
                 let _ = installers::bento4::download_and_install_bento4(|pct, msg| make_progress(pct, msg)).await;
                 let py = venv_manager::get_venv_python();
                 tokio::process::Command::new(py)
-                    .args(["-m", "pip", "install", "--upgrade", "votify"])
-                    .output()
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| MhError::Subprocess(e.to_string()))
-            }
-            "pywidevine" => {
-                let py = venv_manager::get_venv_python();
-                tokio::process::Command::new(py)
-                    .args(["-m", "pip", "install", "--upgrade", "pywidevine"])
+                    .args(["-m", "pip", "install", "--upgrade", "votify", "pywidevine"])
                     .output()
                     .await
                     .map(|_| ())
@@ -2435,6 +2643,9 @@ impl BackendState {
             "qobuz" | "deezer" | "tidal" | "ytmusic" | "googleapi" | "pyapplemusicapi" => {
                 make_progress(100, "built-in (native Rust)");
                 Ok(())
+            }
+            "orpheus" => {
+                orpheus::install_orpheus(|pct, msg| make_progress(pct, msg)).await
             }
             other => Err(MhError::Other(format!("Unknown dependency: {}", other))),
         };
@@ -2445,6 +2656,91 @@ impl BackendState {
                 ipc_contract::InstallDepResponse { success: true, error: None }
             }
             Err(e) => ipc_contract::InstallDepResponse {
+                success: false,
+                error: Some(e.to_string()),
+            },
+        }
+    }
+
+    pub async fn check_orpheus_deps(&self) -> ipc_contract::CheckOrpheusDepsResponse {
+        let settings = self.settings.read().await;
+        let mut modules: Vec<ipc_contract::OrpheusModuleStatus> = orpheus::KNOWN_MODULES.iter().map(|(id, label, _)| {
+            ipc_contract::OrpheusModuleStatus {
+                id: id.to_string(),
+                label: label.to_string(),
+                installed: orpheus::is_module_installed(id),
+            }
+        }).collect();
+
+        let custom: Vec<serde_json::Value> = serde_json::from_str(&settings.orpheus_custom_modules).unwrap_or_default();
+        for item in custom {
+            let id = match item["id"].as_str() {
+                Some(s) if !s.is_empty() => s.to_string(),
+                _ => continue,
+            };
+            if modules.iter().any(|m| m.id == id) {
+                continue;
+            }
+            let label = item["label"].as_str().unwrap_or(&id).to_string();
+            modules.push(ipc_contract::OrpheusModuleStatus {
+                installed: orpheus::is_module_installed(&id),
+                id,
+                label,
+            });
+        }
+
+        ipc_contract::CheckOrpheusDepsResponse {
+            orpheus_installed: orpheus::is_orpheus_installed(),
+            modules,
+        }
+    }
+
+    pub async fn install_orpheus_module(
+        &self,
+        req: ipc_contract::InstallOrpheusModuleRequest,
+    ) -> ipc_contract::InstallOrpheusModuleResponse {
+        let emitter = self.emitter.clone();
+        let dep = format!("orpheus_module_{}", req.module_id);
+
+        let make_progress = move |pct: u8, msg: &str| {
+            emitter.emit_install_progress(&ipc_contract::InstallationProgressEvent {
+                dependency: dep.clone(),
+                percent: pct,
+                status: msg.to_string(),
+            });
+        };
+
+        let git_url = if let Some(url) = req.custom_url.as_deref() {
+            url.to_string()
+        } else {
+            match orpheus::KNOWN_MODULES.iter().find(|(id, _, _)| *id == req.module_id) {
+                Some((_, _, url)) => url.to_string(),
+                None => {
+                    return ipc_contract::InstallOrpheusModuleResponse {
+                        success: false,
+                        error: Some(format!("Unknown module: {}", req.module_id)),
+                    };
+                }
+            }
+        };
+
+        let result = orpheus::install_module(&req.module_id, &git_url, make_progress).await;
+        match result {
+            Ok(_) => {
+                if req.custom_url.is_some() {
+                    if let Some(label) = req.label.filter(|l| !l.is_empty()) {
+                        let mut settings = self.settings.write().await;
+                        let mut custom: Vec<serde_json::Value> = serde_json::from_str(&settings.orpheus_custom_modules).unwrap_or_default();
+                        if !custom.iter().any(|m| m["id"].as_str() == Some(&req.module_id)) {
+                            custom.push(serde_json::json!({ "id": req.module_id, "label": label }));
+                            settings.orpheus_custom_modules = serde_json::to_string(&custom).unwrap_or_else(|_| "[]".into());
+                            settings::save_settings(&settings, &self.user_data).await.ok();
+                        }
+                    }
+                }
+                ipc_contract::InstallOrpheusModuleResponse { success: true, error: None }
+            }
+            Err(e) => ipc_contract::InstallOrpheusModuleResponse {
                 success: false,
                 error: Some(e.to_string()),
             },
@@ -2466,7 +2762,7 @@ impl BackendState {
 
         if venv_manager::is_venv_ready() {
             let py = venv_manager::get_venv_python();
-            for pkg in &["yt-dlp", "gamdl", "votify", "pywidevine"] {
+            for pkg in &["yt-dlp", "gamdl", "votify"] {
                 let out = tokio::process::Command::new(&py)
                     .args(["-m", "pip", "show", pkg])
                     .output()

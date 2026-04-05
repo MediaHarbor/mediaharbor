@@ -14,6 +14,7 @@ use crate::errors::{MhError, MhResult};
 pub struct SubprocessHandle {
     pub child: Child,
     pub cancelled: Arc<AtomicBool>,
+    pub stdin: Option<tokio::process::ChildStdin>,
 }
 
 impl SubprocessHandle {
@@ -42,7 +43,13 @@ pub async fn spawn_with_output(
     cmd.args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .stdin(Stdio::null());
+        .stdin(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
 
     if let Some(env_vars) = env {
         cmd.envs(env_vars);
@@ -57,6 +64,7 @@ pub async fn spawn_with_output(
 
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
+    let stdin = child.stdin.take();
 
     let tx_out = tx.clone();
     let tx_err = tx.clone();
@@ -82,6 +90,7 @@ pub async fn spawn_with_output(
     Ok(SubprocessHandle {
         child,
         cancelled: Arc::new(AtomicBool::new(false)),
+        stdin,
     })
 }
 
@@ -96,6 +105,12 @@ pub async fn run_to_completion(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
 
     if let Some(vars) = env {
         cmd.envs(vars);

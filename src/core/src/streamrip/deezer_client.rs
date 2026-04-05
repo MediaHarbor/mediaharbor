@@ -140,7 +140,7 @@ impl DeezerClient {
             user_id: user_id.to_string(),
             license_token,
             max_quality,
-            sid: captured_sid,   // properly capture sid from Set-Cookie
+            sid: captured_sid,
         });
         Ok(())
     }

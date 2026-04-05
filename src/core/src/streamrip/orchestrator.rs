@@ -183,9 +183,12 @@ pub async fn download_url(
     settings: &Settings,
     clients: &StreamripClients,
     on_progress: impl Fn(u64, u64) + Clone + Send + 'static,
+    on_log: impl Fn(String) + Clone + Send + 'static,
 ) -> MhResult<()> {
     let (platform, content_type) = detect_platform_and_type(url)
         .ok_or_else(|| MhError::Other(format!("Could not detect platform/type for URL: {}", url)))?;
+
+    on_log(format!("Detected: {:?} {:?}", platform, content_type));
 
     let base_dir = if settings.create_platform_subfolders {
         let label = match platform {
@@ -203,17 +206,17 @@ pub async fn download_url(
         Platform::Deezer => {
             let client = clients.deezer.as_ref()
                 .ok_or_else(|| MhError::Auth("Deezer client not initialized".into()))?;
-            download_deezer(client, url, content_type, &base_dir, settings, on_progress).await?;
+            download_deezer(client, url, content_type, &base_dir, settings, on_progress, on_log).await?;
         }
         Platform::Qobuz => {
             let client = clients.qobuz.as_ref()
                 .ok_or_else(|| MhError::Auth("Qobuz client not initialized".into()))?;
-            download_qobuz(client, url, content_type, &base_dir, settings, on_progress).await?;
+            download_qobuz(client, url, content_type, &base_dir, settings, on_progress, on_log).await?;
         }
         Platform::Tidal => {
             let client = clients.tidal.as_ref()
                 .ok_or_else(|| MhError::Auth("Tidal client not initialized".into()))?;
-            download_tidal(client, url, content_type, &base_dir, settings, on_progress).await?;
+            download_tidal(client, url, content_type, &base_dir, settings, on_progress, on_log).await?;
         }
     }
 
@@ -227,11 +230,13 @@ async fn download_deezer(
     base_dir: &Path,
     settings: &Settings,
     on_progress: impl Fn(u64, u64) + Clone + Send + 'static,
+    on_log: impl Fn(String) + Clone + Send + 'static,
 ) -> MhResult<()> {
     match content_type {
         ContentType::Track => {
             let id = extract_deezer_id(url, ContentType::Track)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Deezer track ID from: {}", url)))?;
+            on_log(format!("Track: {}", id));
             tokio::fs::create_dir_all(base_dir).await?;
             client.download_track(&id, base_dir, settings, on_progress, false).await?;
         }
@@ -241,15 +246,26 @@ async fn download_deezer(
             let album_info = client.get_album_tracks(&id).await?;
             let dest_dir = make_collection_dir(base_dir, settings, &album_info.title, &album_info.artist, &album_info.year, &album_info.genre, &album_info.label);
             tokio::fs::create_dir_all(&dest_dir).await?;
-            download_track_list(
-                &album_info.track_ids,
-                Some(&album_info.track_disc_numbers),
-                Some(album_info.number_of_volumes),
-                &dest_dir,
-                settings,
-                on_progress.clone(),
-                |id, dest, s, p| { let id = id.to_string(); let dest = dest.to_path_buf(); let s = s.clone(); Box::pin(async move { client.download_track(&id, &dest, &s, p, true).await.map(|_| ()) }) },
-            ).await?;
+            let total = album_info.track_ids.len();
+            on_log(format!("Album: {} — {} ({} tracks)", album_info.title, album_info.artist, total));
+            let use_disc_dirs = settings.disc_subdirectories
+                && (album_info.number_of_volumes > 1
+                    || album_info.track_disc_numbers.iter().any(|&d| d > 1));
+            for (i, track_id) in album_info.track_ids.iter().enumerate() {
+                let disc = album_info.track_disc_numbers.get(i).copied().unwrap_or(1);
+                let track_dir = if use_disc_dirs {
+                    let d = dest_dir.join(format!("Disc {}", disc));
+                    let _ = tokio::fs::create_dir_all(&d).await;
+                    d
+                } else {
+                    dest_dir.clone()
+                };
+                on_log(format!("Track {}/{}: {}", i + 1, total, track_id));
+                let p = divided_progress(i, total, on_progress.clone());
+                if let Err(e) = client.download_track(track_id, &track_dir, settings, p, true).await {
+                    on_log(format!("  failed: {}", e));
+                }
+            }
         }
         ContentType::Playlist => {
             let id = extract_deezer_id(url, ContentType::Playlist)
@@ -257,18 +273,24 @@ async fn download_deezer(
             let info = client.get_playlist_tracks(&id).await?;
             let dest_dir = make_collection_dir(base_dir, settings, &info.title, &info.artist, "", "", "");
             tokio::fs::create_dir_all(&dest_dir).await?;
-            download_track_list_simple(&info.track_ids, &dest_dir, settings, on_progress.clone(), |id, dest, s, p| {
-                let id = id.to_string(); let dest = dest.to_path_buf(); let s = s.clone();
-                Box::pin(async move { client.download_track(&id, &dest, &s, p, true).await.map(|_| ()) })
-            }).await?;
+            let total = info.track_ids.len();
+            on_log(format!("Playlist: {} ({} tracks)", info.title, total));
+            for (i, track_id) in info.track_ids.iter().enumerate() {
+                on_log(format!("Track {}/{}: {}", i + 1, total, track_id));
+                let p = divided_progress(i, total, on_progress.clone());
+                if let Err(e) = client.download_track(track_id, &dest_dir, settings, p, true).await {
+                    on_log(format!("  failed: {}", e));
+                }
+            }
         }
         ContentType::Artist => {
             let id = extract_deezer_id(url, ContentType::Artist)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Deezer artist ID from: {}", url)))?;
             let album_ids = client.get_artist_albums(&id).await?;
+            on_log(format!("Artist: {} albums", album_ids.len()));
             for album_id in &album_ids {
                 let album_url = format!("https://www.deezer.com/album/{}", album_id);
-                let _ = Box::pin(download_deezer(client, &album_url, ContentType::Album, base_dir, settings, on_progress.clone())).await;
+                let _ = Box::pin(download_deezer(client, &album_url, ContentType::Album, base_dir, settings, on_progress.clone(), on_log.clone())).await;
             }
         }
         ContentType::Label => {
@@ -288,12 +310,14 @@ async fn download_qobuz(
     base_dir: &Path,
     settings: &Settings,
     on_progress: impl Fn(u64, u64) + Clone + Send + 'static,
+    on_log: impl Fn(String) + Clone + Send + 'static,
 ) -> MhResult<()> {
     let quality = settings.qobuz_quality;
     match content_type {
         ContentType::Track => {
             let id = extract_qobuz_id(url, ContentType::Track)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Qobuz track ID from: {}", url)))?;
+            on_log(format!("Track: {}", id));
             tokio::fs::create_dir_all(base_dir).await?;
             client.download_track(&id, quality, base_dir, settings, on_progress, false).await?;
         }
@@ -304,9 +328,13 @@ async fn download_qobuz(
             let dest_dir = make_collection_dir(base_dir, settings, &album_info.title, &album_info.artist, &album_info.year, &album_info.genre, &album_info.label);
             tokio::fs::create_dir_all(&dest_dir).await?;
             let total = album_info.track_ids.len();
+            on_log(format!("Album: {} — {} ({} tracks)", album_info.title, album_info.artist, total));
             for (i, track_id) in album_info.track_ids.iter().enumerate() {
+                on_log(format!("Track {}/{}: {}", i + 1, total, track_id));
                 let p = divided_progress(i, total, on_progress.clone());
-                let _ = client.download_track(track_id, quality, &dest_dir, settings, p, true).await;
+                if let Err(e) = client.download_track(track_id, quality, &dest_dir, settings, p, true).await {
+                    on_log(format!("  failed: {}", e));
+                }
             }
             if settings.qobuz_download_booklets {
                 let _ = client.download_booklet(&id, &dest_dir).await;
@@ -319,9 +347,13 @@ async fn download_qobuz(
             let dest_dir = make_collection_dir(base_dir, settings, &info.title, &info.artist, "", "", "");
             tokio::fs::create_dir_all(&dest_dir).await?;
             let total = info.track_ids.len();
+            on_log(format!("Playlist: {} ({} tracks)", info.title, total));
             for (i, track_id) in info.track_ids.iter().enumerate() {
+                on_log(format!("Track {}/{}: {}", i + 1, total, track_id));
                 let p = divided_progress(i, total, on_progress.clone());
-                let _ = client.download_track(track_id, quality, &dest_dir, settings, p, true).await;
+                if let Err(e) = client.download_track(track_id, quality, &dest_dir, settings, p, true).await {
+                    on_log(format!("  failed: {}", e));
+                }
             }
         }
         ContentType::Artist => {
@@ -329,18 +361,20 @@ async fn download_qobuz(
                 .ok_or_else(|| MhError::Other(format!("Could not extract Qobuz artist ID from: {}", url)))?;
             let filters = qobuz_filters_from_settings(settings);
             let album_ids = client.get_artist_albums(&id, &filters).await?;
+            on_log(format!("Artist: {} albums", album_ids.len()));
             for album_id in &album_ids {
                 let album_url = format!("https://play.qobuz.com/album/{}", album_id);
-                let _ = Box::pin(download_qobuz(client, &album_url, ContentType::Album, base_dir, settings, on_progress.clone())).await;
+                let _ = Box::pin(download_qobuz(client, &album_url, ContentType::Album, base_dir, settings, on_progress.clone(), on_log.clone())).await;
             }
         }
         ContentType::Label => {
             let id = extract_qobuz_id(url, ContentType::Label)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Qobuz label ID from: {}", url)))?;
             let album_ids = client.get_label_albums(&id).await?;
+            on_log(format!("Label: {} albums", album_ids.len()));
             for album_id in &album_ids {
                 let album_url = format!("https://play.qobuz.com/album/{}", album_id);
-                let _ = Box::pin(download_qobuz(client, &album_url, ContentType::Album, base_dir, settings, on_progress.clone())).await;
+                let _ = Box::pin(download_qobuz(client, &album_url, ContentType::Album, base_dir, settings, on_progress.clone(), on_log.clone())).await;
             }
         }
         ContentType::Video => {
@@ -357,12 +391,14 @@ async fn download_tidal(
     base_dir: &Path,
     settings: &Settings,
     on_progress: impl Fn(u64, u64) + Clone + Send + 'static,
+    on_log: impl Fn(String) + Clone + Send + 'static,
 ) -> MhResult<()> {
     let quality = settings.tidal_quality;
     match content_type {
         ContentType::Track => {
             let id = extract_tidal_id(url, ContentType::Track)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Tidal track ID from: {}", url)))?;
+            on_log(format!("Track: {}", id));
             tokio::fs::create_dir_all(base_dir).await?;
             client.download_track(&id, quality, base_dir, settings, on_progress, false).await?;
         }
@@ -373,6 +409,7 @@ async fn download_tidal(
             let dest_dir = make_collection_dir(base_dir, settings, &album_info.title, &album_info.artist, &album_info.year, &album_info.genre, &album_info.label);
             tokio::fs::create_dir_all(&dest_dir).await?;
             let total = album_info.track_ids.len();
+            on_log(format!("Album: {} — {} ({} tracks)", album_info.title, album_info.artist, total));
             let use_disc_dirs = settings.disc_subdirectories
                 && (album_info.number_of_volumes > 1
                     || album_info.track_disc_numbers.iter().any(|&d| d > 1));
@@ -385,8 +422,11 @@ async fn download_tidal(
                 } else {
                     dest_dir.clone()
                 };
+                on_log(format!("Track {}/{}: {}", i + 1, total, track_id));
                 let p = divided_progress(i, total, on_progress.clone());
-                let _ = client.download_track(track_id, quality, &track_dir, settings, p, true).await;
+                if let Err(e) = client.download_track(track_id, quality, &track_dir, settings, p, true).await {
+                    on_log(format!("  failed: {}", e));
+                }
             }
         }
         ContentType::Playlist => {
@@ -396,23 +436,29 @@ async fn download_tidal(
             let dest_dir = make_collection_dir(base_dir, settings, &info.title, &info.artist, "", "", "");
             tokio::fs::create_dir_all(&dest_dir).await?;
             let total = info.track_ids.len();
+            on_log(format!("Playlist: {} ({} tracks)", info.title, total));
             for (i, track_id) in info.track_ids.iter().enumerate() {
+                on_log(format!("Track {}/{}: {}", i + 1, total, track_id));
                 let p = divided_progress(i, total, on_progress.clone());
-                let _ = client.download_track(track_id, quality, &dest_dir, settings, p, true).await;
+                if let Err(e) = client.download_track(track_id, quality, &dest_dir, settings, p, true).await {
+                    on_log(format!("  failed: {}", e));
+                }
             }
         }
         ContentType::Artist => {
             let id = extract_tidal_id(url, ContentType::Artist)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Tidal artist ID from: {}", url)))?;
             let album_ids = client.get_artist_albums(&id).await?;
+            on_log(format!("Artist: {} albums", album_ids.len()));
             for album_id in &album_ids {
                 let album_url = format!("https://tidal.com/browse/album/{}", album_id);
-                let _ = Box::pin(download_tidal(client, &album_url, ContentType::Album, base_dir, settings, on_progress.clone())).await;
+                let _ = Box::pin(download_tidal(client, &album_url, ContentType::Album, base_dir, settings, on_progress.clone(), on_log.clone())).await;
             }
         }
         ContentType::Video => {
             let id = extract_tidal_id(url, ContentType::Video)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Tidal video ID from: {}", url)))?;
+            on_log(format!("Video: {}", id));
             tokio::fs::create_dir_all(base_dir).await?;
             client.download_video(&id, base_dir, "ffmpeg", on_progress).await?;
         }
@@ -436,63 +482,12 @@ fn make_collection_dir(
     base.join(folder_name)
 }
 
-async fn download_track_list<F, Fut>(
-    track_ids: &[String],
-    disc_numbers: Option<&[u32]>,
-    num_volumes: Option<u32>,
-    dest_dir: &Path,
-    settings: &Settings,
-    on_progress: impl Fn(u64, u64) + Clone + Send + 'static,
-    download_fn: F,
-) -> MhResult<()>
-where
-    F: Fn(&str, &Path, &Settings, Box<dyn Fn(u64, u64) + Send>) -> Fut,
-    Fut: std::future::Future<Output = MhResult<()>>,
-{
-    let use_disc_dirs = settings.disc_subdirectories
-        && (num_volumes.unwrap_or(1) > 1
-            || disc_numbers.map(|d| d.iter().any(|&n| n > 1)).unwrap_or(false));
-
-    let total = track_ids.len();
-    for (i, track_id) in track_ids.iter().enumerate() {
-        let disc = disc_numbers.and_then(|d| d.get(i)).copied().unwrap_or(1);
-        let track_dir = if use_disc_dirs {
-            let d = dest_dir.join(format!("Disc {}", disc));
-            let _ = tokio::fs::create_dir_all(&d).await;
-            d
-        } else {
-            dest_dir.to_path_buf()
-        };
-        let p = divided_progress(i, total, on_progress.clone());
-        let _ = download_fn(track_id, &track_dir, settings, Box::new(move |d, t| p(d, t))).await;
-    }
-    Ok(())
-}
-
-async fn download_track_list_simple<F, Fut>(
-    track_ids: &[String],
-    dest_dir: &Path,
-    settings: &Settings,
-    on_progress: impl Fn(u64, u64) + Clone + Send + 'static,
-    download_fn: F,
-) -> MhResult<()>
-where
-    F: Fn(&str, &Path, &Settings, Box<dyn Fn(u64, u64) + Send>) -> Fut,
-    Fut: std::future::Future<Output = MhResult<()>>,
-{
-    let total = track_ids.len();
-    for (i, track_id) in track_ids.iter().enumerate() {
-        let p = divided_progress(i, total, on_progress.clone());
-        let _ = download_fn(track_id, dest_dir, settings, Box::new(move |d, t| p(d, t))).await;
-    }
-    Ok(())
-}
-
 pub async fn download_from_file(
     path: &Path,
     settings: &Settings,
     clients: &StreamripClients,
     on_progress: impl Fn(u64, u64) + Clone + Send + 'static,
+    on_log: impl Fn(String) + Clone + Send + 'static,
 ) -> MhResult<()> {
     let content = tokio::fs::read_to_string(path).await
         .map_err(|e| MhError::Io(e))?;
@@ -504,7 +499,7 @@ pub async fn download_from_file(
 
     for url in urls {
         let p = on_progress.clone();
-        if let Err(e) = download_url(url, settings, clients, p).await {
+        if let Err(e) = download_url(url, settings, clients, p, on_log.clone()).await {
             tracing::warn!("download_from_file: failed for {}: {}", url, e);
         }
     }

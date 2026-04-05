@@ -29,6 +29,9 @@ impl EventEmitter for TauriEmitter {
     fn emit_app_error(&self, event: &ipc_contract::AppErrorEvent) {
         let _ = self.0.emit("app-error", event);
     }
+    fn emit_stdin_prompt(&self, event: &ipc_contract::ProcessStdinPromptEvent) {
+        let _ = self.0.emit("process-stdin-prompt", event);
+    }
 }
 
 struct AppState(Arc<BackendState>);
@@ -299,6 +302,47 @@ async fn get_dependency_versions(
     Ok(state.0.get_dependency_versions().await)
 }
 
+#[tauri::command]
+async fn start_orpheus_download(
+    state: State<'_, AppState>,
+    req: ipc_contract::StartOrpheusDownloadRequest,
+) -> Result<ipc_contract::StartDownloadResponse, String> {
+    Ok(state.0.start_orpheus_download(req).await)
+}
+
+#[tauri::command]
+async fn check_orpheus_deps(
+    state: State<'_, AppState>,
+) -> Result<ipc_contract::CheckOrpheusDepsResponse, String> {
+    Ok(state.0.check_orpheus_deps().await)
+}
+
+#[tauri::command]
+async fn install_orpheus_module(
+    state: State<'_, AppState>,
+    req: ipc_contract::InstallOrpheusModuleRequest,
+) -> Result<ipc_contract::InstallOrpheusModuleResponse, String> {
+    Ok(state.0.install_orpheus_module(req).await)
+}
+
+#[tauri::command]
+async fn read_orpheus_settings() -> Result<String, String> {
+    mediaharbor_core::orpheus::read_settings_json().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn write_orpheus_settings(content: String) -> Result<(), String> {
+    mediaharbor_core::orpheus::write_raw_settings_json(&content).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn send_process_stdin(
+    state: State<'_, AppState>,
+    req: ipc_contract::SendProcessStdinRequest,
+) -> Result<ipc_contract::SendProcessStdinResponse, String> {
+    Ok(state.0.send_process_stdin(req).await)
+}
+
 #[allow(deprecated)]
 #[tauri::command]
 async fn open_external(
@@ -363,6 +407,12 @@ fn main() {
             check_deps,
             install_dep,
             get_dependency_versions,
+            start_orpheus_download,
+            check_orpheus_deps,
+            install_orpheus_module,
+            read_orpheus_settings,
+            write_orpheus_settings,
+            send_process_stdin,
             open_external,
         ])
         .run(tauri::generate_context!())

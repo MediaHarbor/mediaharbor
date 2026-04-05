@@ -203,6 +203,11 @@ pub struct Settings {
     pub apple_use_wrapper: bool,
     pub apple_wrapper_account_url: String,
     pub apple_wrapper_decrypt_ip: String,
+
+    pub orpheus_dl_enabled_modules: String,
+    pub orpheus_download_quality: String,
+    pub orpheus_covers_enabled: bool,
+    pub orpheus_custom_modules: String,
 }
 
 impl Default for Settings {
@@ -410,6 +415,11 @@ impl Default for Settings {
             apple_use_wrapper: false,
             apple_wrapper_account_url: String::new(),
             apple_wrapper_decrypt_ip: String::new(),
+
+            orpheus_dl_enabled_modules: "tidal,qobuz,deezer".into(),
+            orpheus_download_quality: "lossless".into(),
+            orpheus_covers_enabled: true,
+            orpheus_custom_modules: "[]".into(),
         }
     }
 }

@@ -124,7 +124,7 @@ pub struct TidalClient {
     pub refresh_token: String,
     pub user_id: String,
     pub country_code: String,
-    token_expiry: f64,
+    pub token_expiry: f64,
     pub client: reqwest::Client,
 }
 
@@ -442,7 +442,8 @@ impl TidalClient {
         }
 
         if needs_remux {
-            let output = tokio::process::Command::new("ffmpeg")
+            let ffmpeg_bin = crate::venv_manager::resolve_ffmpeg();
+            let output = tokio::process::Command::new(&ffmpeg_bin)
                 .args(&["-y", "-loglevel", "error", "-i"])
                 .arg(&tmp)
                 .args(&["-vn", "-c:a", "flac"])

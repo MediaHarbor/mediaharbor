@@ -82,12 +82,26 @@ impl QobuzSpoofer {
         let bundle_url = format!("https://play.qobuz.com{}", bundle_path);
         let bundle = client.get(&bundle_url).send().await?.text().await?;
 
-        let app_id_re = regex::Regex::new(r#"production:\{api:\{appId:"(?P<app_id>\d{9})""#)
-            .map_err(|e| MhError::Parse(e.to_string()))?;
-        let app_id = app_id_re.captures(&bundle)
-            .and_then(|c| c.name("app_id"))
-            .map(|m| m.as_str().to_string())
-            .ok_or_else(|| MhError::Parse("Qobuz: Could not extract app_id from bundle".into()))?;
+        const APP_ID_PATTERNS: &[&str] = &[
+            r#"production:\{api:\{appId:"(?P<app_id>\d{9})""#,
+            r#"appId:"(?P<app_id>\d{9})""#,
+            r#""app_id":"(?P<app_id>\d{9})""#,
+            r#"appId\s*:\s*"(?P<app_id>\d{9})""#,
+        ];
+        let app_id = APP_ID_PATTERNS.iter()
+            .find_map(|pat| {
+                regex::Regex::new(pat).ok()
+                    .and_then(|re| re.captures(&bundle))
+                    .and_then(|c| c.name("app_id"))
+                    .map(|m| m.as_str().to_string())
+            })
+            .ok_or_else(|| {
+                let snippet: String = bundle.chars().take(200).collect();
+                MhError::Parse(format!(
+                    "Qobuz: Could not extract app_id from bundle. Bundle start: {}",
+                    snippet
+                ))
+            })?;
 
         let seed_tz_re = regex::Regex::new(r#"[a-z]\.initialSeed\("(?P<seed>[\w=]+)",window\.utimezone\.(?P<tz>[a-z]+)\)"#)
             .map_err(|e| MhError::Parse(e.to_string()))?;
@@ -241,13 +255,14 @@ impl QobuzClient {
         let unix_ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs_f64();
-        let sig_str = format!("trackgetFileUrlformat_id27intentstreamtrack_id19512574{}{}", unix_ts, secret);
+            .as_secs();
+        let ts_str = unix_ts.to_string();
+        let sig_str = format!("trackgetFileUrlformat_id27intentstreamtrack_id19512574{}{}", ts_str, secret);
         use md5::{Digest, Md5};
         let hash = format!("{:x}", Md5::digest(sig_str.as_bytes()));
 
         let params = [
-            ("request_ts", unix_ts.to_string()),
+            ("request_ts", ts_str.clone()),
             ("request_sig", hash),
             ("track_id", "19512574".to_string()),
             ("format_id", "27".to_string()),
@@ -264,7 +279,7 @@ impl QobuzClient {
         Ok(resp.status().as_u16() != 400)
     }
 
-    fn api_headers(&self) -> MhResult<HeaderMap> {
+    pub fn api_headers(&self) -> MhResult<HeaderMap> {
         crate::http_client::build_headers(&[
             ("X-App-Id", &self.app_id),
             ("X-User-Auth-Token", &self.auth_token),
@@ -278,27 +293,36 @@ impl QobuzClient {
             .headers(headers)
             .query(params)
             .send().await?;
-        if !resp.status().is_success() {
-            return Err(MhError::Other(format!("Qobuz API error: HTTP {}", resp.status().as_u16())));
+        let status = resp.status();
+        let body = resp.text().await.map_err(MhError::Network)?;
+        if !status.is_success() {
+            let snippet: String = body.chars().take(200).collect();
+            return Err(MhError::Other(format!(
+                "Qobuz API error: HTTP {} — {}",
+                status.as_u16(), snippet
+            )));
         }
-        Ok(resp.json().await?)
+        serde_json::from_str(&body).map_err(|e| {
+            let snippet: String = body.chars().take(200).collect();
+            MhError::Parse(format!("Qobuz: unexpected response from {}: {} — body: {}", endpoint, e, snippet))
+        })
     }
 
     async fn request_file_url_inner(&self, track_id: &str, format_id: u32) -> MhResult<Value> {
         let unix_ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs_f64();
+            .as_secs();
 
+        let ts_str = unix_ts.to_string();
         let sig_str = format!(
             "trackgetFileUrlformat_id{}intentstreamtrack_id{}{}{}",
-            format_id, track_id, unix_ts, self.secret
+            format_id, track_id, ts_str, self.secret
         );
         use md5::{Digest, Md5};
         let hash = format!("{:x}", Md5::digest(sig_str.as_bytes()));
 
         let format_str = format_id.to_string();
-        let ts_str = unix_ts.to_string();
         self.api_get("track/getFileUrl", &[
             ("request_ts", ts_str.as_str()),
             ("request_sig", hash.as_str()),

@@ -133,8 +133,14 @@ pub async fn load_settings(user_data: &Path) -> Settings {
 pub async fn save_settings(settings: &Settings, user_data: &Path) -> MhResult<()> {
     let mut s = settings.clone();
     if s.create_platform_subfolders {
-        s.spotify_output_path = format!("{}/Spotify", s.download_location);
-        s.apple_output_path = format!("{}/Apple Music", s.download_location);
+        s.spotify_output_path = std::path::Path::new(&s.download_location)
+            .join("Spotify")
+            .to_string_lossy()
+            .to_string();
+        s.apple_output_path = std::path::Path::new(&s.download_location)
+            .join("Apple Music")
+            .to_string_lossy()
+            .to_string();
     } else {
         s.spotify_output_path = s.download_location.clone();
         s.apple_output_path = s.download_location.clone();
@@ -261,7 +267,7 @@ fn flatten_settings_for_prefix(settings: &Settings, prefix: &str) -> Vec<(String
                     && v.as_str() != Some("null")
             })
             .map(|(k, v)| {
-                let short_key = k[prefix.len() + 1..].to_string(); // strip "prefix_"
+                let short_key = k[prefix.len() + 1..].to_string();
                 let str_val = match &v {
                     Value::Bool(b) => b.to_string(),
                     Value::Number(n) => n.to_string(),

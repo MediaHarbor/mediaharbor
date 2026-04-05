@@ -264,6 +264,18 @@ pub struct StartTidalDownloadRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StartOrpheusDownloadRequest {
+    pub url: String,
+    pub output_dir: String,
+    pub module_id: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub thumbnail: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StartBatchDownloadRequest {
     pub urls: Vec<String>,
     pub platform: String,
@@ -336,7 +348,6 @@ pub struct CheckDepsResponse {
     pub yt_dlp: bool,
     pub votify: bool,
     pub gamdl: bool,
-    pub pywidevine: bool,
     pub bento4: bool,
 }
 
@@ -355,7 +366,7 @@ pub struct CheckUpdatesResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InstallDepRequest {
-    pub dependency: String, // "ffmpeg", "python", "git", "bento4", "yt_dlp", "votify", "gamdl", "pywidevine"
+    pub dependency: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -398,4 +409,50 @@ pub struct AppErrorEvent {
     pub message: String,
     pub context: Option<String>,
     pub needs_auth: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessStdinPromptEvent {
+    pub download_id: u64,
+    pub prompt_lines: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendProcessStdinRequest {
+    pub download_id: u64,
+    pub input: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SendProcessStdinResponse {
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrpheusModuleStatus {
+    pub id: String,
+    pub label: String,
+    pub installed: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CheckOrpheusDepsResponse {
+    pub orpheus_installed: bool,
+    pub modules: Vec<OrpheusModuleStatus>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallOrpheusModuleRequest {
+    pub module_id: String,
+    pub custom_url: Option<String>,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InstallOrpheusModuleResponse {
+    pub success: bool,
+    pub error: Option<String>,
 }

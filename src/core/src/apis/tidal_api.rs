@@ -371,12 +371,27 @@ impl TidalApiClient {
         &self,
         artist_id: &str,
         country_code: &str,
+        user_token: Option<&str>,
     ) -> MhResult<Value> {
-        self.get_v2(
-            &format!("artists/{}/relationships/albums", artist_id),
-            &[("countryCode", country_code)],
-        )
-        .await
+        let token = match user_token {
+            Some(t) if !t.is_empty() => t.to_string(),
+            _ => self.ensure_token().await?,
+        };
+        let url = format!(
+            "{}/artists/{}/albums?countryCode={}&limit=50",
+            API_URL_V1, artist_id, country_code
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await
+            .map_err(MhError::Network)?;
+        if !resp.status().is_success() {
+            return Err(MhError::Network(resp.error_for_status().unwrap_err()));
+        }
+        Ok(resp.json().await.map_err(MhError::Network)?)
     }
 
     pub async fn get_playlist(&self, playlist_id: &str, country_code: &str) -> MhResult<Value> {

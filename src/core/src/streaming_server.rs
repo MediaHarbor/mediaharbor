@@ -13,6 +13,7 @@ use axum::{
 };
 use bytes::Bytes;
 use dashmap::DashMap;
+use reqwest::{Client, header::HeaderMap as ReqwestHeaderMap};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -21,6 +22,7 @@ use crate::errors::MhResult;
 pub enum StreamContent {
     Full(Bytes),
     Progressive(Mutex<mpsc::Receiver<Result<Bytes, String>>>),
+    Proxied { url: String, auth_headers: ReqwestHeaderMap },
 }
 
 pub struct StreamEntry {
@@ -33,6 +35,7 @@ pub type StreamMap = Arc<DashMap<String, StreamEntry>>;
 #[derive(Clone)]
 struct AppState {
     streams: StreamMap,
+    http: Client,
 }
 
 pub struct StreamingServer {
@@ -44,7 +47,8 @@ pub struct StreamingServer {
 impl StreamingServer {
     pub async fn start() -> MhResult<Self> {
         let streams: StreamMap = Arc::new(DashMap::new());
-        let state = AppState { streams: streams.clone() };
+        let http = crate::http_client::build_client()?;
+        let state = AppState { streams: streams.clone(), http };
 
         let cors = CorsLayer::new()
             .allow_origin(Any)
@@ -105,6 +109,23 @@ impl StreamingServer {
         format!("http://127.0.0.1:{}/{}", self.port, id)
     }
 
+    pub fn register_stream_proxied(
+        &self,
+        id: &str,
+        cdn_url: String,
+        auth_headers: ReqwestHeaderMap,
+        content_type: &str,
+    ) -> String {
+        self.streams.insert(
+            id.to_string(),
+            StreamEntry {
+                content: StreamContent::Proxied { url: cdn_url, auth_headers },
+                content_type: content_type.to_string(),
+            },
+        );
+        format!("http://127.0.0.1:{}/{}", self.port, id)
+    }
+
     pub fn remove_stream(&self, id: &str) {
         self.streams.remove(id);
     }
@@ -121,27 +142,102 @@ impl StreamingServer {
     }
 }
 
+enum ResolvedStream {
+    Full { content_type: String, data: Bytes },
+    Progressive(String),
+    Proxied { content_type: String, url: String, auth_headers: ReqwestHeaderMap },
+}
+
 async fn serve_stream(
     Path(id): Path<String>,
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Response {
-    let (content_type, is_progressive) = {
+    let resolved = {
         let entry = match state.streams.get(&id) {
             Some(e) => e,
             None => return (StatusCode::NOT_FOUND, "Stream not found").into_response(),
         };
-        (entry.content_type.clone(), matches!(entry.content, StreamContent::Progressive(_)))
+        match &entry.content {
+            StreamContent::Full(b) => ResolvedStream::Full {
+                content_type: entry.content_type.clone(),
+                data: b.clone(),
+            },
+            StreamContent::Progressive(_) => ResolvedStream::Progressive(entry.content_type.clone()),
+            StreamContent::Proxied { url, auth_headers } => ResolvedStream::Proxied {
+                content_type: entry.content_type.clone(),
+                url: url.clone(),
+                auth_headers: auth_headers.clone(),
+            },
+        }
     };
 
-    if is_progressive {
+    if let ResolvedStream::Proxied { content_type, url: cdn_url, auth_headers } = resolved {
+
+        let mut upstream_req = state.http.get(&cdn_url).headers(auth_headers);
+        if let Some(range) = headers.get(header::RANGE) {
+            upstream_req = upstream_req.header(reqwest::header::RANGE, range.clone());
+        }
+
+        let upstream_resp = match upstream_req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                return (StatusCode::BAD_GATEWAY, e.to_string()).into_response();
+            }
+        };
+
+        let up_status = upstream_resp.status();
+        let axum_status = StatusCode::from_u16(up_status.as_u16()).unwrap_or(StatusCode::OK);
+        let up_headers = upstream_resp.headers().clone();
+
+        let ct = up_headers
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or(&content_type)
+            .to_string();
+
+        let body_stream = futures_util::stream::unfold(upstream_resp, |mut resp| async move {
+            match resp.chunk().await {
+                Ok(Some(chunk)) => Some((Ok::<Bytes, std::io::Error>(chunk), resp)),
+                Ok(None) => None,
+                Err(e) => Some((
+                    Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+                    resp,
+                )),
+            }
+        });
+
+        let mut builder = axum::http::Response::builder()
+            .status(axum_status)
+            .header(header::CONTENT_TYPE, ct)
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::CACHE_CONTROL, "no-cache");
+
+        if let Some(cl) = up_headers.get(reqwest::header::CONTENT_LENGTH) {
+            builder = builder.header(header::CONTENT_LENGTH, cl.clone());
+        }
+        if let Some(cr) = up_headers.get(reqwest::header::CONTENT_RANGE) {
+            builder = builder.header(header::CONTENT_RANGE, cr.clone());
+        }
+
+        return builder
+            .body(Body::from_stream(body_stream))
+            .unwrap_or_else(|_| {
+                axum::http::Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::empty())
+                    .unwrap()
+            });
+    }
+
+    if let ResolvedStream::Progressive(content_type) = resolved {
         let owned = match state.streams.remove(&id) {
             Some((_, e)) => e,
             None => return (StatusCode::NOT_FOUND, "Stream already consumed").into_response(),
         };
         let rx = match owned.content {
             StreamContent::Progressive(m) => m.into_inner(),
-            StreamContent::Full(_) => unreachable!(),
+            StreamContent::Full(_) | StreamContent::Proxied { .. } => unreachable!(),
         };
 
         let stream = futures_util::stream::unfold(rx, |mut rx| async move {
@@ -166,16 +262,10 @@ async fn serve_stream(
             .into_response();
     }
 
-    let entry = match state.streams.get(&id) {
-        Some(e) => e,
-        None => return (StatusCode::NOT_FOUND, "Stream not found").into_response(),
+    let (content_type, data) = match resolved {
+        ResolvedStream::Full { content_type, data } => (content_type, data),
+        _ => unreachable!(),
     };
-
-    let data = match &entry.content {
-        StreamContent::Full(b) => b.clone(),
-        StreamContent::Progressive(_) => unreachable!(),
-    };
-    drop(entry);
 
     let total = data.len();
 
