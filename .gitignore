@@ -62,3 +62,10 @@ src/funcs/
 
 # Misc local notes
 MediaHarbor Bug Fixes.md
+
+# Dev artifacts
+bum.log
+CLAUDE.md
+src/app/gen/
+src/app/icons/android/
+src/app/icons/ios/
