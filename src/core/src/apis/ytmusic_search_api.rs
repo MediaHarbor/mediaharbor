@@ -685,7 +685,6 @@ fn parse_podcast_results(data: &Value) -> Vec<YtMusicResult> {
             let browse_id = browse_ids
                 .iter()
                 .find(|id| id.starts_with("MPSP"))
-                .or_else(|| browse_ids.first())
                 .cloned()?;
 
             let title = parse_title_from_item(item);

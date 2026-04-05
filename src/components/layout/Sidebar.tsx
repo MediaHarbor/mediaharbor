@@ -117,7 +117,7 @@ export function Sidebar() {
       {/* Top nav */}
       <nav className={cn('py-3 space-y-0.5', collapsed ? 'px-1.5' : 'px-2')}>
         {TOP_NAV.map(item => (
-          <NavItem key={item.path} {...item} isActive={isActive(item.path)} collapsed={collapsed} />
+          <NavItem key={item.path} {...item} isActive={item.path ? isActive(item.path) : false} collapsed={collapsed} />
         ))}
       </nav>
 
