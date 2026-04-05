@@ -164,10 +164,11 @@ where
     Ok(())
 }
 
+#[allow(unused_variables)]
 async fn run_installer<F: Fn(u8, &str)>(
-    _installer_path: &std::path::Path,
-    _version: &str,
-    _on_progress: &F,
+    installer_path: &std::path::Path,
+    version: &str,
+    on_progress: &F,
 ) -> MhResult<()> {
     #[cfg(target_os = "windows")]
     {

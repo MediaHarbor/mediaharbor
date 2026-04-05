@@ -3,7 +3,9 @@ use serde::Deserialize;
 
 use crate::errors::{MhError, MhResult};
 #[cfg(target_os = "windows")]
-use crate::http_client::build_mozilla_client;
+use crate::http_client::{build_mozilla_client, download_to_file};
+#[cfg(target_os = "windows")]
+use tempfile::TempDir;
 
 #[cfg(target_os = "windows")]
 #[derive(Debug, Deserialize)]
@@ -96,7 +98,7 @@ where
 
         on_progress(5, "Starting Git download…");
 
-        download_to_file(&client, &download_url, &installer_path, |dl, total| {
+        download_to_file(&client, &download_url, &installer_path, |dl, total: Option<u64>| {
             let pct = total
                 .map(|t| (dl as u128 * 40 / t as u128) as u8)
                 .unwrap_or(0);

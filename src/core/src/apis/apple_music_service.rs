@@ -15,15 +15,15 @@ use serde_json::{json, Value};
 use crate::{
     crypto::mp4decrypt,
     defaults::Settings,
-    errors::{MhError, MhResult}, venv_manager,
+    errors::{MhError, MhResult},
+    http_client::{UA_CHROME_LATEST, PLATFORM_HEADER},
+    venv_manager,
 };
 
 const APPLE_MUSIC_HOMEPAGE: &str = "https://music.apple.com";
 const AMP_API_URL: &str = "https://amp-api.music.apple.com";
 const WEBPLAYBACK_API_URL: &str =
     "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/webPlayback";
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-                  (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const WIDEVINE_SYSTEM_ID: [u8; 16] = [
     0xed, 0xef, 0x8b, 0xa9, 0x79, 0xd6, 0x4a, 0xce,
     0xa3, 0xc8, 0x27, 0xdc, 0xd5, 0x1d, 0x21, 0xed,
@@ -253,7 +253,7 @@ impl Default for AppleMusicService {
 
 fn build_apple_client() -> MhResult<Client> {
     reqwest::ClientBuilder::new()
-        .user_agent(UA)
+        .user_agent(UA_CHROME_LATEST)
         .redirect(reqwest::redirect::Policy::limited(10))
         .timeout(Duration::from_secs(30))
         .build()
@@ -282,7 +282,7 @@ fn apple_headers(dev_token: &str, media_user_token: &str) -> HeaderMap {
         ),
     );
     h.insert("sec-ch-ua-mobile", HeaderValue::from_static("?0"));
-    h.insert("sec-ch-ua-platform", HeaderValue::from_static(r#""Windows""#));
+    h.insert("sec-ch-ua-platform", HeaderValue::from_static(PLATFORM_HEADER));
     h.insert("sec-fetch-dest", HeaderValue::from_static("empty"));
     h.insert("sec-fetch-mode", HeaderValue::from_static("cors"));
     h.insert("sec-fetch-site", HeaderValue::from_static("same-site"));
@@ -363,7 +363,7 @@ fn build_apple_cookie_header(cookies_path: &str) -> String {
 
 async fn get_developer_token() -> MhResult<String> {
     let client = reqwest::ClientBuilder::new()
-        .user_agent(UA)
+        .user_agent(UA_CHROME_LATEST)
         .redirect(reqwest::redirect::Policy::limited(5))
         .timeout(Duration::from_secs(15))
         .build()
@@ -808,7 +808,7 @@ async fn parse_hls_for_stream(
         fetch_targets.extend(audio_rendition_urls.into_iter().take(3));
 
         let plain_client = client.clone();
-        let plain_ua = UA;
+        let plain_ua = UA_CHROME_LATEST;
 
         for target_url in &fetch_targets {
             if widevine_pssh.is_some() {
@@ -993,7 +993,7 @@ async fn get_legacy_stream_info(
 
     let m3u8_resp = client
         .get(&stream_url)
-        .header(reqwest::header::USER_AGENT, UA)
+        .header(reqwest::header::USER_AGENT, UA_CHROME_LATEST)
         .send()
         .await
         .map_err(MhError::Network)?;
@@ -1166,7 +1166,7 @@ async fn decrypt_and_collect_hls(
     let is_video = content_type.starts_with("video/");
 
     let seg_headers = seg_fetch_headers(dev_token, media_user_token);
-    let plain_ua = UA;
+    let plain_ua = UA_CHROME_LATEST;
 
     let pssh = hls_info
         .widevine_pssh
@@ -1231,7 +1231,8 @@ async fn decrypt_and_collect_hls(
         std::fs::write(&dec_file, &decrypted)
             .map_err(MhError::Io)?;
 
-        let ffmpeg_out = tokio::process::Command::new("ffmpeg")
+        let ffmpeg_bin = crate::venv_manager::resolve_ffmpeg();
+        let ffmpeg_out = tokio::process::Command::new(&ffmpeg_bin)
             .args([
                 "-y", "-loglevel", "error",
                 "-i", dec_file.to_str().unwrap_or(""),

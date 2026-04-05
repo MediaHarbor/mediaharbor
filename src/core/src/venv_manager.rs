@@ -53,6 +53,51 @@ pub fn resolve_command(name: &str, fallback_paths: &[&Path]) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// Resolve the ffmpeg binary, checking venv and common install locations.
+pub fn resolve_ffmpeg() -> String {
+    let venv_bin = get_venv_bin("ffmpeg");
+    if venv_bin.exists() {
+        return venv_bin.to_string_lossy().to_string();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let app_data = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."));
+        let local = app_data.join("Microsoft").join("WinGet").join("Links").join("ffmpeg.exe");
+        if local.exists() {
+            return local.to_string_lossy().to_string();
+        }
+        let mh_ffmpeg = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".mediaharbor")
+            .join("ffmpeg")
+            .join("ffmpeg.exe");
+        if mh_ffmpeg.exists() {
+            return mh_ffmpeg.to_string_lossy().to_string();
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        for p in &["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg"] {
+            if Path::new(p).exists() {
+                return p.to_string();
+            }
+        }
+        let mh_ffmpeg = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".mediaharbor")
+            .join("ffmpeg")
+            .join("ffmpeg");
+        if mh_ffmpeg.exists() {
+            return mh_ffmpeg.to_string_lossy().to_string();
+        }
+    }
+
+    "ffmpeg".to_string()
+}
+
 pub async fn find_system_python() -> MhResult<String> {
     let candidates: &[&str] = if cfg!(windows) {
         &["py", "python3", "python"]

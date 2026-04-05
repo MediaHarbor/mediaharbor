@@ -57,7 +57,11 @@ fn cache_set(cache: &YtAudioStreamCache, key: &str, info: StreamInfo) {
 }
 
 fn ytdlp_candidates(venv_python: Option<&Path>) -> Vec<String> {
-    let mut candidates: Vec<String> = vec!["yt-dlp".to_string()];
+    let mut candidates: Vec<String> = if cfg!(windows) {
+        vec!["yt-dlp.exe".to_string(), "yt-dlp".to_string()]
+    } else {
+        vec!["yt-dlp".to_string()]
+    };
 
     let venv = venv_python
         .map(|p| p.to_string_lossy().to_string())
@@ -73,7 +77,12 @@ fn ytdlp_candidates(venv_python: Option<&Path>) -> Vec<String> {
         candidates.push(format!("{} -m yt_dlp", py));
     }
 
-    for py in &["python", "python3", "py"] {
+    let python_names: &[&str] = if cfg!(windows) {
+        &["py", "python", "python3"]
+    } else {
+        &["python", "python3", "py"]
+    };
+    for py in python_names {
         candidates.push(format!("{} -m yt_dlp", py));
     }
 

@@ -18,6 +18,7 @@ use tokio::process::Command;
 use tracing::{debug, warn};
 
 use crate::errors::{MhError, MhResult};
+use crate::http_client::UA_CHROME_LATEST;
 
 const TOTP_PERIOD: u64 = 30;
 const TOTP_DIGITS: u32 = 6;
@@ -35,8 +36,6 @@ const PLAYPLAY_LICENSE_URL: &str =
     "https://gew4-spclient.spotify.com/playplay/v1/key/{fileId}";
 
 const CLIENT_VERSION: &str = "1.2.70.61.g856ccd63";
-const UA: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 const UA_ANDROID: &str = "Spotify/8.9.86.551 Android/34 (Google Pixel 8)";
 
 const AES_IV: [u8; 16] = [
@@ -386,7 +385,7 @@ impl LibrespotService {
         let resp = self
             .client
             .get(SERVER_TIME_URL)
-            .header("user-agent", UA)
+            .header("user-agent", UA_CHROME_LATEST)
             .send()
             .await
             .map_err(MhError::Network)?;
@@ -439,7 +438,7 @@ impl LibrespotService {
             .client
             .get(&url)
             .header("cookie", format!("sp_dc={sp_dc}"))
-            .header("user-agent", UA)
+            .header("user-agent", UA_CHROME_LATEST)
             .header("app-platform", "WebPlayer")
             .header("spotify-app-version", CLIENT_VERSION)
             .send()
@@ -563,7 +562,7 @@ impl LibrespotService {
         let mut h = vec![
             ("Authorization".to_string(), format!("Bearer {token}")),
             ("Accept".to_string(), "application/json".to_string()),
-            ("user-agent".to_string(), UA.to_string()),
+            ("user-agent".to_string(), UA_CHROME_LATEST.to_string()),
             ("app-platform".to_string(), "WebPlayer".to_string()),
             ("spotify-app-version".to_string(), CLIENT_VERSION.to_string()),
             (
@@ -630,7 +629,7 @@ impl LibrespotService {
                     if self._manifest_has_files(&data) {
                         return Ok(data);
                     }
-                    break; // format returned no files, try next
+                    break;
                 }
 
                 match status.as_u16() {
@@ -1404,7 +1403,7 @@ impl LibrespotService {
             .header("Accept", "*/*")
             .header("Origin", "https://open.spotify.com")
             .header("Referer", "https://open.spotify.com/")
-            .header("User-Agent", UA)
+            .header("User-Agent", UA_CHROME_LATEST)
             .send()
             .await
             .map_err(MhError::Network)?;
@@ -1435,7 +1434,8 @@ impl LibrespotService {
             )
             .await?;
 
-        let mut child = Command::new("ffmpeg")
+        let ffmpeg_bin = crate::venv_manager::resolve_ffmpeg();
+        let mut child = Command::new(&ffmpeg_bin)
             .args([
                 "-y",
                 "-loglevel",
@@ -1570,7 +1570,7 @@ sys.stdout.write(json.dumps({"key": key_hex, "kid": kid_hex}) + "\n")
             .header("spotify-app-version", CLIENT_VERSION)
             .header("Origin", "https://open.spotify.com")
             .header("Referer", "https://open.spotify.com/")
-            .header("User-Agent", UA)
+            .header("User-Agent", UA_CHROME_LATEST)
             .body(challenge_bytes)
             .send()
             .await

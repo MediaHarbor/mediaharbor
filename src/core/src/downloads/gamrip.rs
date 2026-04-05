@@ -99,7 +99,10 @@ pub fn build_gamdl_args(settings: &Settings, url: &str, config_path: &Path) -> V
     args.push(config_path.to_string_lossy().to_string());
 
     if settings.create_platform_subfolders {
-        let output_path = format!("{}/Apple Music", settings.download_location);
+        let output_path = std::path::Path::new(&settings.download_location)
+            .join("Apple Music")
+            .to_string_lossy()
+            .to_string();
         args.push("-o".into());
         args.push(output_path);
     }
@@ -137,7 +140,10 @@ fn build_votify_args_inner(
     args.push(config_path.to_string_lossy().to_string());
 
     if settings.create_platform_subfolders {
-        let output_path = format!("{}/Spotify", settings.download_location);
+        let output_path = std::path::Path::new(&settings.download_location)
+            .join("Spotify")
+            .to_string_lossy()
+            .to_string();
         args.push("-o".into());
         args.push(output_path);
     }
@@ -561,18 +567,21 @@ mod tests {
     #[test]
     fn gamdl_args_has_config_and_output() {
         let settings = Settings::default();
-        let config = Path::new("/tmp/gamdl_config.ini");
-        let args = build_gamdl_args(&settings, "https://music.apple.com/album/123", config);
+        let tmp = std::env::temp_dir();
+        let config = tmp.join("gamdl_config.ini");
+        let config_str = config.to_string_lossy().to_string();
+        let args = build_gamdl_args(&settings, "https://music.apple.com/album/123", &config);
         assert!(args.contains(&"--config-path".to_string()));
-        assert!(args.contains(&"/tmp/gamdl_config.ini".to_string()));
+        assert!(args.contains(&config_str));
         assert_eq!(args.last().unwrap(), "https://music.apple.com/album/123");
     }
 
     #[test]
     fn votify_args_has_output() {
         let settings = Settings::default();
-        let config = Path::new("/tmp/votify_config.ini");
-        let args = build_votify_args(&settings, "https://open.spotify.com/track/abc", config);
+        let tmp = std::env::temp_dir();
+        let config = tmp.join("votify_config.ini");
+        let args = build_votify_args(&settings, "https://open.spotify.com/track/abc", &config);
         assert!(args.contains(&"--config-path".to_string()));
         assert_eq!(args.last().unwrap(), "https://open.spotify.com/track/abc");
     }

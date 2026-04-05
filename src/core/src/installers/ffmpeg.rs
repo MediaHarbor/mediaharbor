@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+#[cfg(target_os = "linux")]
 use tokio::fs;
 use tokio::process::Command;
 
@@ -15,10 +17,13 @@ const FFPROBE_RSS: &str = "https://evermeet.cx/ffmpeg/ffprobe-rss.xml";
 const WIN_X64_URL: &str =
     "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
 
+#[cfg(target_os = "linux")]
 const LINUX_X64_URL: &str =
     "https://johnvansickle.com/ffmpeg/builds/ffmpeg-git-amd64-static.tar.xz";
+#[cfg(target_os = "linux")]
 const LINUX_ARM64_URL: &str =
     "https://johnvansickle.com/ffmpeg/builds/ffmpeg-git-arm64-static.tar.xz";
+#[cfg(target_os = "linux")]
 const LINUX_ARM_URL: &str =
     "https://johnvansickle.com/ffmpeg/builds/ffmpeg-git-armhf-static.tar.xz";
 
@@ -101,9 +106,10 @@ async fn fetch_latest_from_rss(feed_url: &str, label: &str) -> MhResult<RssItem>
     })
 }
 
+#[allow(unused_variables)]
 pub async fn update_system_path<F: Fn(u8, &str)>(
     bin_dir: &Path,
-    _on_progress: &F,
+    on_progress: &F,
 ) -> MhResult<()> {
     let bin_dir_str = bin_dir.to_string_lossy().to_string();
 
@@ -230,7 +236,7 @@ async fn install_macos<F: Fn(u8, &str)>(ffmpeg_dir: &Path, on_progress: &F) -> M
     Ok(())
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "macos")]
 async fn extract_zip_single_binary(
     zip_path: &Path,
     dest_dir: &Path,
@@ -341,6 +347,7 @@ async fn install_windows<F: Fn(u8, &str)>(
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 async fn install_linux<F: Fn(u8, &str)>(
     download_url: &str,
     ffmpeg_dir: &Path,
@@ -417,11 +424,7 @@ fn set_executable(path: &Path) -> MhResult<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn set_executable(_path: &Path) -> MhResult<()> {
-    Ok(())
-}
-
+#[cfg(target_os = "linux")]
 fn resolve_arch() -> &'static str {
     #[cfg(target_arch = "x86_64")]
     return "x64";
@@ -433,6 +436,7 @@ fn resolve_arch() -> &'static str {
     return "x64";
 }
 
+#[cfg(target_os = "linux")]
 fn get_linux_url() -> Option<&'static str> {
     match resolve_arch() {
         "x64" => Some(LINUX_X64_URL),

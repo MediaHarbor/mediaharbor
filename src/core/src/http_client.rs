@@ -7,9 +7,46 @@ use std::time::Duration;
 
 use crate::errors::{MhError, MhResult};
 
+#[cfg(target_os = "windows")]
 pub const UA_MOZILLA: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
      (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+#[cfg(target_os = "macos")]
+pub const UA_MOZILLA: &str =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+pub const UA_MOZILLA: &str =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+/// High-version Chrome UA for APIs that check browser version
+#[cfg(target_os = "windows")]
+pub const UA_CHROME_LATEST: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
+
+#[cfg(target_os = "macos")]
+pub const UA_CHROME_LATEST: &str =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+pub const UA_CHROME_LATEST: &str =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
+
+/// Platform string for sec-ch-ua-platform header
+#[cfg(target_os = "windows")]
+pub const PLATFORM_HEADER: &str = r#""Windows""#;
+
+#[cfg(target_os = "macos")]
+pub const PLATFORM_HEADER: &str = r#""macOS""#;
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+pub const PLATFORM_HEADER: &str = r#""Linux""#;
 
 pub const UA_TIDAL_ANDROID: &str =
     "TIDAL/1099 okhttp/4.9.3";

@@ -150,10 +150,10 @@ fn symlink_to_usr_local_bin(bin_dir: &Path) -> MhResult<()> {
 
 fn update_shell_path(bin_dir: &Path) -> MhResult<()> {
     let bin_dir_str = bin_dir.to_string_lossy().to_string();
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
 
     #[cfg(target_os = "macos")]
     {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
         for rc_name in &[".zshrc", ".bash_profile"] {
             let rc_path = home.join(rc_name);
             let existing = std::fs::read_to_string(&rc_path).unwrap_or_default();
@@ -198,6 +198,7 @@ if ($userPath -split ';' -notcontains $binDir) {{
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
         let shell = std::env::var("SHELL").unwrap_or_default();
         let rc_path = if shell.contains("zsh") {
             home.join(".zshrc")

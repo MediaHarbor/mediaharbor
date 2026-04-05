@@ -1031,7 +1031,7 @@ mod tests {
             url: "https://example.com/watch?v=test".into(),
             output_template: "%(title)s.%(ext)s".into(),
             format: "mp3".into(),
-            download_path: "/tmp".into(),
+            download_path: std::env::temp_dir().to_string_lossy().to_string(),
             quality: "0".into(),
             cookies_path: None,
             cookies_from_browser: None,
@@ -1053,7 +1053,7 @@ mod tests {
         assert!(cli.contains(&"--audio-format".to_string()));
         assert!(cli.contains(&"mp3".to_string()));
         assert!(cli.contains(&"--embed-thumbnail".to_string()));
-        assert!(cli.contains(&"--add-metadata".to_string()));
+        assert!(cli.contains(&"--embed-metadata".to_string()));
     }
 
     #[test]
@@ -1062,7 +1062,7 @@ mod tests {
             url: "https://example.com/v".into(),
             format: "bestvideo+bestaudio".into(),
             output_template: "%(title)s.%(ext)s".into(),
-            download_path: "/tmp".into(),
+            download_path: std::env::temp_dir().to_string_lossy().to_string(),
             cookies_path: None,
             cookies_from_browser: None,
             proxy: None,
