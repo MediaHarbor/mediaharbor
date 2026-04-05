@@ -9,6 +9,7 @@
     "lint": "eslint . --report-unused-disable-directives --max-warnings 150",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "test": "vitest",
+    "tauri:icon": "npx tauri icon D:/Documents/MH-WEB/SVG/MHLogo.svg -o src/app/icons",
     "tauri:dev": "concurrently \"npx vite dev\" \"cd src/app && cargo tauri dev\"",
     "tauri:build": "npm run build:react && cd src/app && APPIMAGE_EXTRACT_AND_RUN=1 cargo tauri build",
     "tauri:build:linux": "npm run build:react && cd src/app && APPIMAGE_EXTRACT_AND_RUN=1 cargo tauri build --bundles deb,rpm,appimage",
@@ -23,6 +24,7 @@
   "description": "MediaHarbor",
   "homepage": "https://mediaharbor.github.io",
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
     "@types/node": "^20.11.5",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
