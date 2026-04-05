@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Disc3, Clock, Play, Shuffle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Disc3, Clock, Play, Shuffle, Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { searchService } from '@/services/ipc/search';
 import type { Platform } from '@/types';
@@ -28,9 +28,33 @@ export interface RemoteTrack {
   url?: string;
 }
 
-function normalizeTrack(track: any, platform: Platform): RemoteTrack {
+interface RawTrackData {
+  title?: string;
+  name?: string;
+  trackName?: string;
+  artist?: string | { name?: string };
+  artists?: { name?: string }[];
+  performer?: { name?: string };
+  artistName?: string;
+  channel?: string;
+  uploader?: string;
+  playUrl?: string;
+  external_urls?: { spotify?: string };
+  uri?: string;
+  url?: string;
+  link?: string;
+  trackViewUrl?: string;
+  webpage_url?: string;
+  id?: string | number;
+  duration?: number;
+  duration_ms?: number;
+  trackTimeMillis?: number;
+}
+
+function normalizeTrack(track: RawTrackData, platform: Platform): RemoteTrack {
   let title = track.title || track.name || track.trackName || 'Unknown Track';
-  let artist = track.artist || '';
+  const artistName = typeof track.artist === 'string' ? track.artist : track.artist?.name;
+  let artist = artistName || '';
   let duration: number | undefined;
   let url: string | undefined;
 
@@ -42,17 +66,17 @@ function normalizeTrack(track: any, platform: Platform): RemoteTrack {
       break;
     case 'tidal':
       url = track.playUrl || track.url || (track.id ? `https://tidal.com/browse/track/${track.id}` : undefined);
-      artist = artist || track.artists?.[0]?.name || track.artist?.name || '';
+      artist = artist || track.artists?.[0]?.name || artistName || '';
       duration = track.duration;
       break;
     case 'qobuz':
       url = track.playUrl || track.url || (track.id ? `https://play.qobuz.com/track/${track.id}` : undefined);
-      artist = artist || track.performer?.name || track.artist?.name || '';
+      artist = artist || track.performer?.name || artistName || '';
       duration = track.duration;
       break;
     case 'deezer':
       url = track.playUrl || track.link || (track.id ? `https://www.deezer.com/track/${track.id}` : undefined);
-      artist = artist || track.artist?.name || '';
+      artist = artist || artistName || '';
       duration = track.duration;
       break;
     case 'applemusic':
@@ -82,6 +106,7 @@ interface SearchAlbumViewProps {
   backLabel?: string;
   onBack: () => void;
   onPlay?: (tracks: RemoteTrack[], index?: number) => void;
+  onDownload?: (albumUrl: string) => void;
 }
 
 export function SearchAlbumView({
@@ -94,6 +119,7 @@ export function SearchAlbumView({
   backLabel = 'Artist',
   onBack,
   onPlay,
+  onDownload,
 }: SearchAlbumViewProps) {
   const [tracks, setTracks] = useState<RemoteTrack[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,7 +136,7 @@ export function SearchAlbumView({
       .then((data) => {
         if (cancelled) return;
         if (data?.thumbnail) setCoverUrl(data.thumbnail);
-        const rawTracks: any[] = data?.tracks || data?.items || [];
+        const rawTracks: RawTrackData[] = data?.tracks || data?.items || [];
         setTracks(rawTracks.map((t) => normalizeTrack(t, platform)));
       })
       .catch((e) => {
@@ -123,6 +149,18 @@ export function SearchAlbumView({
   }, [albumId, platform]);
 
   const totalDuration = tracks.reduce((acc, t) => acc + (t.duration || 0), 0);
+
+  const albumUrl = (() => {
+    switch (platform) {
+      case 'tidal': return `https://tidal.com/browse/album/${albumId}`;
+      case 'deezer': return `https://www.deezer.com/album/${albumId}`;
+      case 'qobuz': return `https://play.qobuz.com/album/${albumId}`;
+      case 'spotify': return `https://open.spotify.com/album/${albumId}`;
+      case 'applemusic': return `https://music.apple.com/album/${albumId}`;
+      case 'youtubemusic': return `https://music.youtube.com/browse/${albumId}`;
+      default: return albumId;
+    }
+  })();
 
   return (
     <motion.div
@@ -195,6 +233,16 @@ export function SearchAlbumView({
             >
               <Shuffle className="h-3.5 w-3.5" />
               Shuffle
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-full gap-2 px-5"
+              disabled={!onDownload}
+              onClick={() => onDownload?.(albumUrl)}
+            >
+              <Download className="h-3.5 w-3.5" />
+              Download
             </Button>
           </div>
         </div>

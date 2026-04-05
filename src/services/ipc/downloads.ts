@@ -1,7 +1,11 @@
-import type { Platform } from '@/types';
+import type { Platform, OrpheusPlatform } from '@/types';
+
+const ORPHEUS_PLATFORMS: ReadonlySet<string> = new Set([
+  'soundcloud', 'napster', 'beatport', 'nugs', 'kkbox', 'bugs', 'idagio', 'jiosaavn',
+]);
 
 interface DownloadParams {
-  platform: Platform | 'generic';
+  platform: Platform | OrpheusPlatform | 'generic';
   url: string;
   quality?: string | number;
   type?: 'track' | 'album' | 'playlist';
@@ -55,7 +59,11 @@ class DownloadService {
           break;
 
         default:
-          throw new Error(`Unsupported platform: ${platform}`);
+          if (ORPHEUS_PLATFORMS.has(platform)) {
+            window.electron.downloads.startOrpheus({ url, platform, ...meta });
+          } else {
+            throw new Error(`Unsupported platform: ${platform}`);
+          }
       }
 
     } catch (error) {

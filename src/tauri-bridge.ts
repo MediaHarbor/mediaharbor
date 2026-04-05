@@ -1,6 +1,97 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type { Settings } from '@/types/settings';
+import type { SearchResult } from '@/types';
+
+interface DownloadInfoPayload {
+  order: number;
+  title?: string;
+  artist?: string;
+  uploader?: string;
+  album?: string;
+  thumbnail?: string | null;
+  platform?: string;
+  quality?: string;
+}
+
+interface DownloadProgressPayload {
+  order: number;
+  progress: number;
+  title?: string;
+  thumbnail?: string | null;
+  artist?: string;
+  album?: string;
+}
+
+interface DownloadCompletePayload {
+  order: number;
+  title?: string;
+  warnings?: string;
+  location?: string;
+  fullLog?: string;
+}
+
+interface DownloadErrorPayload {
+  order: number;
+  error: string;
+  fullLog: string;
+  title?: string;
+}
+
+interface StreamReadyPayload {
+  streamUrl: string;
+  platform: string;
+  durationSec?: number;
+  mediaType: 'audio' | 'video';
+}
+
+interface InstallProgressPayload {
+  dependency: string;
+  percent: number;
+  status: string;
+}
+
+interface ScanProgressPayload {
+  directory: string;
+  percent: number;
+  status: string;
+}
+
+interface FilesChangedPayload {
+  directory: string;
+}
+
+interface AppErrorPayload {
+  message: string;
+  context?: string;
+  needs_auth?: string;
+}
+
+interface BackendLogPayload {
+  level: string;
+  source: string;
+  title: string;
+  message: string;
+  timestamp: string;
+}
+
+interface DownloadData {
+  url: string;
+  outputDir?: string;
+  quality?: string | null;
+  title?: string | null;
+  artist?: string | null;
+  uploader?: string | null;
+  album?: string | null;
+  thumbnail?: string | null;
+  platform?: string;
+}
+
+interface SpotifyProfile {
+  name?: string;
+  [key: string]: unknown;
+}
 
 function makeHub<T>() {
   const subs = new Set<(data: T) => void>();
@@ -15,10 +106,10 @@ function makeHub<T>() {
   };
 }
 
-const infoHub     = makeHub<any>();
-const progressHub = makeHub<any>();
-const completeHub = makeHub<any>();
-const errorHub    = makeHub<any>();
+const infoHub     = makeHub<DownloadInfoPayload>();
+const progressHub = makeHub<DownloadProgressPayload>();
+const completeHub = makeHub<DownloadCompletePayload>();
+const errorHub    = makeHub<DownloadErrorPayload>();
 
 listen<{
   download_id: number;
@@ -55,23 +146,25 @@ listen<{
   }
 });
 
-const streamReadyHub    = makeHub<any>();
-const installProgressHub = makeHub<any>();
-const scanProgressHub   = makeHub<any>();
-const filesChangedHub   = makeHub<any>();
-const appErrorHub       = makeHub<any>();
-const backendLogHub     = makeHub<any>();
+const streamReadyHub    = makeHub<StreamReadyPayload>();
+const installProgressHub = makeHub<InstallProgressPayload>();
+const scanProgressHub   = makeHub<ScanProgressPayload>();
+const filesChangedHub   = makeHub<FilesChangedPayload>();
+const appErrorHub       = makeHub<AppErrorPayload>();
+const backendLogHub     = makeHub<BackendLogPayload>();
+const stdinPromptHub    = makeHub<{ downloadId: number; promptLines: string[] }>();
 
-listen<any>('stream-ready',     (e) => streamReadyHub.emit(e.payload));
-listen<any>('install-progress', (e) => installProgressHub.emit(e.payload));
-listen<any>('scan-progress',    (e) => scanProgressHub.emit(e.payload));
-listen<any>('library-changed',  (e) => filesChangedHub.emit(e.payload));
-listen<any>('app-error',        (e) => appErrorHub.emit(e.payload));
-listen<any>('backend-log',      (e) => backendLogHub.emit(e.payload));
+listen<StreamReadyPayload>('stream-ready',        (e) => streamReadyHub.emit(e.payload));
+listen<InstallProgressPayload>('install-progress',    (e) => installProgressHub.emit(e.payload));
+listen<ScanProgressPayload>('scan-progress',       (e) => scanProgressHub.emit(e.payload));
+listen<FilesChangedPayload>('library-changed',     (e) => filesChangedHub.emit(e.payload));
+listen<AppErrorPayload>('app-error',           (e) => appErrorHub.emit(e.payload));
+listen<BackendLogPayload>('backend-log',         (e) => backendLogHub.emit(e.payload));
+listen<{ downloadId: number; promptLines: string[] }>('process-stdin-prompt',(e) => stdinPromptHub.emit(e.payload));
 
 async function getOutputDir(): Promise<string> {
   try {
-    const resp = await invoke<any>('get_settings');
+    const resp = await invoke<{ settings: Settings }>('get_settings');
     return resp?.settings?.downloadLocation ?? '';
   } catch {
     return '';
@@ -134,48 +227,48 @@ const tauriAPI = {
     updateDependencies: (_packages: string[]) => {
     },
     onInstallProgress: installProgressHub.on.bind(installProgressHub),
-    onDependencyNotification: (_cb: (data: any) => void) => () => {},
+    onDependencyNotification: (_cb: (data: Record<string, unknown>) => void) => () => {},
     onDependencyLoading:      (_cb: (isLoading: boolean) => void) => () => {},
   },
 
   search: {
     perform: async (params: { platform: string; query: string; type: string }) => {
-      return invoke<{ results: any; platform: string }>('perform_search', { req: params });
+      return invoke<{ results: SearchResult[]; platform: string }>('perform_search', { req: params });
     },
     getAlbumDetails: async (platform: string, albumId: string) => {
       try {
-        const r = await invoke<{ data: any }>('get_album_details', {
+        const r = await invoke<{ data: Record<string, unknown> }>('get_album_details', {
           req: { albumId, platform },
         });
         return { success: true, data: r.data };
-      } catch (e: any) {
+      } catch (e: unknown) {
         return { success: false, error: String(e) };
       }
     },
     getPlaylistDetails: async (platform: string, playlistId: string) => {
       try {
-        const r = await invoke<{ data: any }>('get_playlist_details', {
+        const r = await invoke<{ data: Record<string, unknown> }>('get_playlist_details', {
           req: { playlistId, platform },
         });
         return { success: true, data: r.data };
-      } catch (e: any) {
+      } catch (e: unknown) {
         return { success: false, error: String(e) };
       }
     },
     getArtistDetails: async (platform: string, artistId: string) => {
       try {
-        const r = await invoke<{ data: any }>('get_artist_details', {
+        const r = await invoke<{ data: Record<string, unknown> }>('get_artist_details', {
           req: { artistId, platform },
         });
         return { success: true, data: r.data };
-      } catch (e: any) {
+      } catch (e: unknown) {
         return { success: false, error: String(e) };
       }
     },
   },
 
   downloads: {
-    startYouTubeMusic: async (data: any) => {
+    startYouTubeMusic: async (data: DownloadData) => {
       const outputDir = data.outputDir || await getOutputDir();
       invoke('start_yt_music_download', {
         req: {
@@ -188,7 +281,7 @@ const tauriAPI = {
         },
       }).catch(() => {});
     },
-    startYouTubeVideo: async (data: any) => {
+    startYouTubeVideo: async (data: DownloadData) => {
       const outputDir = data.outputDir || await getOutputDir();
       invoke('start_yt_video_download', {
         req: {
@@ -201,7 +294,7 @@ const tauriAPI = {
         },
       }).catch(() => {});
     },
-    startGenericVideo: async (data: any) => {
+    startGenericVideo: async (data: DownloadData) => {
       const outputDir = data.outputDir || await getOutputDir();
       invoke('start_yt_video_download', {
         req: {
@@ -214,7 +307,7 @@ const tauriAPI = {
         },
       }).catch(() => {});
     },
-    startSpotify: async (data: any) => {
+    startSpotify: async (data: DownloadData) => {
       const outputDir = data.outputDir || await getOutputDir();
       invoke('start_spotify_download', {
         req: {
@@ -227,7 +320,7 @@ const tauriAPI = {
         },
       }).catch(() => {});
     },
-    startAppleMusic: async (data: any) => {
+    startAppleMusic: async (data: DownloadData) => {
       const outputDir = data.outputDir || await getOutputDir();
       invoke('start_apple_download', {
         req: {
@@ -240,7 +333,7 @@ const tauriAPI = {
         },
       }).catch(() => {});
     },
-    startQobuz: async (data: any) => {
+    startQobuz: async (data: DownloadData) => {
       const outputDir = data.outputDir || await getOutputDir();
       const quality = data.quality != null ? parseInt(String(data.quality), 10) : null;
       invoke('start_qobuz_download', {
@@ -254,7 +347,7 @@ const tauriAPI = {
         },
       }).catch(() => {});
     },
-    startDeezer: async (data: any) => {
+    startDeezer: async (data: DownloadData) => {
       const outputDir = data.outputDir || await getOutputDir();
       const quality = data.quality != null ? parseInt(String(data.quality), 10) : null;
       invoke('start_deezer_download', {
@@ -268,7 +361,7 @@ const tauriAPI = {
         },
       }).catch(() => {});
     },
-    startTidal: async (data: any) => {
+    startTidal: async (data: DownloadData) => {
       const outputDir = data.outputDir || await getOutputDir();
       invoke('start_tidal_download', {
         req: {
@@ -278,6 +371,20 @@ const tauriAPI = {
           album: data.album ?? null,
           thumbnail: data.thumbnail ?? null,
           platform: 'tidal',
+        },
+      }).catch(() => {});
+    },
+    startOrpheus: async (data: DownloadData) => {
+      const outputDir = data.outputDir || await getOutputDir();
+      invoke('start_orpheus_download', {
+        req: {
+          url: data.url,
+          outputDir,
+          moduleId: data.platform,
+          title: data.title ?? null,
+          artist: data.artist ?? null,
+          album: data.album ?? null,
+          thumbnail: data.thumbnail ?? null,
         },
       }).catch(() => {});
     },
@@ -298,10 +405,10 @@ const tauriAPI = {
 
   settings: {
     get: async () => {
-      const r = await invoke<{ settings: any }>('get_settings');
+      const r = await invoke<{ settings: Settings }>('get_settings');
       return r.settings;
     },
-    set: async (settings: any) => {
+    set: async (settings: Settings) => {
       const r = await invoke<{ success: boolean; error: string | null }>('set_settings', {
         req: { settings },
       });
@@ -319,7 +426,7 @@ const tauriAPI = {
 
   library: {
     scan: async (directory: string, force = false) => {
-      return invoke<any[]>('scan_directory', { req: { directory, force } });
+      return invoke<Record<string, unknown>[]>('scan_directory', { req: { directory, force } });
     },
     showItemInFolder: async (filePath: string) => {
       const r = await invoke<{ success: boolean }>('show_item_in_folder', {
@@ -358,7 +465,7 @@ const tauriAPI = {
     login: () => invoke('spotify_oauth_login'),
     logout: () => invoke('spotify_oauth_logout'),
     getStatus: async () => {
-      const r = await invoke<{ logged_in: boolean; profile: any }>('spotify_oauth_status');
+      const r = await invoke<{ logged_in: boolean; profile: SpotifyProfile | null }>('spotify_oauth_status');
       return { loggedIn: r.logged_in, profile: r.profile };
     },
     getToken: async () => {
@@ -394,9 +501,29 @@ const tauriAPI = {
   },
 
   app: {
-    onError:      appErrorHub.on.bind(appErrorHub),
-    onBackendLog: backendLogHub.on.bind(backendLogHub),
+    onError:         appErrorHub.on.bind(appErrorHub),
+    onBackendLog:    backendLogHub.on.bind(backendLogHub),
+    onStdinPrompt:   stdinPromptHub.on.bind(stdinPromptHub),
+    sendProcessStdin: async (downloadId: number, input: string) => {
+      await invoke('send_process_stdin', { req: { downloadId, input } });
+    },
+  },
+
+  orpheus: {
+    checkDeps: () =>
+      invoke<{ orpheus_installed: boolean; modules: Array<{ id: string; label: string; installed: boolean }> }>(
+        'check_orpheus_deps'
+      ),
+    installCore: () =>
+      invoke<{ success: boolean; error: string | null }>('install_dep', { req: { dependency: 'orpheus' } }),
+    installModule: (moduleId: string, customUrl?: string, label?: string) =>
+      invoke<{ success: boolean; error: string | null }>('install_orpheus_module', {
+        req: { moduleId, customUrl: customUrl ?? null, label: label ?? null },
+      }),
+    readSettings: () => invoke<string>('read_orpheus_settings'),
+    writeSettings: (content: string) => invoke<void>('write_orpheus_settings', { content }),
+    onInstallProgress: installProgressHub.on.bind(installProgressHub),
   },
 };
 
-(window as any).electron = tauriAPI;
+(window as unknown as { electron: typeof tauriAPI }).electron = tauriAPI;

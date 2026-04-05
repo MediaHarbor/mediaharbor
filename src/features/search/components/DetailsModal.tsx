@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -11,6 +11,68 @@ import { formatDuration } from '@/utils/formatters';
 import type { Platform } from '@/types';
 import { searchService } from '@/services/ipc/search';
 import { useNotificationStore } from '@/stores/useNotificationStore';
+
+interface RawTrack {
+  id?: string;
+  title?: string;
+  name?: string;
+  trackName?: string;
+  artist?: string | { name?: string };
+  artists?: Array<{ name?: string }>;
+  performer?: { name?: string };
+  artistName?: string;
+  channel?: string;
+  uploader?: string;
+  album?: {
+    images?: Array<{ url?: string }>;
+    cover?: string;
+    cover_xl?: string;
+    cover_big?: string;
+    image?: { large?: string };
+  };
+  playUrl?: string;
+  url?: string;
+  uri?: string;
+  link?: string;
+  webpage_url?: string;
+  trackViewUrl?: string;
+  external_urls?: { spotify?: string };
+  thumbnail?: string;
+  thumbnail_url?: string;
+  artworkUrl100?: string;
+  duration?: number;
+  duration_secs?: number;
+  duration_ms?: number;
+  number?: number;
+  quality?: string;
+}
+
+interface DetailsResponse {
+  tracks?: RawTrack[];
+  album?: {
+    coverUrl?: string;
+    title?: string;
+    artist?: string | { name?: string };
+    releaseDate?: string;
+    genre?: string | { name?: string };
+  };
+  playlist?: {
+    coverUrl?: string;
+    title?: string;
+    creator?: string;
+    artist?: string;
+    creationDate?: string;
+  };
+  thumbnail?: string;
+  images?: Array<{ url?: string }>;
+  cover_xl?: string;
+  artworkUrl100?: string;
+  artist?: string | { name?: string };
+  url?: string;
+  external_urls?: { spotify?: string };
+  uri?: string;
+  link?: string;
+}
 
 export interface TrackInfo {
   url: string;
@@ -31,7 +93,7 @@ interface DetailsModalProps {
   onPlayAll?: (tracks: TrackInfo[]) => void;
 }
 
-function getTrackInfo(track: any, platform: Platform, fallbackThumbnail?: string): TrackInfo | null {
+function getTrackInfo(track: RawTrack, platform: Platform, fallbackThumbnail?: string): TrackInfo | null {
   let url: string | undefined;
   let title = track.title || track.name || track.trackName || 'Unknown Track';
   let artist = (typeof track.artist === 'string' ? track.artist : track.artist?.name) || '';
@@ -46,8 +108,8 @@ function getTrackInfo(track: any, platform: Platform, fallbackThumbnail?: string
 
     case 'tidal':
       url = track.playUrl || track.url || (track.id ? `https://tidal.com/browse/track/${track.id}` : undefined);
-      artist = artist || track.artists?.[0]?.name || track.artist?.name || 'Unknown Artist';
-      if (!artist || artist === 'Unknown Artist') artist = track.artists?.[0]?.name || track.artist?.name || 'Unknown Artist';
+      artist = artist || track.artists?.[0]?.name || (typeof track.artist !== 'string' ? track.artist?.name : undefined) || 'Unknown Artist';
+      if (!artist || artist === 'Unknown Artist') artist = track.artists?.[0]?.name || (typeof track.artist !== 'string' ? track.artist?.name : undefined) || 'Unknown Artist';
       if (track.album?.cover) {
         thumbnail = `https://resources.tidal.com/images/${track.album.cover.replace(/-/g, '/')}/640x640.jpg`;
       }
@@ -55,13 +117,13 @@ function getTrackInfo(track: any, platform: Platform, fallbackThumbnail?: string
 
     case 'qobuz':
       url = track.playUrl || track.url || (track.id ? `https://play.qobuz.com/track/${track.id}` : undefined);
-      artist = artist || track.performer?.name || track.artist?.name || 'Unknown Artist';
+      artist = artist || track.performer?.name || (typeof track.artist !== 'string' ? track.artist?.name : undefined) || 'Unknown Artist';
       thumbnail = track.album?.image?.large || thumbnail;
       break;
 
     case 'deezer':
       url = track.playUrl || track.link || (track.id ? `https://www.deezer.com/track/${track.id}` : undefined);
-      artist = artist || track.artist?.name || 'Unknown Artist';
+      artist = artist || (typeof track.artist !== 'string' ? track.artist?.name : undefined) || 'Unknown Artist';
       thumbnail = track.album?.cover_xl || track.album?.cover_big || thumbnail;
       break;
 
@@ -99,15 +161,11 @@ export function DetailsModal({
   onPlay,
   onPlayAll,
 }: DetailsModalProps) {
-  const [details, setDetails] = useState<any>(null);
+  const [details, setDetails] = useState<DetailsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const addNotification = useNotificationStore((state) => state.addNotification);
 
-  useEffect(() => {
-    if (open && id) loadDetails();
-  }, [open, id, platform, type]);
-
-  const loadDetails = async () => {
+  const loadDetails = useCallback(async () => {
     setLoading(true);
     setDetails(null);
     try {
@@ -127,9 +185,13 @@ export function DetailsModal({
     } finally {
       setLoading(false);
     }
-  };
+  }, [type, id, platform, addNotification]);
 
-  const tracks: any[] = details?.tracks || [];
+  useEffect(() => {
+    if (open && id) loadDetails();
+  }, [open, id, loadDetails]);
+
+  const tracks: RawTrack[] = details?.tracks || [];
 
   const coverUrl: string | undefined =
     details?.album?.coverUrl ||
@@ -155,7 +217,9 @@ export function DetailsModal({
     '';
 
   const qualityBadge: string =
-    details?.album?.genre ||
+    (typeof details?.album?.genre === 'string'
+      ? details.album.genre
+      : details?.album?.genre?.name) ||
     tracks[0]?.quality ||
     '';
 
@@ -166,7 +230,7 @@ export function DetailsModal({
     details?.link ||
     '';
 
-  const handlePlayTrack = (track: any) => {
+  const handlePlayTrack = (track: RawTrack) => {
     const info = getTrackInfo(track, platform, coverUrl);
     if (!info) {
       addNotification({ type: 'error', title: 'Playback Failed', message: 'No URL found for this track' });
@@ -175,7 +239,7 @@ export function DetailsModal({
     onPlay(info);
   };
 
-  const handleDownloadTrack = (track: any) => {
+  const handleDownloadTrack = (track: RawTrack) => {
     const info = getTrackInfo(track, platform, coverUrl);
     if (!info) {
       addNotification({ type: 'error', title: 'Download Failed', message: 'No URL found for this track' });
@@ -277,10 +341,10 @@ export function DetailsModal({
           ) : tracks.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">No tracks found</p>
           ) : (
-            tracks.map((track: any, index: number) => {
+            tracks.map((track: RawTrack, index: number) => {
               const duration = track.duration || track.duration_secs || (track.duration_ms && Math.floor(track.duration_ms / 1000));
               const trackArtist =
-                track.artist?.name || track.artist ||
+                (typeof track.artist !== 'string' ? track.artist?.name : track.artist) ||
                 track.artists?.[0]?.name ||
                 track.performer?.name ||
                 track.artistName ||

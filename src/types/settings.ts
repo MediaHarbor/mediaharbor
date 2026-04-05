@@ -190,6 +190,11 @@ export interface Settings {
   apple_use_wrapper: boolean;
   apple_wrapper_account_url: string;
   apple_wrapper_decrypt_ip: string;
+
+  orpheus_dl_enabled_modules: string;
+  orpheus_download_quality: string;
+  orpheus_covers_enabled: boolean;
+  orpheus_custom_modules: string;
 }
 
 export type SettingsSetter = (key: keyof Settings, value: unknown) => void;

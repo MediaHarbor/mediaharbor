@@ -7,6 +7,16 @@ export type Platform =
   | 'youtubemusic'
   | 'applemusic';
 
+export type OrpheusPlatform =
+  | 'soundcloud'
+  | 'napster'
+  | 'beatport'
+  | 'nugs'
+  | 'kkbox'
+  | 'bugs'
+  | 'idagio'
+  | 'jiosaavn';
+
 export type SearchType = 'track' | 'album' | 'playlist' | 'artist' | 'video' | 'channel' | 'podcast' | 'show' | 'episode' | 'musicvideo' | 'audiobook';
 
 export interface Track {

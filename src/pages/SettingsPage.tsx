@@ -17,7 +17,7 @@ import { cn } from '@/utils/cn';
 import { logError, logWarning } from '@/utils/logger';
 import {
   Check, ChevronDown, Eye, EyeOff, Loader2,
-  SlidersHorizontal, KeyRound,
+  SlidersHorizontal, KeyRound, FileText, BoomBox
 } from 'lucide-react';
 import { PlatformIcon } from '@/utils/platforms';
 import type { Settings, SettingsSetter } from '@/types/settings';
@@ -114,6 +114,10 @@ const TAB_GROUPS = [
     label: 'Developer',
     tabs: [{ id: 'apikeys', label: 'API Keys', icon: KeyRound as React.ElementType | null, platform: null as string | null }],
   },
+  {
+    label: 'Backends',
+    tabs: [{ id: 'orpheusdl', label: 'OrpheusDL', icon: BoomBox as React.ElementType | null, platform: null as string | null }],
+  },
 ];
 
 const ALL_TABS = TAB_GROUPS.flatMap((g) => g.tabs);
@@ -169,7 +173,7 @@ export default function SettingsPage() {
     }, 900);
 
     return () => { clearTimeout(saveTimer.current); clearTimeout(savedTimer.current); };
-  }, [settings]);
+  }, [settings, loading, setTheme]);
 
   const set: SettingsSetter = (key, value) =>
     setSettings((prev) => ({ ...prev, [key]: value }));
@@ -273,6 +277,7 @@ export default function SettingsPage() {
           {activeTab === 'spotify'    && <SpotifyTab    s={settings} set={set} browseFile={browseFile} />}
           {activeTab === 'applemusic' && <AppleMusicTab s={settings} set={set} browse={browseFolder} browseFile={browseFile} />}
           {activeTab === 'apikeys'    && <ApiKeysTab    s={settings} set={set} />}
+          {activeTab === 'orpheusdl' && <OrpheusDLTab  s={settings} set={set} />}
         </div>
       </div>
     </div>
@@ -703,8 +708,8 @@ function TidalTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
       setCodeVerifier(cv);
       if (authUrl) await window.electron.updates.openRelease(authUrl);
       setAuthState('waiting');
-    } catch (e: any) {
-      setErrorMsg(e.message || 'Failed to open Tidal login');
+    } catch (e: unknown) {
+      setErrorMsg(e instanceof Error ? e.message : 'Failed to open Tidal login');
       setAuthState('error');
     }
   }
@@ -719,8 +724,8 @@ function TidalTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
       Object.entries(tokens).forEach(([k, v]) => set(k as keyof Settings, v));
       setAuthState('success');
       setRedirectUrl('');
-    } catch (e: any) {
-      setErrorMsg(typeof e === 'string' ? e : (e?.message || 'Failed to exchange code'));
+    } catch (e: unknown) {
+      setErrorMsg(typeof e === 'string' ? e : (e instanceof Error ? e.message : 'Failed to exchange code'));
       setAuthState('error');
     }
   }
@@ -812,14 +817,14 @@ function SpotifyTab({ s, set, browseFile }: { s: Partial<Settings>; set: Setting
 
   useEffect(() => {
     if (!s.spotify_cookies_path) return;
-    window.electron?.spotifyAccount?.getStatus().then((status: any) => {
+    window.electron?.spotifyAccount?.getStatus().then((status) => {
       if (status?.loggedIn && status?.profile) {
         setLoginStatus('success');
         setLoginMessage(`Connected as ${status.profile.name || status.profile.id || 'Spotify user'}`);
-      } else if (loginStatus !== 'loading') {
-        setLoginStatus('idle');
+      } else {
+        setLoginStatus((prev) => prev === 'loading' ? prev : 'idle');
       }
-    }).catch((err: any) => {
+    }).catch((err: unknown) => {
       logWarning('settings', 'Spotify status check failed', err instanceof Error ? (err.stack || err.message) : String(err));
     });
   }, [s.spotify_cookies_path]);
@@ -831,9 +836,9 @@ function SpotifyTab({ s, set, browseFile }: { s: Partial<Settings>; set: Setting
       const result = await window.electron?.spotifyAccount?.login();
       setLoginStatus('success');
       setLoginMessage(`Connected as ${result?.name || result?.id || 'Spotify user'}`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setLoginStatus('error');
-      setLoginMessage(err?.message || 'Login failed');
+      setLoginMessage(err instanceof Error ? err.message : 'Login failed');
     }
   };
 
@@ -842,8 +847,8 @@ function SpotifyTab({ s, set, browseFile }: { s: Partial<Settings>; set: Setting
       await window.electron?.spotifyAccount?.logout();
       setLoginStatus('idle');
       setLoginMessage('');
-    } catch (err: any) {
-      setLoginMessage(err?.message || 'Logout failed');
+    } catch (err: unknown) {
+      setLoginMessage(err instanceof Error ? err.message : 'Logout failed');
     }
   };
 
@@ -1192,6 +1197,231 @@ function SecretInput({ value, onChange, placeholder }: { value: string; onChange
     </div>
   );
 }
+
+function RawSettingsEditor({ prominent }: { prominent?: boolean }) {
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const raw = await window.electron?.orpheus?.readSettings();
+      setContent(raw ?? '');
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const save = async () => {
+    if (content === null) return;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await window.electron?.orpheus?.writeSettings(content);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (content === null) {
+    return (
+      <div className="space-y-1">
+        <Button
+          variant="outline"
+          size={prominent ? 'default' : 'sm'}
+          onClick={load}
+          disabled={loading}
+          className={prominent ? 'w-full justify-start gap-2 font-medium' : 'gap-1.5'}
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          Edit settings.json directly
+        </Button>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <textarea
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        className="w-full h-96 font-mono text-xs rounded-md border border-border bg-muted/20 p-3 resize-y focus:outline-none focus:ring-1 focus:ring-ring"
+        spellCheck={false}
+      />
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={save} disabled={saving}>
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : saved ? <Check className="h-3.5 w-3.5 mr-1.5" /> : null}
+          {saved ? 'Saved' : 'Save'}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => { setContent(null); setError(null); }}>Close</Button>
+      </div>
+    </div>
+  );
+}
+
+const ORPHEUS_SKIP_GENERAL = new Set(['download_path', 'download_quality']);
+
+function isSensitiveKey(key: string) {
+  return /(password|secret|token|web_access_token|kc1_key|secret_key|app_secret|dev_key)/i.test(key);
+}
+
+function toLabel(key: string) {
+  const s = key.replace(/_/g, ' ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function setNestedPath(obj: Record<string, unknown>, path: string[], value: unknown): Record<string, unknown> {
+  if (path.length === 0) return obj;
+  const [head, ...rest] = path;
+  if (rest.length === 0) return { ...obj, [head]: value };
+  return { ...obj, [head]: setNestedPath((obj[head] as Record<string, unknown>) ?? {}, rest, value) };
+}
+
+function renderLeaf(
+  path: string[],
+  key: string,
+  val: unknown,
+  config: Record<string, unknown>,
+  setConfig: (c: Record<string, unknown>) => void,
+): React.ReactNode {
+  const id = path.join('_');
+  const update = (v: unknown) => setConfig(setNestedPath(config, path, v));
+  if (typeof val === 'boolean') {
+    return <Check2 key={id} id={id} label={toLabel(key)} checked={val} onChange={update as (v: boolean) => void} />;
+  }
+  if (typeof val === 'number') {
+    return (
+      <Row key={id} label={toLabel(key)}>
+        <Input type="number" value={val} onChange={(e) => update(Number(e.target.value))} className="w-28" />
+      </Row>
+    );
+  }
+  if (typeof val === 'string') {
+    if (isSensitiveKey(key)) {
+      return (
+        <Row key={id} label={toLabel(key)}>
+          <SecretInput value={val} onChange={update as (v: string) => void} />
+        </Row>
+      );
+    }
+    return (
+      <Row key={id} label={toLabel(key)}>
+        <Input value={val} onChange={(e) => update(e.target.value)} />
+      </Row>
+    );
+  }
+  return null;
+}
+
+function OrpheusConfigEditor() {
+  const [config, setConfig] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    window.electron?.orpheus?.readSettings()
+      .then((raw) => {
+        if (!raw || raw.trim() === '') {
+          setNotFound(true);
+        } else {
+          try {
+            setConfig(JSON.parse(raw));
+          } catch {
+            setError('Failed to parse settings.json');
+          }
+        }
+      })
+      .catch((e: unknown) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    if (!config) return;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await window.electron?.orpheus?.writeSettings(JSON.stringify(config, null, 2));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <p className="text-xs text-muted-foreground py-1">Loading settings.json…</p>;
+  if (notFound) return <p className="text-xs text-muted-foreground py-1">Settings file not found — it will be created on first download.</p>;
+  if (!config) return null;
+
+  const globalObj = config['global'] as Record<string, unknown> | undefined;
+  const modulesObj = config['modules'] as Record<string, unknown> | undefined;
+
+  return (
+    <div className="space-y-3">
+      {globalObj && Object.entries(globalObj).map(([subKey, subVal]) => {
+        if (typeof subVal !== 'object' || subVal === null || Array.isArray(subVal)) return null;
+        const subObj = subVal as Record<string, unknown>;
+        const entries = Object.entries(subObj).filter(([k]) => !(subKey === 'general' && ORPHEUS_SKIP_GENERAL.has(k)));
+        if (entries.length === 0) return null;
+        return (
+          <Section key={subKey} title={toLabel(subKey)}>
+            {entries.map(([leafKey, leafVal]) =>
+              renderLeaf(['global', subKey, leafKey], leafKey, leafVal, config, setConfig)
+            )}
+          </Section>
+        );
+      })}
+
+      {modulesObj && Object.entries(modulesObj).map(([modName, modVal]) => {
+        if (typeof modVal !== 'object' || modVal === null || Array.isArray(modVal)) return null;
+        const modObj = modVal as Record<string, unknown>;
+        if (Object.keys(modObj).length === 0) return null;
+        return (
+          <Section key={modName} title={`${toLabel(modName)} (module)`}>
+            {Object.entries(modObj).map(([leafKey, leafVal]) =>
+              renderLeaf(['modules', modName, leafKey], leafKey, leafVal, config, setConfig)
+            )}
+          </Section>
+        );
+      })}
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <Button size="sm" onClick={save} disabled={saving || !config}>
+        {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : saved ? <Check className="h-3.5 w-3.5 mr-1.5" /> : null}
+        {saved ? 'Saved' : 'Save settings'}
+      </Button>
+    </div>
+  );
+}
+
+function OrpheusDLTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
+  return (
+    <ToggleSection title="OrpheusDL" enabled={s.orpheusDL ?? false} onToggle={(v) => set('orpheusDL', v)}>
+      <RawSettingsEditor prominent />
+      <OrpheusConfigEditor />
+    </ToggleSection>
+  );
+}
+
 
 function ApiKeysTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
   return (
