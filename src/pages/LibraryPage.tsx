@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef, useState, useMemo } from 'react';
 import { useNotificationStore } from '@/stores/useNotificationStore';
-import { usePlayerStore } from '@/components/Player';
-import type { MediaType, PlayableTrack } from '@/components/Player';
+import { usePlayerStore } from '@/stores/usePlayerStore';
+import type { MediaType, PlayableTrack } from '@/stores/usePlayerStore';
 import {
   useLibraryStore,
   type AlbumItem,
