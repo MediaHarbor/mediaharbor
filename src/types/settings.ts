@@ -195,6 +195,9 @@ export interface Settings {
   orpheus_download_quality: string;
   orpheus_covers_enabled: boolean;
   orpheus_custom_modules: string;
+
+  crossfade_enabled: boolean;
+  crossfade_duration: number;
 }
 
 export type SettingsSetter = (key: keyof Settings, value: unknown) => void;

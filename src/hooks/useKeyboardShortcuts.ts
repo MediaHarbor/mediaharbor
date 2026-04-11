@@ -11,13 +11,19 @@ export function useKeyboardShortcuts() {
         target.isContentEditable
       ) return;
 
-      const { isPlaying, setPlaying, streamUrl } = usePlayerStore.getState();
+      const { isPlaying, setPlaying, streamUrl, toggleNowPlaying } = usePlayerStore.getState();
 
       switch (e.code) {
         case 'Space':
           if (streamUrl) {
             e.preventDefault();
             setPlaying(!isPlaying);
+          }
+          break;
+        case 'KeyN':
+          if (streamUrl) {
+            e.preventDefault();
+            toggleNowPlaying();
           }
           break;
       }

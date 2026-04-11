@@ -208,6 +208,9 @@ pub struct Settings {
     pub orpheus_download_quality: String,
     pub orpheus_covers_enabled: bool,
     pub orpheus_custom_modules: String,
+
+    pub crossfade_enabled: bool,
+    pub crossfade_duration: u32,
 }
 
 impl Default for Settings {
@@ -420,6 +423,9 @@ impl Default for Settings {
             orpheus_download_quality: "lossless".into(),
             orpheus_covers_enabled: true,
             orpheus_custom_modules: "[]".into(),
+
+            crossfade_enabled: false,
+            crossfade_duration: 6,
         }
     }
 }

@@ -1,6 +1,8 @@
 import type { Platform, SearchType, SearchResult } from '@/types';
 import { logInfo, logError } from '@/utils/logger';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 class SearchService {
   private mapSearchType(platform: Platform, type: SearchType): string {
     const typeMap: Record<Platform, Partial<Record<SearchType, string>>> = {

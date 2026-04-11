@@ -76,6 +76,7 @@ export interface Artist {
   thumbnail?: string;
   followerCount?: number;
   genre?: string;
+  albums?: Album[];
 }
 
 export type SearchResult = Track | Album | Playlist | Artist;

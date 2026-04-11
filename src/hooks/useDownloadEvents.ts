@@ -77,5 +77,5 @@ export function useDownloadEvents() {
     ];
 
     return () => cleanups.forEach((fn) => fn());
-  }, []);
+  }, [addOrUpdate, addLog]);
 }

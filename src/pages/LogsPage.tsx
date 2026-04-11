@@ -112,7 +112,7 @@ export default function LogsPage() {
       const timer = setTimeout(() => setHighlight(null), 3000);
       return () => clearTimeout(timer);
     }
-  }, [highlightId]);
+  }, [highlightId, setHighlight]);
 
   const filtered = entries.filter((e) => {
     if (levelFilter !== 'all' && e.level !== levelFilter) return false;

@@ -6,7 +6,7 @@
     "dev": "vite",
     "build:react": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --report-unused-disable-directives --max-warnings 150",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "test": "vitest",
     "tauri:icon": "npx tauri icon D:/Documents/MH-WEB/SVG/MHLogo.svg -o src/app/icons",

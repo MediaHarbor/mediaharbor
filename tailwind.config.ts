@@ -106,6 +106,23 @@ export default {
           '0%': { opacity: '0' },
           '100%': { opacity: '1' },
         },
+        'ambientPulse': {
+          '0%, 100%': { opacity: '0.45', transform: 'scale(1)' },
+          '50%': { opacity: '0.6', transform: 'scale(1.04)' },
+        },
+        'ambientDrift': {
+          '0%, 100%': { opacity: '0.25', transform: 'scale(1) rotate(0deg)' },
+          '33%': { opacity: '0.35', transform: 'scale(1.06) rotate(1.5deg)' },
+          '66%': { opacity: '0.2', transform: 'scale(0.97) rotate(-1deg)' },
+        },
+        'ambientBreath': {
+          '0%, 100%': { opacity: '0.15', transform: 'scale(1)' },
+          '50%': { opacity: '0.25', transform: 'scale(1.08)' },
+        },
+        'vinylSpin': {
+          '0%': { transform: 'rotate(0deg)' },
+          '100%': { transform: 'rotate(360deg)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -113,6 +130,10 @@ export default {
         'glow': 'glow 2s ease-in-out infinite',
         'slide-up': 'slide-up 0.5s ease-out',
         'fade-in': 'fade-in 0.3s ease-out',
+        'ambient-pulse': 'ambientPulse 4s ease-in-out infinite',
+        'ambient-drift': 'ambientDrift 6s ease-in-out infinite',
+        'ambient-breath': 'ambientBreath 5s ease-in-out infinite',
+        'vinyl-spin': 'vinylSpin 10s linear infinite',
       },
       boxShadow: {
         'glow-amber': '0 0 20px rgba(249, 178, 51, 0.4)',

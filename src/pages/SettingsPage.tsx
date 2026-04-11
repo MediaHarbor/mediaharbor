@@ -304,6 +304,8 @@ function FormatGuide() {
     ['{explicit}',         '" (Explicit)" if the track is flagged, else empty',  ' (Explicit)'],
     ['{label}',            'Record label',                                       'Virgin Records'],
     ['{composer}',         'Composer / songwriter name(s)',                      'Thomas Bangalter'],
+    ['{quality}',          'Bit depth and sample rate (no format prefix)',        '24-bit ⁄ 192kHz'],
+    ['{format}',           'Container format — use with {quality} for full label', 'FLAC'],
   ];
 
   const folderOnlyVars = [
@@ -422,6 +424,27 @@ function GeneralTab({ s, set, browse }: { s: Partial<Settings>; set: SettingsSet
             </SelectContent>
           </Select>
         </Row>
+      </Section>
+
+      <Section title="Playback">
+        <Check2 id="crossfade_enabled" label="Crossfade between tracks"
+          help="Smoothly blend the end of one track into the beginning of the next"
+          checked={s.crossfade_enabled ?? false} onChange={(v) => set('crossfade_enabled', v)} />
+        {s.crossfade_enabled && (
+          <Row label="Crossfade duration" help="Seconds of overlap between tracks">
+            <Select value={String(s.crossfade_duration ?? 6)} onValueChange={(v) => set('crossfade_duration', Number(v))}>
+              <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="2">2 seconds</SelectItem>
+                <SelectItem value="4">4 seconds</SelectItem>
+                <SelectItem value="6">6 seconds</SelectItem>
+                <SelectItem value="8">8 seconds</SelectItem>
+                <SelectItem value="10">10 seconds</SelectItem>
+                <SelectItem value="12">12 seconds</SelectItem>
+              </SelectContent>
+            </Select>
+          </Row>
+        )}
       </Section>
 
       <Section title="Downloads">

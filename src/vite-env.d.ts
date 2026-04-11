@@ -1,3 +1,8 @@
+declare module '*.svg' {
+  const content: string;
+  export default content;
+}
+
 interface DownloadRequest {
   url: string;
   outputDir?: string;
@@ -95,9 +100,10 @@ interface Window {
       showItemInFolder: (filePath: string) => Promise<boolean>;
     };
     player: {
-      playMedia: (params: { url: string; platform: string }) => Promise<{ streamUrl: string; platform: string }>;
+      playMedia: (params: { url: string; platform: string }) => Promise<{ streamUrl: string; platform: string; mediaType?: string; isLive?: boolean }>;
+      prefetchMedia: (params: { url: string; platform: string }) => Promise<{ streamUrl: string; platform: string; mediaType?: string; isLive?: boolean }>;
       pause: () => Promise<void>;
-      onStreamReady: (callback: (data: { streamUrl: string; platform: string; durationSec?: number; mediaType?: 'audio' | 'video' }) => void) => () => void;
+      onStreamReady: (callback: (data: { streamUrl: string; platform: string; durationSec?: number; mediaType?: 'audio' | 'video'; isLive?: boolean }) => void) => () => void;
     };
     tidalAuth: {
       startAuth: () => Promise<{ codeVerifier: string; authUrl: string }>;
@@ -142,6 +148,15 @@ interface Window {
       readSettings: () => Promise<string>;
       writeSettings: (content: string) => Promise<void>;
       onInstallProgress: (callback: (data: { dependency: string; percent: number; status: string }) => void) => () => void;
+    };
+    lyrics: {
+      get: (req: {
+        url: string;
+        platform: string;
+        title: string;
+        artist: string;
+        duration?: number;
+      }) => Promise<{ synced: string | null; plain: string | null; wordSynced: string | null }>;
     };
   };
 }

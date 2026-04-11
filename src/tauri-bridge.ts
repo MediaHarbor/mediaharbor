@@ -44,6 +44,8 @@ interface StreamReadyPayload {
   platform: string;
   durationSec?: number;
   mediaType: 'audio' | 'video';
+  isLive?: boolean;
+  audioStreamUrl?: string;
 }
 
 interface InstallProgressPayload {
@@ -445,15 +447,33 @@ const tauriAPI = {
         platform: string;
         duration_sec: number | null;
         media_type: string | null;
+        is_live: boolean;
       }>('play_media', { req: params });
       const result = {
         streamUrl: r.stream_url,
         platform: r.platform,
         durationSec: r.duration_sec ?? undefined,
         mediaType: (r.media_type ?? 'audio') as 'audio' | 'video',
+        isLive: r.is_live ?? false,
       };
       streamReadyHub.emit(result);
       return result;
+    },
+    prefetchMedia: async (params: { url: string; platform: string }) => {
+      const r = await invoke<{
+        stream_url: string;
+        platform: string;
+        duration_sec: number | null;
+        media_type: string | null;
+        is_live: boolean;
+      }>('play_media', { req: params });
+      return {
+        streamUrl: r.stream_url,
+        platform: r.platform,
+        durationSec: r.duration_sec ?? undefined,
+        mediaType: (r.media_type ?? 'audio') as 'audio' | 'video',
+        isLive: r.is_live ?? false,
+      };
     },
     pause: async () => {
       await invoke('pause_media');
@@ -523,6 +543,18 @@ const tauriAPI = {
     readSettings: () => invoke<string>('read_orpheus_settings'),
     writeSettings: (content: string) => invoke<void>('write_orpheus_settings', { content }),
     onInstallProgress: installProgressHub.on.bind(installProgressHub),
+  },
+
+  lyrics: {
+    get: async (req: {
+      url: string;
+      platform: string;
+      title: string;
+      artist: string;
+      duration?: number;
+    }) => {
+      return invoke<{ synced: string | null; plain: string | null; wordSynced: string | null }>('get_lyrics', { req });
+    },
   },
 };
 
