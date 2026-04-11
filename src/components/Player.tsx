@@ -1,145 +1,20 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Play, Pause, SkipBack, SkipForward,
   Volume2, Volume1, VolumeX,
-  Music2, Maximize2, Shuffle, Repeat,
+  Music2, Maximize2, Shuffle, Repeat, Repeat1, ListMusic,
 } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
-import { create } from 'zustand';
-import { PLATFORM_COLORS } from '@/utils/platforms';
+import { usePlayerStore } from '@/stores/usePlayerStore';
+import { PLATFORM_COLORS } from '@/utils/platform-data';
 import { logError, logWarning, logInfo } from '@/utils/logger';
+import { crossfadeEngine } from '@/utils/AudioCrossfadeEngine';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
-export type MediaType = 'audio' | 'video';
-
-export interface PlayableTrack {
-  url: string;
-  title: string;
-  artist: string;
-  thumbnail?: string;
-  platform?: string;
-  mediaType?: MediaType;
-}
-
-interface PlayerState {
-  streamUrl: string | null;
-  title: string;
-  artist: string;
-  thumbnail: string | null;
-  mediaType: MediaType;
-  isPlaying: boolean;
-  platform: string | null;
-  queue: PlayableTrack[];
-  queueIndex: number;
-  setTrack: (track: {
-    streamUrl: string;
-    title: string;
-    artist: string;
-    thumbnail?: string;
-    mediaType?: MediaType;
-    platform?: string;
-  }) => void;
-  setQueue: (tracks: PlayableTrack[], startIndex?: number) => void;
-  insertNext: (track: PlayableTrack) => void;
-  appendToQueue: (tracks: PlayableTrack[]) => void;
-  playNext: () => void;
-  playPrev: () => void;
-  setPlaying: (playing: boolean) => void;
-  clear: () => void;
-}
-
-export const usePlayerStore = create<PlayerState>((set, get) => ({
-  streamUrl: null,
-  title: '',
-  artist: '',
-  thumbnail: null,
-  mediaType: 'audio',
-  isPlaying: false,
-  platform: null,
-  queue: [],
-  queueIndex: -1,
-
-  setTrack: (track) =>
-    set({
-      streamUrl: track.streamUrl,
-      title: track.title,
-      artist: track.artist,
-      thumbnail: track.thumbnail ?? null,
-      mediaType: track.mediaType ?? 'audio',
-      isPlaying: true,
-      platform: track.platform ?? null,
-      queue: [],
-      queueIndex: -1,
-    }),
-
-  setQueue: (tracks, startIndex = 0) => {
-    if (!tracks.length) return;
-    const track = tracks[startIndex];
-    set({
-      queue: tracks,
-      queueIndex: startIndex,
-      streamUrl: null,
-      title: track.title,
-      artist: track.artist,
-      thumbnail: track.thumbnail ?? null,
-      mediaType: track.mediaType ?? 'audio',
-      isPlaying: true,
-      platform: track.platform ?? null,
-    });
-  },
-
-  playNext: () => {
-    const { queue, queueIndex } = get();
-    const next = queueIndex + 1;
-    if (next >= queue.length) return;
-    const track = queue[next];
-    set({ queueIndex: next, streamUrl: null, title: track.title, artist: track.artist, thumbnail: track.thumbnail ?? null, mediaType: track.mediaType ?? 'audio', isPlaying: true, platform: track.platform ?? null });
-  },
-
-  playPrev: () => {
-    const { queue, queueIndex } = get();
-    const prev = queueIndex - 1;
-    if (prev < 0) return;
-    const track = queue[prev];
-    set({ queueIndex: prev, streamUrl: null, title: track.title, artist: track.artist, thumbnail: track.thumbnail ?? null, mediaType: track.mediaType ?? 'audio', isPlaying: true, platform: track.platform ?? null });
-  },
-
-  insertNext: (track) => {
-    const { queue, queueIndex } = get();
-    if (!queue.length) {
-      set({
-        queue: [track], queueIndex: 0, streamUrl: null,
-        title: track.title, artist: track.artist,
-        thumbnail: track.thumbnail ?? null,
-        mediaType: track.mediaType ?? 'audio',
-        isPlaying: true, platform: track.platform ?? null,
-      });
-      return;
-    }
-    const next = [...queue];
-    next.splice(queueIndex + 1, 0, track);
-    set({ queue: next });
-  },
-
-  appendToQueue: (tracks) => {
-    const { queue } = get();
-    set({ queue: [...queue, ...tracks] });
-  },
-
-  setPlaying: (isPlaying) => set({ isPlaying }),
-
-  clear: () =>
-    set({
-      streamUrl: null, title: '', artist: '', thumbnail: null,
-      mediaType: 'audio', isPlaying: false, platform: null,
-      queue: [], queueIndex: -1,
-    }),
-}));
-
-export function toAudioUrl(url: string): string {
+function toAudioUrl(url: string): string {
   if (!url) return url;
   if (/^https?:\/\/|^blob:/.test(url)) return url;
-  if (url.startsWith('mhfile://')) return url;
 
   let filePath = url;
   if (url.startsWith('file:///')) {
@@ -147,32 +22,65 @@ export function toAudioUrl(url: string): string {
   } else if (url.startsWith('file://')) {
     filePath = decodeURIComponent(url.slice('file://'.length));
   }
-
-  const fwd = filePath.replace(/\\/g, '/');
-  const clean = fwd.startsWith('/') ? fwd.slice(1) : fwd;
-  return 'mhfile:///' + clean;
+  const absPath = (filePath.startsWith('/') ? filePath : '/' + filePath).replace(/\\/g, '/');
+  return convertFileSrc(absPath);
 }
 
 export function Player() {
   const {
-    streamUrl, title, artist, thumbnail, mediaType,
+    streamUrl, title, artist, thumbnail, mediaType, isLive,
     isPlaying, setPlaying, platform,
     queue, queueIndex, playNext, playPrev,
+    shuffle, toggleShuffle, shuffleHistory,
+    repeat, cycleRepeat,
+    nowPlayingOpen, toggleNowPlaying,
+    setMediaElement,
   } = usePlayerStore();
 
   const platformColor = platform ? PLATFORM_COLORS[platform] : undefined;
-  const canPrev = queueIndex > 0;
-  const canNext = queueIndex >= 0 && queueIndex < queue.length - 1;
+  const canPrev = shuffle ? shuffleHistory.length > 1 : queueIndex > 0;
+  const canNext = queue.length > 1;
 
-  const mediaRef = useRef<HTMLVideoElement>(null);
+  const mediaRef = useRef<HTMLVideoElement | null>(null);
+const crossfadeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const crossfadeActiveRef = useRef(false);
+  const crossfadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const crossfadeHandoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const crossfadePendingRef = useRef(false);
+  const idlePrefetchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [engineReady, setEngineReady] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
+  const volumeRef = useRef(1);
   const [muted, setMuted] = useState(false);
   const [artHovered, setArtHovered] = useState(false);
+  const [crossfadeEnabled, setCrossfadeEnabled] = useState(false);
+  const [crossfadeDuration, setCrossfadeDuration] = useState(6);
+
+  const setVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    mediaRef.current = node;
+    setMediaElement(node);
+    if (node) {
+      const ok = crossfadeEngine.init(node);
+      setEngineReady(ok);
+      if (ok) {
+        crossfadeEngine.setVolume(volumeRef.current);
+      }
+    }
+  }, [setMediaElement]);
 
   const isPlayingRef = useRef(isPlaying);
   isPlayingRef.current = isPlaying;
+
+  useEffect(() => {
+    window.electron?.settings.get().then((data) => {
+      if (data) {
+        setCrossfadeEnabled(data.crossfade_enabled ?? false);
+        setCrossfadeDuration(data.crossfade_duration ?? 6);
+      }
+    }).catch(() => {});
+  }, []);
 
   const prevQueueKeyRef = useRef('');
   useEffect(() => {
@@ -181,11 +89,24 @@ export function Player() {
     const key = `${queueIndex}:${track.url}`;
     if (key === prevQueueKeyRef.current) return;
     prevQueueKeyRef.current = key;
+
+    const cached = usePlayerStore.getState().getCachedStream(track.url);
+    if (cached) {
+      usePlayerStore.setState({
+        streamUrl: cached.streamUrl,
+        isPlaying: true,
+        ...(cached.mediaType ? { mediaType: cached.mediaType as 'audio' | 'video' } : {}),
+        isLive: cached.isLive ?? false,
+      });
+      logInfo('playback', 'Stream from cache', `Playing cached stream for "${track.title}"`);
+      return;
+    }
+
     window.electron?.player.playMedia({
       url: track.url,
       platform: track.platform === 'youtubemusic' ? 'youtubeMusic' : (track.platform ?? ''),
-    }).catch((err: Error) => {
-      const msg = err.message.replace(/^Error invoking remote method '[^']+': Error:\s*/i, '');
+    }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err ?? 'Unknown error');
       logError('playback', `Failed to play "${track.title}"`, msg);
     });
   }, [queueIndex, queue]);
@@ -193,24 +114,25 @@ export function Player() {
   useEffect(() => {
     const cleanup = window.electron?.player?.onStreamReady?.((data) => {
       if (!data?.streamUrl) return;
-      usePlayerStore.setState((s) => ({
-        ...s,
+      usePlayerStore.setState({
         streamUrl: data.streamUrl,
-        isPlaying: true,
         ...(data.mediaType ? { mediaType: data.mediaType } : {}),
-      }));
+        isLive: data.isLive ?? false,
+      });
       if (data.durationSec) setDuration(data.durationSec);
       logInfo('playback', 'Stream ready', `Now playing stream from ${data.platform || 'unknown'}`);
     });
     return () => cleanup?.();
   }, []);
 
-
   useEffect(() => {
     const el = mediaRef.current;
     if (!el || !streamUrl) return;
+    if (crossfadeActiveRef.current) return;
 
+    crossfadeEngine.ensureResumed();
     const resolvedUrl = toAudioUrl(streamUrl);
+
     const onReady = () => {
       if (isPlayingRef.current) el.play().catch(() => {
         setPlaying(false);
@@ -230,15 +152,26 @@ export function Player() {
       el.removeEventListener('canplay', onReady);
       el.removeEventListener('loadeddata', onReady);
     };
+  }, [streamUrl, setPlaying]);
+
+  useEffect(() => {
+    if (crossfadeActiveRef.current) return;
+    setCurrentTime(0);
+    setDuration(0);
   }, [streamUrl]);
 
   useEffect(() => {
     const el = mediaRef.current;
     if (!el || !el.src) return;
-    if (isPlaying) el.play().catch(() => {
-      logWarning('playback', 'Play failed', 'Could not resume playback');
-    });
-    else el.pause();
+    if (isPlaying) {
+      crossfadeEngine.ensureResumed();
+      el.play().catch(() => {
+        logWarning('playback', 'Play failed', 'Could not resume playback');
+      });
+    } else {
+      crossfadeEngine.suspend();
+      el.pause();
+    }
   }, [isPlaying]);
 
   useEffect(() => {
@@ -257,42 +190,337 @@ export function Player() {
     navigator.mediaSession.setActionHandler('pause', () => setPlaying(false));
     navigator.mediaSession.setActionHandler('nexttrack', canNext ? playNext : null);
     navigator.mediaSession.setActionHandler('previoustrack', canPrev ? playPrev : null);
-  }, [isPlaying, canNext, canPrev]);
+  }, [isPlaying, canNext, canPrev, playNext, playPrev, setPlaying]);
+
+  const resetIdlePrefetch = useCallback(() => {
+    if (idlePrefetchRef.current) {
+      clearTimeout(idlePrefetchRef.current);
+      idlePrefetchRef.current = null;
+    }
+  }, []);
+
+  const scheduleIdlePrefetch = useCallback(() => {
+    resetIdlePrefetch();
+    idlePrefetchRef.current = setTimeout(() => {
+      const state = usePlayerStore.getState();
+      const nextIdx = state.queueIndex + 1;
+      if (nextIdx >= state.queue.length) return;
+      const nextTrack = state.queue[nextIdx];
+      if (!nextTrack?.url) return;
+      if (state.getCachedStream(nextTrack.url)) return;
+
+      window.electron?.player.prefetchMedia({
+        url: nextTrack.url,
+        platform: nextTrack.platform === 'youtubemusic' ? 'youtubeMusic' : (nextTrack.platform ?? ''),
+      }).then((data) => {
+        if (data?.streamUrl) {
+          const current = usePlayerStore.getState();
+          if (current.queue[current.queueIndex + 1]?.url === nextTrack.url) {
+            current.cacheStream(nextTrack.url, data.streamUrl, data.mediaType, data.isLive);
+            logInfo('playback', 'Idle prefetch complete', `Cached stream for "${nextTrack.title}"`);
+          }
+        }
+      }).catch(() => {});
+    }, 15000);
+  }, [resetIdlePrefetch]);
+
+  useEffect(() => {
+    if (queueIndex >= 0 && isPlaying) {
+      scheduleIdlePrefetch();
+    }
+    return resetIdlePrefetch;
+  }, [queueIndex, isPlaying, scheduleIdlePrefetch, resetIdlePrefetch]);
 
   const handleTimeUpdate = () => {
     const el = mediaRef.current;
     if (!el) return;
     setCurrentTime(el.currentTime);
     if (el.duration && isFinite(el.duration)) setDuration(el.duration);
+
+    if (
+      crossfadeEnabled &&
+      !crossfadeActiveRef.current &&
+      repeat !== 'one' &&
+      el.duration &&
+      isFinite(el.duration) &&
+      el.duration > crossfadeDuration + 2 &&
+      el.currentTime >= el.duration - crossfadeDuration
+    ) {
+      startCrossfade();
+    }
   };
+
+  const disposeBridge = useCallback(() => {
+    if (crossfadeTimerRef.current) {
+      clearTimeout(crossfadeTimerRef.current);
+      crossfadeTimerRef.current = null;
+    }
+    if (crossfadeHandoffTimerRef.current) {
+      clearTimeout(crossfadeHandoffTimerRef.current);
+      crossfadeHandoffTimerRef.current = null;
+    }
+    if (engineReady) {
+      crossfadeEngine.completeCrossfade();
+    }
+    const fadeAudio = crossfadeAudioRef.current;
+    if (fadeAudio) {
+      fadeAudio.pause();
+      fadeAudio.removeAttribute('src');
+      fadeAudio.load();
+      crossfadeAudioRef.current = null;
+    }
+    crossfadeActiveRef.current = false;
+    crossfadePendingRef.current = false;
+  }, [engineReady]);
+
+  const finishCrossfade = useCallback(() => {
+    if (crossfadeTimerRef.current) {
+      clearTimeout(crossfadeTimerRef.current);
+      crossfadeTimerRef.current = null;
+    }
+
+    const fadeAudio = crossfadeAudioRef.current;
+    const mainEl = mediaRef.current;
+    if (mainEl) mainEl.pause();
+
+    const state = usePlayerStore.getState();
+    const nextIdx = state.queueIndex + 1;
+    const nextTrack = state.queue[nextIdx];
+
+    if (!nextTrack) {
+      disposeBridge();
+      usePlayerStore.setState({ isPlaying: false });
+      return;
+    }
+
+    const cached = state.getCachedStream(nextTrack.url);
+    prevQueueKeyRef.current = `${nextIdx}:${nextTrack.url}`;
+
+    const { [nextTrack.url]: _, ...restCache } = state.streamCache;
+    usePlayerStore.setState({
+      queueIndex: nextIdx,
+      streamCache: restCache,
+      streamUrl: cached ? cached.streamUrl : null,
+      title: nextTrack.title,
+      artist: nextTrack.artist,
+      thumbnail: nextTrack.thumbnail ?? null,
+      mediaType: (nextTrack.mediaType ?? 'audio') as 'audio' | 'video',
+      isPlaying: true,
+      platform: nextTrack.platform ?? null,
+      syncedLyrics: null,
+      plainLyrics: null,
+      wordSyncedLyrics: null,
+      lyricsLoading: false,
+    });
+
+    if (!fadeAudio) {
+      crossfadeActiveRef.current = false;
+      return;
+    }
+
+    crossfadeHandoffTimerRef.current = setTimeout(() => {
+      disposeBridge();
+    }, 8000);
+
+    const doHandoff = (url: string) => {
+      const el = mediaRef.current;
+      if (!el) { disposeBridge(); return; }
+
+      crossfadeEngine.ensureResumed();
+      const resolvedUrl = toAudioUrl(url);
+      let done = false;
+      const onReady = () => {
+        if (done) return;
+        done = true;
+        el.removeEventListener('canplay', onReady);
+        el.removeEventListener('loadeddata', onReady);
+        const pos = crossfadeAudioRef.current?.currentTime ?? 0;
+        if (pos > 0.5) el.currentTime = pos;
+        el.play().then(() => {
+          requestAnimationFrame(() => disposeBridge());
+        }).catch(() => disposeBridge());
+      };
+      el.addEventListener('canplay', onReady);
+      el.addEventListener('loadeddata', onReady);
+      el.src = resolvedUrl;
+      el.load();
+    };
+
+    if (cached) {
+      doHandoff(cached.streamUrl);
+    } else {
+      window.electron?.player.playMedia({
+        url: nextTrack.url,
+        platform: nextTrack.platform === 'youtubemusic' ? 'youtubeMusic' : (nextTrack.platform ?? ''),
+      }).catch(() => {});
+
+      const unsub = usePlayerStore.subscribe((curr, prev) => {
+        if (curr.streamUrl && curr.streamUrl !== prev.streamUrl) {
+          unsub();
+          doHandoff(curr.streamUrl);
+        }
+      });
+    }
+  }, [disposeBridge]);
+
+  const startCrossfade = useCallback(() => {
+    if (crossfadeActiveRef.current) return;
+
+    const state = usePlayerStore.getState();
+    const nextIdx = state.queueIndex + 1;
+    const nextTrack = state.queue[nextIdx];
+    if (!nextTrack) return;
+
+    const cached = state.getCachedStream(nextTrack.url);
+    if (!cached) {
+      if (!crossfadePendingRef.current) {
+        crossfadePendingRef.current = true;
+        window.electron?.player.prefetchMedia({
+          url: nextTrack.url,
+          platform: nextTrack.platform === 'youtubemusic' ? 'youtubeMusic' : (nextTrack.platform ?? ''),
+        }).then((data) => {
+          if (data?.streamUrl) {
+            usePlayerStore.getState().cacheStream(nextTrack.url, data.streamUrl, data.mediaType, data.isLive);
+          }
+        }).catch(() => {
+          crossfadePendingRef.current = false;
+        });
+      }
+      return;
+    }
+
+    crossfadePendingRef.current = false;
+    crossfadeActiveRef.current = true;
+    const fadeAudio = new Audio();
+    fadeAudio.crossOrigin = 'anonymous';
+    fadeAudio.src = toAudioUrl(cached.streamUrl);
+    crossfadeAudioRef.current = fadeAudio;
+
+    window.electron?.player.prefetchMedia({
+      url: nextTrack.url,
+      platform: nextTrack.platform === 'youtubemusic' ? 'youtubeMusic' : (nextTrack.platform ?? ''),
+    }).then((data) => {
+      if (data?.streamUrl) {
+        usePlayerStore.getState().cacheStream(nextTrack.url, data.streamUrl, data.mediaType, data.isLive);
+      }
+    }).catch(() => {});
+
+    if (engineReady) {
+      fadeAudio.volume = 1;
+      crossfadeEngine.prepareFade(fadeAudio);
+    } else {
+      fadeAudio.volume = 0;
+    }
+
+    fadeAudio.addEventListener('canplay', () => {
+      fadeAudio.play().catch(() => {});
+      if (engineReady) {
+        crossfadeEngine.startCrossfade(crossfadeDuration);
+        crossfadeTimerRef.current = setTimeout(() => {
+          finishCrossfade();
+        }, crossfadeDuration * 1000);
+      }
+    }, { once: true });
+
+    fadeAudio.load();
+
+    if (!engineReady) {
+      const mainEl = mediaRef.current;
+      if (!mainEl) return;
+      const fadeDur = crossfadeDuration * 1000;
+      const startTs = performance.now();
+      const fadeStartVol = volumeRef.current;
+
+      const tick = () => {
+        const elapsed = performance.now() - startTs;
+        const t = Math.min(1, elapsed / fadeDur);
+        const eqOut = Math.cos(t * Math.PI * 0.5);
+        const eqIn = Math.sin(t * Math.PI * 0.5);
+
+        if (mainEl && !mainEl.ended) {
+          mainEl.volume = Math.max(0, fadeStartVol * eqOut);
+        }
+        fadeAudio.volume = Math.min(fadeStartVol, fadeStartVol * eqIn);
+
+        if (t < 1 && !mainEl.ended) {
+          requestAnimationFrame(tick);
+        } else {
+          if (mainEl) mainEl.volume = volumeRef.current;
+          finishCrossfade();
+        }
+      };
+      requestAnimationFrame(tick);
+    }
+  }, [crossfadeDuration, engineReady, finishCrossfade]);
+
+  useEffect(() => {
+    return () => {
+      if (!crossfadeActiveRef.current) {
+        if (crossfadeTimerRef.current) {
+          clearTimeout(crossfadeTimerRef.current);
+          crossfadeTimerRef.current = null;
+        }
+        if (crossfadeAudioRef.current) {
+          crossfadeAudioRef.current.pause();
+          crossfadeAudioRef.current.removeAttribute('src');
+          crossfadeAudioRef.current.load();
+          crossfadeAudioRef.current = null;
+        }
+      }
+    };
+  }, [streamUrl]);
 
   const handleSeek = (val: number[]) => {
     const el = mediaRef.current;
     if (!el) return;
     el.currentTime = val[0];
     setCurrentTime(val[0]);
+    scheduleIdlePrefetch();
   };
 
   const handleVolume = (val: number[]) => {
-    const el = mediaRef.current;
-    if (!el) return;
     const v = val[0];
-    el.volume = v;
     setVolume(v);
-    if (v > 0 && muted) { el.muted = false; setMuted(false); }
+    volumeRef.current = v;
+    if (engineReady) {
+      crossfadeEngine.setVolume(v);
+    } else {
+      const el = mediaRef.current;
+      if (el) el.volume = v;
+    }
+    if (v > 0 && muted) {
+      setMuted(false);
+      if (engineReady) {
+        crossfadeEngine.setMuted(false);
+      } else {
+        const el = mediaRef.current;
+        if (el) el.muted = false;
+      }
+    }
   };
 
   const toggleMute = () => {
-    const el = mediaRef.current;
-    if (!el) return;
     const next = !muted;
-    el.muted = next;
     setMuted(next);
+    if (engineReady) {
+      crossfadeEngine.setMuted(next);
+    } else {
+      const el = mediaRef.current;
+      if (el) el.muted = next;
+    }
   };
 
   const handleEnded = () => {
-    if (canNext) playNext();
-    else setPlaying(false);
+    if (crossfadeActiveRef.current) return;
+    if (repeat === 'one') {
+      const el = mediaRef.current;
+      if (el) {
+        el.currentTime = 0;
+        el.play().catch(() => {});
+      }
+      return;
+    }
+    playNext();
   };
 
   const handleFullscreen = () => {
@@ -307,6 +535,8 @@ export function Player() {
   };
 
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+  const RepeatIcon = repeat === 'one' ? Repeat1 : Repeat;
+  const activeColor = platformColor || 'hsl(var(--primary))';
 
   if (!streamUrl && !title) return null;
 
@@ -318,13 +548,15 @@ export function Player() {
 
       <div className="flex items-center gap-3 w-[28%] min-w-0">
         <div
-          className="relative shrink-0 rounded-md overflow-hidden bg-muted"
+          className="relative shrink-0 rounded-md overflow-hidden bg-muted cursor-pointer"
           style={{ width: 56, height: 56 }}
           onMouseEnter={() => setArtHovered(true)}
           onMouseLeave={() => setArtHovered(false)}
+          onClick={mediaType === 'video' && artHovered ? handleFullscreen : toggleNowPlaying}
         >
           <video
-            ref={mediaRef}
+            ref={setVideoRef}
+            crossOrigin="anonymous"
             className="w-full h-full object-cover"
             style={{ display: mediaType === 'video' ? 'block' : 'none' }}
             onTimeUpdate={handleTimeUpdate}
@@ -351,7 +583,7 @@ export function Player() {
             }}
           />
 
-          {mediaType === 'audio' && (
+{mediaType === 'audio' && (
 
             thumbnail
               ? <img src={thumbnail} alt={title} className="absolute inset-0 w-full h-full object-cover" />
@@ -372,7 +604,7 @@ export function Player() {
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold truncate leading-snug">{title || '—'}</p>
+          <p className="text-sm font-semibold truncate leading-snug">{title || '\u2014'}</p>
           {artist && (
             <p className="text-xs text-muted-foreground truncate mt-0.5">{artist}</p>
           )}
@@ -388,9 +620,10 @@ export function Player() {
         <div className="flex items-center gap-0.5">
           <Button
             variant="ghost" size="icon"
-            className="h-8 w-8 text-muted-foreground/40"
-            disabled
-            title="Shuffle (coming soon)"
+            className="h-8 w-8"
+            onClick={toggleShuffle}
+            title="Shuffle"
+            style={shuffle ? { color: activeColor, backgroundColor: activeColor + '20' } : undefined}
           >
             <Shuffle className="h-3.5 w-3.5" />
           </Button>
@@ -427,34 +660,53 @@ export function Player() {
 
           <Button
             variant="ghost" size="icon"
-            className="h-8 w-8 text-muted-foreground/40"
-            disabled
-            title="Repeat (coming soon)"
+            className="h-8 w-8"
+            onClick={cycleRepeat}
+            title={repeat === 'off' ? 'Repeat' : repeat === 'all' ? 'Repeat All' : 'Repeat One'}
+            style={repeat !== 'off' ? { color: activeColor, backgroundColor: activeColor + '20' } : undefined}
           >
-            <Repeat className="h-3.5 w-3.5" />
+            <RepeatIcon className="h-3.5 w-3.5" />
           </Button>
         </div>
 
-        <div className="flex items-center gap-2 w-full max-w-[480px]">
-          <span className="text-[11px] text-muted-foreground tabular-nums w-8 text-right shrink-0 select-none">
-            {fmt(currentTime)}
-          </span>
-          <Slider
-            min={0}
-            max={duration || 100}
-            step={0.5}
-            value={[currentTime]}
-            onValueChange={handleSeek}
-            className="flex-1"
-            trackColor={platformColor}
-          />
-          <span className="text-[11px] text-muted-foreground tabular-nums w-8 shrink-0 select-none">
-            {fmt(duration)}
-          </span>
-        </div>
+        {isLive ? (
+          <div className="flex items-center gap-2 w-full max-w-[480px]">
+            <span className="text-[10px] font-bold tracking-widest text-red-500 uppercase px-1.5 py-0.5 border border-red-500 rounded select-none">
+              LIVE
+            </span>
+            <div className="flex-1 h-1 bg-muted-foreground/20 rounded-full" />
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 w-full max-w-[480px]">
+            <span className="text-[11px] text-muted-foreground tabular-nums w-8 text-right shrink-0 select-none">
+              {fmt(currentTime)}
+            </span>
+            <Slider
+              min={0}
+              max={duration || 100}
+              step={0.5}
+              value={[currentTime]}
+              onValueChange={handleSeek}
+              className="flex-1"
+              trackColor={platformColor}
+            />
+            <span className="text-[11px] text-muted-foreground tabular-nums w-8 shrink-0 select-none">
+              {fmt(duration)}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-end gap-2 w-[28%]">
+        <Button
+          variant="ghost" size="icon"
+          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={toggleNowPlaying}
+          title="Now Playing"
+          style={nowPlayingOpen ? { color: activeColor } : undefined}
+        >
+          <ListMusic className="h-4 w-4" />
+        </Button>
         <Button
           variant="ghost" size="icon"
           className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"

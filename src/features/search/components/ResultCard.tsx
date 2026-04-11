@@ -4,6 +4,38 @@ import { cn } from '@/utils/cn';
 import { formatDuration } from '@/utils/formatters';
 import type { SearchResult, Track, Album, Playlist, Artist } from '@/types';
 
+interface SearchResultView {
+  resultType?: string;
+  id?: string;
+  title?: string;
+  name?: string;
+  artist?: string;
+  album?: string;
+  owner?: string;
+  channel?: string;
+  platform?: string;
+  url?: string;
+  thumbnail?: string;
+  duration?: number;
+  trackCount?: number;
+  followerCount?: number;
+  genre?: string;
+  releaseDate?: string;
+  explicit?: boolean;
+  hires?: boolean;
+  bitDepth?: number;
+  sampleRate?: number;
+  mediaTag?: string;
+  views?: number;
+  popularity?: number;
+  rank?: number;
+  videoId?: string;
+  channelId?: string;
+  channelTitle?: string;
+  viewCount?: number;
+  subscriberCount?: number;
+}
+
 interface ResultCardProps {
   result: SearchResult;
   onPlay?: () => void;
@@ -98,7 +130,7 @@ function RankBadge({ rank }: { rank: number }) {
 export function ResultCard({ result, onPlay, onPlayNext, onDownload, onClick }: ResultCardProps) {
   const [copied, setCopied] = useState(false);
 
-  const r = result as any;
+  const r = result as SearchResultView;
 
   const isTrack      = r.resultType === 'track';
   const isAlbum      = r.resultType === 'album';

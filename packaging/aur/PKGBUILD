@@ -1,0 +1,95 @@
+# Maintainer: CrossyAtom46 <your@email.com>
+#
+# Source build — downloads the tagged GitHub tarball and compiles natively.
+# makepkg handles everything: npm, cargo, Tauri.
+#
+# Local install:
+#   cd packaging/aur && makepkg -si
+#
+# Publish to AUR (once per release):
+#   makepkg --printsrcinfo > .SRCINFO
+#   # commit PKGBUILD + .SRCINFO to your AUR git remote
+
+pkgname=mediaharbor
+pkgver=1.1.9
+pkgrel=1
+pkgdesc="Music streaming and media management (Tauri)"
+arch=('x86_64')
+url="https://github.com/MediaHarbor/mediaharbor"
+license=('GPL3')
+
+depends=(
+  'webkit2gtk-4.1'
+  'gtk3'
+  'libappindicator-gtk3'
+  'glib2'
+)
+
+makedepends=(
+  'rust'
+  'cargo'
+  'nodejs'
+  'npm'
+  'patchelf'          # used by tauri-cli during the build
+)
+
+provides=('mediaharbor')
+conflicts=('mediaharbor')
+options=('!lto')      # LTO can cause linker issues with mixed Rust/C deps
+
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/MediaHarbor/mediaharbor/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('SKIP')   # replace with real hash: updpkgsums
+
+prepare() {
+  cd "mediaharbor-${pkgver}"
+  npm ci --prefer-offline
+}
+
+build() {
+  cd "mediaharbor-${pkgver}"
+
+  # Build the React frontend
+  npm run build:react
+
+  # Compile the Tauri binary — skip bundling (no .deb/.rpm/.AppImage needed here)
+  cd src-tauri/mediaharbor
+  cargo tauri build --bundles none
+}
+
+package() {
+  cd "mediaharbor-${pkgver}"
+
+  # Binary
+  install -Dm755 src-tauri/target/release/mediaharbor \
+    "${pkgdir}/usr/bin/mediaharbor"
+
+  # Desktop entry
+  install -Dm644 /dev/stdin \
+    "${pkgdir}/usr/share/applications/mediaharbor.desktop" << 'EOF'
+[Desktop Entry]
+Name=MediaHarbor
+Exec=mediaharbor
+Icon=mediaharbor
+Type=Application
+Categories=AudioVideo;Audio;Music;Player;Network;
+Comment=Music streaming and media management
+StartupWMClass=mediaharbor
+EOF
+
+  # Icons (install every size present in the repo)
+  local icon_dir="src-tauri/mediaharbor/icons"
+  for size in 32 128; do
+    install -Dm644 "${icon_dir}/${size}x${size}.png" \
+      "${pkgdir}/usr/share/icons/hicolor/${size}x${size}/apps/mediaharbor.png"
+  done
+  # 128@2x = 256x256 logical
+  install -Dm644 "${icon_dir}/128x128@2x.png" \
+    "${pkgdir}/usr/share/icons/hicolor/256x256/apps/mediaharbor.png"
+  # Fallback scalable icon
+  install -Dm644 "${icon_dir}/icon.png" \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/mediaharbor.png"
+
+  # License
+  install -Dm644 LICENSE \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE" 2>/dev/null || true
+}

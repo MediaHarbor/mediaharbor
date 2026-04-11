@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 
+interface ITunesResult {
+  wrapperType?: string;
+  artistName?: string;
+  collectionName?: string;
+  trackName?: string;
+}
+
 type SuggestionType = 'artist' | 'track' | 'album';
 
 interface Suggestion {
@@ -29,7 +36,7 @@ export function useMusicSuggestions(query: string) {
           `&entity=musicTrack,album,musicArtist&limit=15&media=music`;
 
         const res = await fetch(url, { signal: abortRef.current.signal });
-        const data: { results?: any[] } = await res.json();
+        const data: { results?: ITunesResult[] } = await res.json();
 
         const seen = new Set<string>();
         const result: Suggestion[] = [];
@@ -57,8 +64,8 @@ export function useMusicSuggestions(query: string) {
         }
 
         setSuggestions(result);
-      } catch (err: any) {
-        if (err.name !== 'AbortError') setSuggestions([]);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name !== 'AbortError') setSuggestions([]);
       }
     }, 300);
 

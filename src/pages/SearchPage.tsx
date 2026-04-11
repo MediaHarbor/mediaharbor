@@ -12,12 +12,13 @@ import { useSearch } from '@/features/search/hooks/useSearch';
 import { useSearchStore } from '@/features/search/stores/searchStore';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { downloadService } from '@/services/ipc/downloads';
-import { usePlayerStore, type PlayableTrack } from '@/components/Player';
+import { usePlayerStore, type PlayableTrack } from '@/stores/usePlayerStore';
 import { useMusicSuggestions } from '@/hooks/useMusicSuggestions';
 import { searchService } from '@/services/ipc/search';
 import { logInfo, logError } from '@/utils/logger';
 import { cn } from '@/utils/cn';
-import { PlatformIcon, PLATFORM_COLORS, PLATFORM_LIST } from '@/utils/platforms';
+import { PlatformIcon } from '@/utils/platforms';
+import { PLATFORM_COLORS, PLATFORM_LIST } from '@/utils/platform-data';
 import { SEARCH_TYPE_LABELS, PLATFORM_IPC_NAME } from '@/utils/constants';
 import type { Platform, SearchType, SearchResult } from '@/types';
 
@@ -39,6 +40,46 @@ interface ViewingAlbum {
   fromArtist: boolean;
 }
 
+interface PlayableSource {
+  url?: string;
+  external_urls?: { spotify?: string };
+  uri?: string;
+  title?: string;
+  name?: string;
+  artist?: string;
+  thumbnail?: string;
+  resultType?: string;
+}
+
+interface DownloadableSource {
+  url?: string;
+  external_urls?: { spotify?: string };
+  uri?: string;
+  title?: string;
+  name?: string;
+  trackName?: string;
+  artist?: string | { name?: string };
+  artists?: Array<{ name: string }>;
+  artistName?: string;
+  uploader?: string;
+  channel?: string;
+  album?: { title?: string; name?: string; images?: Array<{ url: string }> };
+  collectionName?: string;
+  thumbnail?: string;
+  artworkUrl100?: string;
+}
+
+interface SearchResultLike {
+  id: string;
+  url: string;
+  title?: string;
+  name?: string;
+  thumbnail?: string;
+  artist?: string;
+  followerCount?: number;
+  genre?: string;
+}
+
 export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -55,6 +96,9 @@ export default function SearchPage() {
     open: boolean;
     url: string;
     title: string;
+    artist?: string;
+    album?: string;
+    thumbnail?: string | null;
   } | null>(null);
   const [isLoadingArtist, setIsLoadingArtist] = useState(false);
   const [viewingArtist, setViewingArtist] = useState<ViewingArtist | null>(null);
@@ -74,12 +118,12 @@ export default function SearchPage() {
   const { data: results, isLoading, error } = useSearch(searchQuery, searchQuery.length > 0);
 
   const toPlayableTrack = (r: SearchResult | TrackInfo): PlayableTrack => ({
-    url: (r as any).url || (r as any).external_urls?.spotify || (r as any).uri || '',
-    title: (r as any).title || (r as any).name || '',
-    artist: (r as any).artist || '',
-    thumbnail: (r as any).thumbnail,
+    url: (r as PlayableSource).url || (r as PlayableSource).external_urls?.spotify || (r as PlayableSource).uri || '',
+    title: (r as PlayableSource).title || (r as PlayableSource).name || '',
+    artist: (r as PlayableSource).artist || '',
+    thumbnail: (r as PlayableSource).thumbnail,
     platform: selectedPlatform,
-    mediaType: ((r as any).resultType === 'video' || (r as any).resultType === 'musicvideo') ? 'video' as const : 'audio' as const,
+    mediaType: ((r as PlayableSource).resultType === 'video' || (r as PlayableSource).resultType === 'musicvideo') ? 'video' as const : 'audio' as const,
   });
 
   const suggestions = useMusicSuggestions(showSuggestions ? query : '');
@@ -135,8 +179,13 @@ export default function SearchPage() {
         return;
       }
 
-      const url = (result as any).url || (result as any).external_urls?.spotify || (result as any).uri;
-      const title = (result as any).title || (result as any).name;
+      const r = result as DownloadableSource;
+      const url = r.url || r.external_urls?.spotify || r.uri;
+      const title = (r.title || r.name || r.trackName) as string;
+      const artist = (typeof r.artist === 'string' ? r.artist : r.artist?.name)
+        || r.artists?.[0]?.name || r.artistName || r.uploader || r.channel;
+      const album = r.album?.title || r.album?.name || r.collectionName;
+      const thumbnail = r.thumbnail || r.album?.images?.[0]?.url || r.artworkUrl100?.replace('100x100', '640x640') || null;
 
       if (!url) {
         addNotification({ type: 'error', title: 'Error', message: 'No URL found for download' });
@@ -144,7 +193,7 @@ export default function SearchPage() {
       }
 
       logInfo('download', 'Download requested', `"${title}" on ${selectedPlatform}`);
-      setQualityModal({ open: true, url, title });
+      setQualityModal({ open: true, url, title, artist, album, thumbnail });
     } catch (err) {
       addNotification({
         type: 'error',
@@ -163,6 +212,10 @@ export default function SearchPage() {
         platform: selectedPlatform,
         url: qualityModal.url,
         quality,
+        title: qualityModal.title,
+        artist: qualityModal.artist,
+        album: qualityModal.album,
+        thumbnail: qualityModal.thumbnail,
       });
 
       addNotification({ type: 'success', title: 'Download Started', message: `Downloading ${qualityModal.title}...` });
@@ -188,7 +241,7 @@ export default function SearchPage() {
       }
 
       const currentResults = results || [];
-      const clickedIndex = currentResults.findIndex((r) => (r as any).id === (result as any).id);
+      const clickedIndex = currentResults.findIndex((r) => r.id === result.id);
       const startIndex = clickedIndex >= 0 ? clickedIndex : 0;
       const playable: PlayableTrack[] = currentResults.map(toPlayableTrack).filter((t) => t.url);
 
@@ -197,7 +250,7 @@ export default function SearchPage() {
         return;
       }
 
-      const title = (result as any).title || (result as any).name;
+      const title = (result as SearchResultLike).title || (result as SearchResultLike).name;
       logInfo('playback', 'Playing track', `"${title}" from ${selectedPlatform}`);
       setQueue(playable, startIndex);
       addNotification({ type: 'success', title: 'Now Playing', message: title });
@@ -215,7 +268,7 @@ export default function SearchPage() {
     const track = toPlayableTrack(result);
     if (!track.url) return;
     insertNext(track);
-    addNotification({ type: 'success', title: 'Play next', message: (result as any).title || (result as any).name });
+    addNotification({ type: 'success', title: 'Play next', message: (result as SearchResultLike).title || (result as SearchResultLike).name });
   };
 
   const handleAddAllToQueue = () => {
@@ -234,19 +287,20 @@ export default function SearchPage() {
   };
 
   const openDetails = (result: SearchResult) => {
-    const id = String((result as any).id ?? '');
-    const title = (result as any).title || (result as any).name;
+    const id = String(result.id ?? '');
+    const title = ((result as SearchResultLike).title || (result as SearchResultLike).name) as string;
     if (searchType === 'album') setDetailsModal({ open: true, type: 'album', id, title });
     else if (searchType === 'audiobook') setDetailsModal({ open: true, type: 'album', id: `audiobook::${id}`, title });
     else if (searchType === 'playlist') setDetailsModal({ open: true, type: 'playlist', id, title });
     else if (searchType === 'show') setDetailsModal({ open: true, type: 'playlist', id: `show::${id}`, title });
     else if (searchType === 'podcast') setDetailsModal({ open: true, type: 'podcast', id: `podcast::${id}`, title });
+    else if (searchType === 'channel') openArtistDetails(result);
   };
 
   const openArtistDetails = async (result: SearchResult) => {
-    const r = result as any;
+    const r = result as SearchResultLike;
     const id = r.id;
-    const name = r.title || r.name;
+    const name = (r.title || r.name) as string;
 
     logInfo('search', 'Fetching artist', `${name} on ${selectedPlatform}`);
     setIsLoadingArtist(true);
@@ -280,6 +334,16 @@ export default function SearchPage() {
       artist: viewingArtist?.name,
       releaseDate: album.releaseDate,
       fromArtist: viewingArtist !== null,
+    });
+  };
+
+  const handleAlbumDownload = (albumUrl: string) => {
+    setQualityModal({
+      open: true,
+      url: albumUrl,
+      title: viewingAlbum?.title || '',
+      artist: viewingAlbum?.artist,
+      thumbnail: viewingAlbum?.thumbnail ?? null,
     });
   };
 
@@ -318,6 +382,7 @@ export default function SearchPage() {
           backLabel={viewingAlbum.fromArtist ? viewingArtist?.name || 'Artist' : 'Search Results'}
           onBack={() => setViewingAlbum(null)}
           onPlay={handleAlbumTracksPlay}
+          onDownload={handleAlbumDownload}
         />
       </div>
     );
@@ -500,13 +565,17 @@ export default function SearchPage() {
             id={detailsModal.id}
             platform={selectedPlatform}
             title={detailsModal.title}
-            onDownload={(url: string) => {
-              setQualityModal({ open: true, url, title: detailsModal.title });
+            onDownload={(info) => {
+              const url = typeof info === 'string' ? info : info.url;
+              const title = typeof info === 'string' ? detailsModal.title : (info.title || detailsModal.title);
+              const artist = typeof info === 'string' ? undefined : info.artist;
+              const thumbnail = typeof info === 'string' ? undefined : info.thumbnail;
+              setQualityModal({ open: true, url, title, artist, thumbnail });
             }}
             onPlay={(track: TrackInfo) => {
               setTrack({ streamUrl: '', title: track.title, artist: track.artist, thumbnail: track.thumbnail, mediaType: 'audio', platform: selectedPlatform });
               window.electron?.player.playMedia({ url: track.url, platform: PLATFORM_IPC_NAME[selectedPlatform] ?? selectedPlatform })
-                .catch((err: any) => addNotification({ type: 'error', title: 'Playback Failed', message: err?.message ?? 'Unknown error' }));
+                .catch((err: Error) => addNotification({ type: 'error', title: 'Playback Failed', message: err?.message ?? 'Unknown error' }));
               addNotification({ type: 'success', title: 'Now Playing', message: track.title });
             }}
             onPlayAll={handlePlayAll}

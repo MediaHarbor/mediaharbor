@@ -1,0 +1,11 @@
+pub mod credentials;
+pub mod spotify_api;
+pub mod tidal_api;
+pub mod qobuz_api;
+pub mod apple_music_api;
+pub mod deezer_api;
+pub mod ytmusic_search_api;
+pub mod yt_search_api;
+pub mod yt_audio_stream;
+pub mod librespot_service;
+pub mod apple_music_service;
