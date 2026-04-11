@@ -192,6 +192,21 @@ impl BackendState {
                     {
                         Ok(r) => Ok(r),
                         Err(e) if e.to_string().contains("401") || e.to_string().contains("Unauthorized") => {
+                            if !settings.tidal_refresh_token.is_empty() {
+                                if let Ok(tidal_client) = self.authenticate_tidal(&settings).await {
+                                    if let Ok(r) = client
+                                        .search_v1(
+                                            &req.query,
+                                            map_tidal_type(&req.search_type),
+                                            &settings.tidal_country_code,
+                                            &tidal_client.access_token,
+                                        )
+                                        .await
+                                    {
+                                        return Ok(r);
+                                    }
+                                }
+                            }
                             self.emitter.emit_app_error(&ipc_contract::AppErrorEvent {
                                 message: "Tidal session expired — please sign in again.".into(),
                                 context: Some("tidal_search".into()),
@@ -277,15 +292,64 @@ impl BackendState {
         match platform {
             "youtube" => {
                 use std::process::Stdio;
-                use tokio::io::AsyncReadExt;
 
-                let (video_info, audio_info) =
-                    apis::yt_audio_stream::get_video_stream_url(&req.url, None).await?;
+                let info = apis::yt_audio_stream::get_video_stream_info(&req.url, None).await?;
+
+                let server = self
+                    .streaming_server
+                    .as_ref()
+                    .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
+                let id = uuid::Uuid::new_v4().to_string();
+
+                if info.is_live {
+                    let hls_url = info.video.url.clone();
+                    let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, String>>(32);
+                    tokio::spawn(async move {
+                        use tokio::io::AsyncReadExt;
+                        let ffmpeg_bin = venv_manager::resolve_ffmpeg();
+                        let mut child = match tokio::process::Command::new(&ffmpeg_bin)
+                            .args([
+                                "-loglevel", "error",
+                                "-i", &hls_url,
+                                "-c", "copy",
+                                "-f", "mpegts",
+                                "pipe:1",
+                            ])
+                            .stdout(Stdio::piped())
+                            .stderr(Stdio::null())
+                            .spawn()
+                        {
+                            Ok(c) => c,
+                            Err(e) => { let _ = tx.send(Err(format!("ffmpeg: {}", e))).await; return; }
+                        };
+                        if let Some(mut stdout) = child.stdout.take() {
+                            let mut buf = vec![0u8; 65_536];
+                            loop {
+                                match stdout.read(&mut buf).await {
+                                    Ok(0) => break,
+                                    Ok(n) => {
+                                        if tx.send(Ok(bytes::Bytes::copy_from_slice(&buf[..n]))).await.is_err() { break; }
+                                    }
+                                    Err(e) => { let _ = tx.send(Err(e.to_string())).await; break; }
+                                }
+                            }
+                        }
+                        let _ = child.wait().await;
+                    });
+                    let stream_url = server.register_stream_progressive(&id, rx, "video/mp2t");
+                    return Ok(ipc_contract::PlayMediaResponse {
+                        stream_url,
+                        platform: platform.to_string(),
+                        duration_sec: None,
+                        media_type: Some("video".to_string()),
+                        is_live: true,
+                    });
+                }
 
                 let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, String>>(16);
 
-                if video_info.url == audio_info.url {
-                    let url = video_info.url.clone();
+                if info.video.url == info.audio.url {
+                    let url = info.video.url.clone();
                     tokio::spawn(async move {
                         use futures_util::StreamExt;
                         let client = reqwest::Client::builder()
@@ -313,9 +377,10 @@ impl BackendState {
                         }
                     });
                 } else {
-                    let video_url = video_info.url.clone();
-                    let audio_url = audio_info.url.clone();
+                    let video_url = info.video.url.clone();
+                    let audio_url = info.audio.url.clone();
                     tokio::spawn(async move {
+                        use tokio::io::AsyncReadExt;
                         let ffmpeg_bin = venv_manager::resolve_ffmpeg();
                         let mut child = match tokio::process::Command::new(&ffmpeg_bin)
                             .args([
@@ -337,7 +402,6 @@ impl BackendState {
                                 return;
                             }
                         };
-
                         if let Some(mut stdout) = child.stdout.take() {
                             let mut buf = vec![0u8; 65_536];
                             loop {
@@ -359,11 +423,6 @@ impl BackendState {
                     });
                 }
 
-                let server = self
-                    .streaming_server
-                    .as_ref()
-                    .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
-                let id = uuid::Uuid::new_v4().to_string();
                 let stream_url = server.register_stream_progressive(&id, rx, "video/mp4");
 
                 Ok(ipc_contract::PlayMediaResponse {
@@ -371,12 +430,14 @@ impl BackendState {
                     platform: platform.to_string(),
                     duration_sec: None,
                     media_type: Some("video".to_string()),
+                    is_live: false,
                 })
             }
 
             "youtubeMusic" | "youtubemusic" => {
                 let stream_info =
                     apis::yt_audio_stream::get_audio_stream_url(&req.url, &self.yt_stream_cache, None).await?;
+
                 let client = reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(300))
                     .connect_timeout(std::time::Duration::from_secs(10))
@@ -410,6 +471,7 @@ impl BackendState {
                     platform: platform.to_string(),
                     duration_sec: None,
                     media_type: Some("audio".to_string()),
+                    is_live: false,
                 })
             }
 
@@ -443,6 +505,7 @@ impl BackendState {
                     platform: "spotify".to_string(),
                     duration_sec: None,
                     media_type: Some("audio".to_string()),
+                    is_live: false,
                 })
             }
 
@@ -466,6 +529,7 @@ impl BackendState {
                     platform: "tidal".to_string(),
                     duration_sec: None,
                     media_type: Some("audio".to_string()),
+                    is_live: false,
                 })
             }
 
@@ -483,7 +547,7 @@ impl BackendState {
                     streamrip::orchestrator::Platform::Deezer,
                     streamrip::orchestrator::ContentType::Track,
                 ).ok_or_else(|| MhError::Parse("Could not extract Deezer track ID".into()))?;
-                let (url_str, ext) = client.get_stream_url(&track_id, 3).await?;
+                let (url_str, ext, filesize) = client.get_stream_url(&track_id, 3).await?;
                 let mime_type: &'static str = if ext == "flac" { "audio/flac" } else { "audio/mpeg" };
 
                 let server = self
@@ -492,59 +556,14 @@ impl BackendState {
                     .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
                 let id = uuid::Uuid::new_v4().to_string();
 
-                let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, String>>(32);
-                let http_client = http_client::build_mozilla_client()?;
-                let track_id_clone = track_id.clone();
-                tokio::spawn(async move {
-                    use futures_util::StreamExt;
-                    use crate::crypto::deezer::{generate_blowfish_key, decrypt_chunk};
-
-                    const CHUNK: usize = 6144;
-                    const ENC: usize = 2048;
-
-                    let key = generate_blowfish_key(&track_id_clone);
-                    let resp = match http_client.get(&url_str).send().await {
-                        Ok(r) => r,
-                        Err(e) => { let _ = tx.send(Err(e.to_string())).await; return; }
-                    };
-
-                    let mut buf: Vec<u8> = Vec::with_capacity(CHUNK * 2);
-                    let mut stream = resp.bytes_stream();
-
-                    while let Some(result) = stream.next().await {
-                        match result {
-                            Ok(incoming) => buf.extend_from_slice(&incoming),
-                            Err(e) => { let _ = tx.send(Err(e.to_string())).await; return; }
-                        }
-
-                        while buf.len() >= CHUNK {
-                            let raw: Vec<u8> = buf.drain(..CHUNK).collect();
-                            let mut out = decrypt_chunk(&key, &raw[..ENC]);
-                            out.extend_from_slice(&raw[ENC..]);
-                            if tx.send(Ok(bytes::Bytes::from(out))).await.is_err() { return; }
-                        }
-                    }
-
-                    if !buf.is_empty() {
-                        let raw = buf;
-                        let out: Vec<u8> = if raw.len() >= ENC {
-                            let mut dec = decrypt_chunk(&key, &raw[..ENC]);
-                            dec.extend_from_slice(&raw[ENC..]);
-                            dec
-                        } else {
-                            raw
-                        };
-                        let _ = tx.send(Ok(bytes::Bytes::from(out))).await;
-                    }
-                });
-
-                let stream_url = server.register_stream_progressive(&id, rx, mime_type);
+                let stream_url = server.register_stream_deezer(&id, url_str, track_id.clone(), filesize, mime_type);
 
                 Ok(ipc_contract::PlayMediaResponse {
                     stream_url,
                     platform: "deezer".to_string(),
                     duration_sec: None,
                     media_type: Some("audio".to_string()),
+                    is_live: false,
                 })
             }
 
@@ -571,6 +590,7 @@ impl BackendState {
                     platform: "qobuz".to_string(),
                     duration_sec: None,
                     media_type: Some("audio".to_string()),
+                    is_live: false,
                 })
             }
 
@@ -596,6 +616,7 @@ impl BackendState {
                     platform: "applemusic".to_string(),
                     duration_sec: None,
                     media_type: Some("audio".to_string()),
+                    is_live: false,
                 })
             }
 
@@ -640,6 +661,7 @@ impl BackendState {
                         platform: "local".to_string(),
                         duration_sec: None,
                         media_type: Some(if is_video { "video" } else { "audio" }.to_string()),
+                        is_live: false,
                     });
                 }
 
@@ -648,6 +670,7 @@ impl BackendState {
                     platform: platform.to_string(),
                     duration_sec: None,
                     media_type: None,
+                    is_live: false,
                 })
             }
         }
@@ -735,6 +758,329 @@ impl BackendState {
         }
         Ok(client)
     }
+
+    pub async fn get_lyrics(
+        &self,
+        req: ipc_contract::GetLyricsRequest,
+    ) -> MhResult<ipc_contract::GetLyricsResponse> {
+        let settings = self.settings.read().await.clone();
+        let platform = req.platform.as_str();
+
+        let empty = || ipc_contract::GetLyricsResponse {
+            synced: None, plain: None, word_synced: None,
+        };
+
+        let native_result = match platform {
+            "tidal" => {
+                match self.authenticate_tidal(&settings).await {
+                    Err(_) => empty(),
+                    Ok(client) => {
+                        match extract_tidal_track_id(&req.url) {
+                            None => empty(),
+                            Some(track_id) => {
+                                if let Some(lyr) = client.fetch_lyrics(&track_id).await {
+                                    let plain = lyr["lyrics"].as_str().map(|s| s.to_string());
+                                    let synced = lyr["subtitles"].as_str().map(|s| s.to_string());
+                                    ipc_contract::GetLyricsResponse { synced, plain, word_synced: None }
+                                } else {
+                                    empty()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            "deezer" => {
+                if settings.deezer_arl.is_empty() {
+                    empty()
+                } else {
+                    match streamrip::deezer_client::DeezerClient::new(&settings.deezer_arl) {
+                        Err(_) => empty(),
+                        Ok(client) => {
+                            if client.authenticate().await.is_err() {
+                                empty()
+                            } else {
+                                let track_id = streamrip::orchestrator::extract_platform_id(
+                                    &req.url,
+                                    streamrip::orchestrator::Platform::Deezer,
+                                    streamrip::orchestrator::ContentType::Track,
+                                );
+                                match track_id {
+                                    None => empty(),
+                                    Some(track_id) => {
+                                        let word_synced = client.get_word_lyrics(&track_id).await;
+                                        match client.get_lyrics(&track_id).await {
+                                            Ok(lyr) => {
+                                                let ldata = &lyr["results"];
+                                                let has_error = lyr["error"].as_array().map(|a| !a.is_empty()).unwrap_or(false);
+                                                if !has_error {
+                                                    let plain = ldata["LYRICS_TEXT"].as_str().map(|s| s.to_string());
+                                                    let synced = ldata["LYRICS_SYNC_JSON"].as_array().and_then(|arr| {
+                                                        if arr.is_empty() { return None; }
+                                                        let lines: Vec<String> = arr.iter()
+                                                            .filter_map(deezer_sync_line_to_lrc)
+                                                            .collect();
+                                                        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+                                                    });
+                                                    ipc_contract::GetLyricsResponse { synced, plain, word_synced }
+                                                } else {
+                                                    ipc_contract::GetLyricsResponse { synced: None, plain: None, word_synced }
+                                                }
+                                            }
+                                            Err(_) => ipc_contract::GetLyricsResponse { synced: None, plain: None, word_synced },
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            "spotify" => {
+                let track_id = extract_spotify_id(&req.url).unwrap_or_default();
+                if track_id.is_empty() {
+                    empty()
+                } else {
+                    let token_opt = {
+                        let librespot = self.librespot.read().await;
+                        librespot.cached_access_token()
+                    };
+                    match token_opt {
+                    None => empty(),
+                    Some(token) => {
+                    let http = http_client::build_client()?;
+                    let resp = http
+                        .get(&format!("https://spclient.wg.spotify.com/color-lyrics/v2/track/{}", track_id))
+                        .header("Authorization", format!("Bearer {}", token))
+                        .header("App-Platform", "WebPlayer")
+                        .header("Accept", "application/json")
+                        .send()
+                        .await;
+                    let mut result = empty();
+                    if let Ok(r) = resp {
+                        if r.status().is_success() {
+                            if let Ok(body) = r.json::<serde_json::Value>().await {
+                                let lyrics_obj = &body["lyrics"];
+                                let synced_lines = lyrics_obj["lines"].as_array();
+                                if let Some(lines) = synced_lines {
+                                    let lrc: Vec<String> = lines.iter().filter_map(|l| {
+                                        let ms: u64 = l["startTimeMs"].as_str()
+                                            .and_then(|s| s.parse().ok())
+                                            .or_else(|| l["startTimeMs"].as_u64())
+                                            .or_else(|| l["startTimeMs"].as_f64().map(|f| f as u64))?;
+                                        let text = l["words"].as_str().unwrap_or("");
+                                        Some(ms_to_lrc_stamp(ms, text))
+                                    }).collect();
+                                    let plain: Vec<String> = lines.iter().filter_map(|l| {
+                                        l["words"].as_str().map(|s| s.to_string())
+                                    }).collect();
+
+                                    let word_synced = {
+                                        let mut wlines: Vec<serde_json::Value> = Vec::new();
+                                        for l in lines {
+                                            if let Some(syls) = l["syllables"].as_array() {
+                                                if syls.is_empty() { continue; }
+                                                let start_ms: f64 = l["startTimeMs"].as_str()
+                                                    .and_then(|s| s.parse().ok())
+                                                    .or_else(|| l["startTimeMs"].as_f64())
+                                                    .unwrap_or(0.0);
+                                                let end_ms: f64 = l["endTimeMs"].as_str()
+                                                    .and_then(|s| s.parse().ok())
+                                                    .or_else(|| l["endTimeMs"].as_f64())
+                                                    .unwrap_or(0.0);
+                                                let text = l["words"].as_str().unwrap_or("");
+                                                let words: Vec<serde_json::Value> = syls.iter().filter_map(|s| {
+                                                    let st = s["startTimeMs"].as_str()
+                                                        .and_then(|v| v.parse::<f64>().ok())
+                                                        .or_else(|| s["startTimeMs"].as_f64())
+                                                        .unwrap_or(0.0);
+                                                    let en = s["endTimeMs"].as_str()
+                                                        .and_then(|v| v.parse::<f64>().ok())
+                                                        .or_else(|| s["endTimeMs"].as_f64())
+                                                        .unwrap_or(st);
+                                                    let w = s["chars"].as_str()
+                                                        .or_else(|| s["text"].as_str())
+                                                        .or_else(|| s["words"].as_str())
+                                                        .unwrap_or("");
+                                                    if w.is_empty() { return None; }
+                                                    Some(serde_json::json!({
+                                                        "start": st / 1000.0,
+                                                        "end": en / 1000.0,
+                                                        "text": w
+                                                    }))
+                                                }).collect();
+                                                if !words.is_empty() {
+                                                    wlines.push(serde_json::json!({
+                                                        "startTime": start_ms / 1000.0,
+                                                        "endTime": if end_ms > 0.0 { end_ms / 1000.0 } else {
+                                                            words.last().and_then(|w| w["end"].as_f64()).unwrap_or(start_ms / 1000.0)
+                                                        },
+                                                        "text": text,
+                                                        "words": words
+                                                    }));
+                                                }
+                                            }
+                                        }
+                                        if wlines.is_empty() { None }
+                                        else { serde_json::to_string(&wlines).ok() }
+                                    };
+
+                                    result = ipc_contract::GetLyricsResponse {
+                                        synced: if lrc.is_empty() { None } else { Some(lrc.join("\n")) },
+                                        plain: if plain.is_empty() { None } else { Some(plain.join("\n")) },
+                                        word_synced,
+                                    };
+                                }
+                            }
+                        }
+                    }
+                    result
+                    }
+                    }
+                }
+            }
+
+            "applemusic" => {
+                let apple = self.apple_music.read().await;
+                if !apple.is_configured() {
+                    empty()
+                } else {
+                    match apple.fetch_lyrics(&req.url).await {
+                        Some((synced, plain, word_synced)) => ipc_contract::GetLyricsResponse { synced, plain, word_synced },
+                        None => empty(),
+                    }
+                }
+            }
+
+            "youtubeMusic" | "youtubemusic" | "ytmusic" => {
+                let video_id = extract_yt_video_id(&req.url).unwrap_or_default();
+                if video_id.is_empty() {
+                    empty()
+                } else {
+                    match apis::ytmusic_search_api::YtMusicClient::init().await {
+                        Ok(client) => {
+                            let plain = client.fetch_lyrics(&video_id).await;
+                            ipc_contract::GetLyricsResponse { synced: None, plain, word_synced: None }
+                        }
+                        Err(_) => empty(),
+                    }
+                }
+            }
+
+            _ => {
+                empty()
+            }
+        };
+
+        if native_result.synced.is_some() || native_result.plain.is_some() || native_result.word_synced.is_some() {
+            return Ok(native_result);
+        }
+
+        if let Some(deezer_wbw) = fetch_deezer_word_lyrics(&req.title, &req.artist, &settings).await {
+            return Ok(deezer_wbw);
+        }
+
+        if let Some(lrclib_result) = fetch_lrclib_lyrics(&req.title, &req.artist, req.duration).await {
+            return Ok(lrclib_result);
+        }
+
+        Ok(native_result)
+    }
+}
+
+async fn fetch_lrclib_lyrics(
+    title: &str,
+    artist: &str,
+    duration: Option<f64>,
+) -> Option<ipc_contract::GetLyricsResponse> {
+    if title.is_empty() {
+        return None;
+    }
+    let http = http_client::build_client().ok()?;
+    let mut url = format!(
+        "https://lrclib.net/api/get?track_name={}&artist_name={}",
+        url::form_urlencoded::byte_serialize(title.as_bytes()).collect::<String>(),
+        url::form_urlencoded::byte_serialize(artist.as_bytes()).collect::<String>(),
+    );
+    if let Some(dur) = duration {
+        url.push_str(&format!("&duration={}", dur.round() as u64));
+    }
+    let resp = http
+        .get(&url)
+        .header("User-Agent", "MediaHarbor/1.0")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    let synced = body["syncedLyrics"].as_str().map(|s| s.to_string());
+    let plain = body["plainLyrics"].as_str().map(|s| s.to_string());
+    if synced.is_none() && plain.is_none() {
+        return None;
+    }
+    Some(ipc_contract::GetLyricsResponse { synced, plain, word_synced: None })
+}
+
+async fn fetch_deezer_word_lyrics(
+    title: &str,
+    artist: &str,
+    settings: &defaults::Settings,
+) -> Option<ipc_contract::GetLyricsResponse> {
+    if title.is_empty() { return None; }
+
+    let http = http_client::build_client().ok()?;
+    let query = format!("{} {}", title, artist);
+    let search_url = format!(
+        "https://api.deezer.com/search?q={}&limit=5",
+        url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>(),
+    );
+    let search_resp = http.get(&search_url)
+        .header("User-Agent", http_client::UA_MOZILLA)
+        .send().await.ok()?;
+    let search_body: serde_json::Value = search_resp.json().await.ok()?;
+    let track_id = search_body["data"].as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|t| t["id"].as_u64())
+        .map(|id| id.to_string())?;
+
+    let arl = &settings.deezer_arl;
+    if !arl.is_empty() {
+        let client = streamrip::deezer_client::DeezerClient::new(arl).ok()?;
+        client.authenticate().await.ok()?;
+        let word_synced = client.get_word_lyrics(&track_id).await;
+
+        let gw_result = client.get_lyrics(&track_id).await.ok();
+        let (synced, plain) = if let Some(ref lyr) = gw_result {
+            let ldata = &lyr["results"];
+            let p = ldata["LYRICS_TEXT"].as_str().map(|s| s.to_string());
+            let s = ldata["LYRICS_SYNC_JSON"].as_array().and_then(|arr| {
+                if arr.is_empty() { return None; }
+                let lines: Vec<String> = arr.iter()
+                    .filter_map(deezer_sync_line_to_lrc)
+                    .collect();
+                if lines.is_empty() { None } else { Some(lines.join("\n")) }
+            });
+            (s, p)
+        } else {
+            (None, None)
+        };
+
+        if word_synced.is_some() || synced.is_some() || plain.is_some() {
+            return Some(ipc_contract::GetLyricsResponse { synced, plain, word_synced });
+        }
+        return None;
+    }
+
+    let word_synced = fetch_public_word_lyrics(&track_id).await;
+    if word_synced.is_some() {
+        return Some(ipc_contract::GetLyricsResponse { synced: None, plain: None, word_synced });
+    }
+
+    None
 }
 
 fn make_log_buffer() -> (std::sync::Arc<std::sync::Mutex<Vec<String>>>, impl Fn(String) + Clone + Send + 'static) {
@@ -926,17 +1272,62 @@ fn map_ytmusic_filter(t: &ipc_contract::SearchType) -> apis::ytmusic_search_api:
     }
 }
 
+use once_cell::sync::Lazy;
+
+static SPOTIFY_ID_RE: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(r"spotify\.com/(?:track|episode|album|artist|playlist)/([a-zA-Z0-9]+)").unwrap()
+});
+static TIDAL_TRACK_ID_RE: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(r"tidal\.com/(?:browse/)?(?:track|album|video)/(\d+)").unwrap()
+});
+static YT_VIDEO_ID_RE: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(r"[?&]v=([a-zA-Z0-9_-]{11})").unwrap()
+});
+
 fn extract_spotify_id(url: &str) -> Option<String> {
-    let re = regex::Regex::new(
-        r"spotify\.com/(?:track|episode|album|artist|playlist)/([a-zA-Z0-9]+)",
-    )
-    .ok()?;
-    re.captures(url)?.get(1).map(|m| m.as_str().to_string())
+    SPOTIFY_ID_RE.captures(url)?.get(1).map(|m| m.as_str().to_string())
 }
 
 fn extract_tidal_track_id(url: &str) -> Option<String> {
-    let re = regex::Regex::new(r"tidal\.com/(?:browse/)?(?:track|album|video)/(\d+)").ok()?;
-    re.captures(url)?.get(1).map(|m| m.as_str().to_string())
+    TIDAL_TRACK_ID_RE.captures(url)?.get(1).map(|m| m.as_str().to_string())
+}
+
+fn extract_yt_video_id(url: &str) -> Option<String> {
+    if let Some(caps) = YT_VIDEO_ID_RE.captures(url) {
+        return caps.get(1).map(|m| m.as_str().to_string());
+    }
+    if url.len() == 11 && url.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+        return Some(url.to_string());
+    }
+    None
+}
+
+fn ms_to_lrc_stamp(ms: u64, line: &str) -> String {
+    let m = ms / 60000;
+    let s = (ms % 60000) / 1000;
+    let cs = (ms % 1000) / 10;
+    format!("[{:02}:{:02}.{:02}]{}", m, s, cs, line)
+}
+
+fn deezer_sync_line_to_lrc(l: &serde_json::Value) -> Option<String> {
+    let line = l["line"].as_str().unwrap_or("");
+    if let Some(ts) = l["lrc_timestamp"].as_str() {
+        if !ts.is_empty() {
+            return Some(format!("{}{}", ts, line));
+        }
+    }
+    let ms = l["milliseconds"].as_str()
+        .and_then(|s| s.parse::<u64>().ok())
+        .or_else(|| l["milliseconds"].as_u64())
+        .or_else(|| l["milliseconds"].as_f64().map(|f| f as u64))
+        .or_else(|| l["lrc_timestamp"].as_u64())
+        .or_else(|| l["lrc_timestamp"].as_f64().map(|f| f as u64))?;
+    Some(ms_to_lrc_stamp(ms, line))
+}
+
+async fn fetch_public_word_lyrics(track_id: &str) -> Option<String> {
+    let client = streamrip::deezer_client::DeezerClient::new("").ok()?;
+    client.get_word_lyrics(track_id).await
 }
 
 fn getrandom_bytes(buf: &mut [u8]) -> MhResult<()> {
@@ -1458,7 +1849,7 @@ impl BackendState {
                                    .or_else(|| data["album"]["cover_big"].as_str())
                                    .map(String::from),
                     platform:  Some("deezer".into()),
-                    quality:   None,
+                    quality:   Some(format!("{} {}", streamrip::deezer_format(&settings.deezer_quality), streamrip::deezer_quality_label(&settings.deezer_quality))),
                 })
             }
             SrPlatform::Qobuz => {
@@ -1480,7 +1871,7 @@ impl BackendState {
                     album:     data["album"]["title"].as_str().map(String::from),
                     thumbnail: data["album"]["image"]["large"].as_str().map(String::from),
                     platform:  Some("qobuz".into()),
-                    quality:   None,
+                    quality:   Some(format!("{} {}", if settings.qobuz_quality == 5 { "MP3" } else { "FLAC" }, streamrip::qobuz_quality_label(settings.qobuz_quality as u32))),
                 })
             }
             SrPlatform::Tidal => {
@@ -1507,7 +1898,7 @@ impl BackendState {
                         Some(format!("https://resources.tidal.com/images/{}/640x640.jpg", cover_id))
                     },
                     platform:  Some("tidal".into()),
-                    quality:   None,
+                    quality:   Some(format!("{} {}", streamrip::tidal_format(settings.tidal_quality), streamrip::tidal_quality_label(settings.tidal_quality))),
                 })
             }
         }

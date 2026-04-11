@@ -52,7 +52,15 @@ fn build_file_name(
 
     if restrict {
         name = name.chars().map(|c| match c {
-            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            '<'  => '＜',
+            '>'  => '＞',
+            ':'  => '：',
+            '"'  => '＂',
+            '/'  => '⁄',
+            '\\' => '＼',
+            '|'  => '｜',
+            '?'  => '？',
+            '*'  => '＊',
             '\x00'..='\x1f' => '_',
             other => other,
         }).collect();
@@ -578,6 +586,17 @@ impl QobuzClient {
             String::new()
         };
 
+        let isrc = meta["isrc"].as_str().unwrap_or("").to_string();
+        let label = meta["album"]["label"]["name"].as_str().unwrap_or("").to_string();
+        let date = meta["album"]["release_date_original"].as_str().unwrap_or("").to_string();
+        let actual_bit_depth = meta["maximum_bit_depth"].as_u64()
+            .or_else(|| meta["album"]["maximum_bit_depth"].as_u64())
+            .unwrap_or(16) as u32;
+        let actual_sampling_rate = meta["maximum_sampling_rate"].as_f64()
+            .or_else(|| meta["album"]["maximum_sampling_rate"].as_f64())
+            .unwrap_or(44.1);
+        let quality_str = crate::streamrip::qobuz_audio_quality_label(ext, format_id, actual_bit_depth, actual_sampling_rate);
+
         let mut vars = std::collections::HashMap::new();
         vars.insert("title", title.clone());
         vars.insert("artist", artist.clone());
@@ -590,11 +609,14 @@ impl QobuzClient {
         vars.insert("year", year.clone());
         vars.insert("genre", genre.clone());
         vars.insert("explicit", explicit_str);
+        vars.insert("isrc", isrc.clone());
+        vars.insert("label", label.clone());
+        vars.insert("date", date.clone());
+        vars.insert("quality", quality_str.clone());
+        vars.insert("format", if ext == "flac" { "FLAC" } else { "MP3" }.to_string());
 
         let file_stem = build_file_name(&track_template, &vars.iter().map(|(k, v)| (*k, v.clone())).collect(), restrict, truncate);
         let file_name = format!("{}.{}", file_stem, ext);
-
-        let label = meta["album"]["label"]["name"].as_str().unwrap_or("").to_string();
         let track_dest = if !in_collection {
             let folder = crate::streamrip::build_album_folder(
                 &settings.filepaths_folder_format,
@@ -603,6 +625,8 @@ impl QobuzClient {
                 &year,
                 &genre,
                 &label,
+                quality_str.as_str(),
+                if ext == "flac" { "FLAC" } else { "MP3" },
             );
             let d = dest.join(folder);
             tokio::fs::create_dir_all(&d).await?;

@@ -64,7 +64,15 @@ fn build_file_name(template: &str, vars: &std::collections::HashMap<&str, String
 
     if restrict {
         name = name.chars().map(|c| match c {
-            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            '<'  => '＜',
+            '>'  => '＞',
+            ':'  => '：',
+            '"'  => '＂',
+            '/'  => '⁄',
+            '\\' => '＼',
+            '|'  => '｜',
+            '?'  => '？',
+            '*'  => '＊',
             '\x00'..='\x1f' => '_',
             other => other,
         }).collect();
@@ -77,10 +85,7 @@ fn build_file_name(template: &str, vars: &std::collections::HashMap<&str, String
 }
 
 fn safe_name(s: &str) -> String {
-    s.chars().map(|c| match c {
-        '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
-        other => other,
-    }).collect()
+    super::safe_name(s)
 }
 
 impl DeezerClient {
@@ -339,7 +344,7 @@ impl DeezerClient {
         ))
     }
 
-    async fn get_token_url(&self, track_token: &str, format: &str, license_token: &str, sid: Option<&str>) -> MhResult<Option<String>> {
+    async fn get_token_url(&self, track_token: &str, format: &str, license_token: &str, sid: Option<&str>) -> MhResult<Option<(String, Option<u64>)>> {
         let body = serde_json::json!({
             "license_token": license_token,
             "media": [{ "type": "FULL", "formats": [{ "cipher": "BF_CBC_STRIPE", "format": format }] }],
@@ -358,12 +363,13 @@ impl DeezerClient {
             return Ok(None);
         }
         let json: Value = resp.json().await?;
-        Ok(json["data"][0]["media"][0]["sources"][0]["url"]
-            .as_str()
-            .map(|s| s.to_string()))
+        let media = &json["data"][0]["media"][0];
+        let url_str = media["sources"][0]["url"].as_str().map(|s| s.to_string());
+        let filesize = media["filesize"].as_u64();
+        Ok(url_str.map(|u| (u, filesize)))
     }
 
-    pub async fn get_stream_url(&self, track_id: &str, quality: u8) -> MhResult<(String, &'static str)> {
+    pub async fn get_stream_url(&self, track_id: &str, quality: u8) -> MhResult<(String, &'static str, Option<u64>)> {
         let guard = self.require_session().await?;
         let sess = guard.as_ref().unwrap();
         let effective_quality = quality.min(sess.max_quality);
@@ -375,16 +381,24 @@ impl DeezerClient {
         let (format, ext) = quality_info(effective_quality);
 
         let mut url: Option<String> = None;
+        let mut filesize: Option<u64> = None;
+
         if let Some(token) = track_info["TRACK_TOKEN"].as_str() {
             if !token.is_empty() {
-                url = self.get_token_url(token, format, &license_token, sid.as_deref()).await.ok().flatten();
+                if let Ok(Some((u, fs))) = self.get_token_url(token, format, &license_token, sid.as_deref()).await {
+                    url = Some(u);
+                    filesize = fs;
+                }
             }
         }
 
         if url.is_none() {
             if let Some(token) = track_info["FALLBACK"]["TRACK_TOKEN"].as_str() {
                 if !token.is_empty() {
-                    url = self.get_token_url(token, format, &license_token, sid.as_deref()).await.ok().flatten();
+                    if let Ok(Some((u, fs))) = self.get_token_url(token, format, &license_token, sid.as_deref()).await {
+                        url = Some(u);
+                        filesize = fs;
+                    }
                 }
             }
         }
@@ -405,10 +419,10 @@ impl DeezerClient {
             ));
         }
 
-        Ok((url.unwrap(), ext))
+        Ok((url.unwrap(), ext, filesize))
     }
 
-    async fn get_lyrics(&self, track_id: &str) -> MhResult<Value> {
+    pub async fn get_lyrics(&self, track_id: &str) -> MhResult<Value> {
         let guard = self.require_session().await?;
         let sess = guard.as_ref().unwrap();
         let token = sess.token.clone();
@@ -427,6 +441,103 @@ impl DeezerClient {
             .send().await?;
         let text = resp.text().await?;
         Ok(serde_json::from_str(&text)?)
+    }
+
+    pub async fn get_word_lyrics(&self, track_id: &str) -> Option<String> {
+        let jwt = {
+            let http = crate::http_client::build_client().ok()?;
+            let resp = http
+                .get("https://auth.deezer.com/login/anonymous?jo=p&rto=c")
+                .send().await.ok()?;
+            let body: Value = resp.json().await.ok()?;
+            body["jwt"].as_str()?.to_string()
+        };
+
+        let query = r#"query GetLyrics($trackId: String!) {
+  track(trackId: $trackId) {
+    id
+    lyrics {
+      id
+      text
+      ...SynchronizedWordByWordLines
+      ...SynchronizedLines
+      copyright
+      writers
+    }
+  }
+}
+
+fragment SynchronizedWordByWordLines on Lyrics {
+  id
+  synchronizedWordByWordLines {
+    start
+    end
+    words {
+      start
+      end
+      word
+    }
+  }
+}
+
+fragment SynchronizedLines on Lyrics {
+  id
+  synchronizedLines {
+    lrcTimestamp
+    line
+    milliseconds
+    duration
+  }
+}"#;
+
+        let http = crate::http_client::build_client().ok()?;
+        let resp = http
+            .post("https://pipe.deezer.com/api")
+            .header("Authorization", format!("Bearer {}", jwt))
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "operationName": "GetLyrics",
+                "variables": { "trackId": track_id },
+                "query": query
+            }))
+            .send().await.ok()?;
+
+        let body: Value = resp.json().await.ok()?;
+        let lyrics = &body["data"]["track"]["lyrics"];
+
+        let wbw = lyrics["synchronizedWordByWordLines"].as_array()?;
+        if wbw.is_empty() { return None; }
+
+        let mut lines_out: Vec<Value> = Vec::new();
+        for line in wbw {
+            let start_ms = line["start"].as_f64().unwrap_or(0.0);
+            let end_ms = line["end"].as_f64().unwrap_or(0.0);
+            let words_arr = line["words"].as_array()?;
+            let words: Vec<Value> = words_arr.iter().filter_map(|w| {
+                let ws = w["start"].as_f64().unwrap_or(0.0);
+                let we = w["end"].as_f64().unwrap_or(ws);
+                let wt = w["word"].as_str().unwrap_or("");
+                if wt.is_empty() { return None; }
+                Some(serde_json::json!({
+                    "start": ws / 1000.0,
+                    "end": we / 1000.0,
+                    "text": wt
+                }))
+            }).collect();
+            if words.is_empty() { continue; }
+            let text: String = words_arr.iter()
+                .filter_map(|w| w["word"].as_str())
+                .collect::<Vec<_>>().join(" ");
+            lines_out.push(serde_json::json!({
+                "startTime": start_ms / 1000.0,
+                "endTime": end_ms / 1000.0,
+                "text": text,
+                "words": words
+            }));
+        }
+
+        if lines_out.is_empty() { None }
+        else { serde_json::to_string(&lines_out).ok() }
     }
 
     pub async fn download_track(
@@ -452,7 +563,7 @@ impl DeezerClient {
             preferred.min(sess.max_quality)
         };
 
-        let (stream_url, ext) = self.get_stream_url(track_id, quality).await?;
+        let (stream_url, ext, _filesize) = self.get_stream_url(track_id, quality).await?;
 
         let public_meta = self.get_public_track(track_id).await.ok();
         let album_meta: Option<Value> = if let Some(ref pm) = public_meta {
@@ -519,6 +630,15 @@ impl DeezerClient {
             String::new()
         };
 
+        let isrc = public_meta.as_ref().and_then(|m| m["isrc"].as_str()).unwrap_or("").to_string();
+        let label = album_meta.as_ref().and_then(|m| m["label"].as_str()).unwrap_or("").to_string();
+        let date = public_meta.as_ref().and_then(|m| m["release_date"].as_str()).unwrap_or("").to_string();
+        let quality_str: &str = match ext {
+            "flac" => "16-bit ⁄ 44.1kHz",
+            _ => match quality { 1 => "320kbps", _ => "128kbps" },
+        };
+        let format_str: &str = if ext == "flac" { "FLAC" } else { "MP3" };
+
         let mut vars = std::collections::HashMap::new();
         vars.insert("title", title.clone());
         vars.insert("artist", artist.clone());
@@ -530,12 +650,15 @@ impl DeezerClient {
         vars.insert("year", year.clone());
         vars.insert("genre", genre.clone());
         vars.insert("explicit", explicit_str);
+        vars.insert("isrc", isrc.clone());
+        vars.insert("label", label.clone());
+        vars.insert("date", date.clone());
+        vars.insert("quality", quality_str.to_string());
+        vars.insert("format", format_str.to_string());
 
         let file_stem = build_file_name(&track_template, &vars.iter().map(|(k, v)| (*k, v.clone())).collect(), restrict, truncate);
         let file_stem = if !restrict { safe_name(&file_stem) } else { file_stem };
         let file_name = format!("{}.{}", file_stem, ext);
-
-        let label = album_meta.as_ref().and_then(|m| m["label"].as_str()).unwrap_or("").to_string();
         let track_dest = if !in_collection {
             let folder = crate::streamrip::build_album_folder(
                 &settings.filepaths_folder_format,
@@ -544,6 +667,8 @@ impl DeezerClient {
                 &year,
                 &genre,
                 &label,
+                quality_str,
+                format_str,
             );
             let d = dest.join(folder);
             tokio::fs::create_dir_all(&d).await?;

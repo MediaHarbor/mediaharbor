@@ -22,6 +22,17 @@ pub struct StreamInfo {
     pub quality_label: String,
 }
 
+/// All information about a YouTube video stream resolved in a single yt-dlp call.
+#[derive(Debug)]
+pub struct VideoStreamInfo {
+    /// Primary (or combined) stream. For live streams this is the HLS manifest URL.
+    pub video: StreamInfo,
+    /// Secondary audio stream. Identical to `video` when a combined URL is returned.
+    pub audio: StreamInfo,
+    pub is_live: bool,
+    pub duration_sec: Option<f64>,
+}
+
 pub struct YtAudioStreamCache {
     inner: DashMap<String, (StreamInfo, Instant)>,
 }
@@ -193,7 +204,7 @@ fn categorise_ytdlp_error(stderr: &str) -> String {
 
 const AUDIO_FLAGS: &[&str] = &[
     "-f",
-    "bestaudio/best",
+    "bestaudio[ext=m4a]/bestaudio/best",
     "--get-url",
     "--no-playlist",
     "--no-warnings",
@@ -208,6 +219,64 @@ const VIDEO_FLAGS: &[&str] = &[
     "--no-warnings",
     "--quiet",
 ];
+
+/// Like VIDEO_FLAGS but prepends `--print is_live` and `--print duration` so that
+/// live-stream detection, duration, and CDN URLs are all resolved in a single yt-dlp call.
+const VIDEO_STREAM_FLAGS: &[&str] = &[
+    "--print", "is_live",
+    "--print", "duration",
+    "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+    "--get-url",
+    "--no-playlist",
+    "--no-warnings",
+    "--quiet",
+];
+
+/// Resolves live-stream status, duration, and CDN URL(s) in a single yt-dlp invocation.
+///
+/// Output lines are split into:
+/// - `http`-prefixed lines → CDN URL(s) (`--get-url` output)
+/// - everything else → metadata (`--print is_live` / `--print duration`)
+///
+/// Degrades gracefully on older yt-dlp that doesn't support `--print`: metadata lines will
+/// simply be absent, `is_live` defaults to `false` and `duration_sec` to `None`.
+pub async fn get_video_stream_info(
+    video_url_or_id: &str,
+    yt_dlp_cmd: Option<&str>,
+) -> MhResult<VideoStreamInfo> {
+    let watch_url = to_watch_url(video_url_or_id);
+
+    let lines = if let Some(cmd) = yt_dlp_cmd {
+        run_ytdlp(cmd, VIDEO_STREAM_FLAGS, &watch_url).await?
+    } else {
+        run_ytdlp_any_candidate(VIDEO_STREAM_FLAGS, &watch_url, None).await?
+    };
+
+    // Separate URL lines from metadata lines (order-independent and version-agnostic).
+    let url_lines: Vec<String> = lines.iter().filter(|l| l.starts_with("http")).cloned().collect();
+    let meta_lines: Vec<&String> = lines.iter().filter(|l| !l.starts_with("http")).collect();
+
+    let is_live = meta_lines.first().map(|s| s.eq_ignore_ascii_case("true")).unwrap_or(false);
+    let duration_sec = meta_lines.get(1).and_then(|s| s.parse::<f64>().ok());
+
+    let video_url = url_lines
+        .first()
+        .cloned()
+        .ok_or_else(|| MhError::Subprocess("yt-dlp returned no URL".to_string()))?;
+
+    // For a combined/live single-URL format, audio == video.
+    let audio_url = url_lines.get(1).cloned().unwrap_or_else(|| video_url.clone());
+
+    let video_mime = guess_mime_from_url(&video_url, "video/mp4");
+    let audio_mime = guess_mime_from_url(&audio_url, "audio/mp4");
+
+    Ok(VideoStreamInfo {
+        video: StreamInfo { url: video_url, mime_type: video_mime, quality_label: "video".to_string() },
+        audio: StreamInfo { url: audio_url, mime_type: audio_mime, quality_label: "audio".to_string() },
+        is_live,
+        duration_sec,
+    })
+}
 
 fn mime_to_quality_label(mime: &str) -> String {
     if mime.contains("opus") || mime.contains("webm") {
@@ -344,6 +413,7 @@ pub async fn proxy_audio_stream(
     let data = resp.bytes().await.map_err(MhError::Network)?;
     Ok((data, content_type))
 }
+
 
 fn guess_mime_from_url(url: &str, default: &str) -> String {
     url::Url::parse(url)

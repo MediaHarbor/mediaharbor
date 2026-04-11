@@ -230,6 +230,24 @@ impl YtMusicClient {
         let cover = parse_header_thumbnail(&data);
         Ok((tracks, title, cover))
     }
+
+    pub async fn fetch_lyrics(&self, video_id: &str) -> Option<String> {
+        let next_body = json!({
+            "context": self.context(),
+            "videoId": video_id
+        });
+        let next_data = self.post(&self.endpoint("next"), next_body).await.ok()?;
+
+        let browse_id = extract_lyrics_browse_id(&next_data)?;
+
+        let browse_body = json!({
+            "context": self.context(),
+            "browseId": browse_id
+        });
+        let browse_data = self.post(&self.endpoint("browse"), browse_body).await.ok()?;
+
+        extract_lyrics_text(&browse_data)
+    }
 }
 
 struct InnertubeConfig {
@@ -887,4 +905,51 @@ fn parse_playlist_tracks(data: &Value) -> Vec<YtMusicResult> {
             })
         })
         .collect()
+}
+
+fn extract_lyrics_browse_id(next_data: &Value) -> Option<String> {
+    let tabs = next_data["contents"]["singleColumnMusicWatchNextResultsRenderer"]
+        ["tabbedRenderer"]["watchNextTabbedResultsRenderer"]["tabs"]
+        .as_array()?;
+
+    for tab in tabs {
+        let tab_title = tab["tabRenderer"]["title"].as_str().unwrap_or("");
+        if tab_title.eq_ignore_ascii_case("lyrics") {
+            let browse_id = tab["tabRenderer"]["endpoint"]["browseEndpoint"]["browseId"].as_str()?;
+            return Some(browse_id.to_string());
+        }
+    }
+
+    for tab in tabs {
+        let endpoint = &tab["tabRenderer"]["endpoint"];
+        let browse_id = endpoint["browseEndpoint"]["browseId"].as_str();
+        if let Some(id) = browse_id {
+            if id.starts_with("MPLA") || id.contains("lyrics") {
+                return Some(id.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn extract_lyrics_text(browse_data: &Value) -> Option<String> {
+    let sections = browse_data["contents"]["sectionListRenderer"]["contents"].as_array()?;
+
+    for section in sections {
+        if let Some(desc) = section["musicDescriptionShelfRenderer"]["description"]["runs"]
+            .as_array()
+        {
+            let text: String = desc
+                .iter()
+                .filter_map(|r| r["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("");
+            if !text.trim().is_empty() {
+                return Some(text);
+            }
+        }
+    }
+
+    None
 }

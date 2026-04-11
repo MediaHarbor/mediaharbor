@@ -56,7 +56,15 @@ fn build_file_name(
 
     if restrict {
         name = name.chars().map(|c| match c {
-            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            '<'  => '＜',
+            '>'  => '＞',
+            ':'  => '：',
+            '"'  => '＂',
+            '/'  => '⁄',
+            '\\' => '＼',
+            '|'  => '｜',
+            '?'  => '？',
+            '*'  => '＊',
             '\x00'..='\x1f' => '_',
             other => other,
         }).collect();
@@ -721,7 +729,7 @@ impl TidalClient {
         Ok(ids)
     }
 
-    async fn fetch_lyrics(&self, track_id: &str) -> Option<Value> {
+    pub async fn fetch_lyrics(&self, track_id: &str) -> Option<Value> {
         let qs = format!("countryCode={}", self.country_code);
         let hosts = [
             format!("https://api.tidal.com/v1/tracks/{}/lyrics?{}", track_id, qs),
@@ -807,6 +815,21 @@ impl TidalClient {
             String::new()
         };
 
+        let isrc = meta["isrc"].as_str().unwrap_or("").to_string();
+        let label = album_meta.as_ref().and_then(|m| m["label"]["name"].as_str()).unwrap_or("").to_string();
+        let date = meta["album"]["releaseDate"].as_str().unwrap_or("").to_string();
+
+        let ext = downloadable.ext().to_string();
+        let raw_quality = downloadable.actual_quality();
+        let quality_label = match raw_quality {
+            "LOW"      => "Low",
+            "HIGH"     => "High",
+            "LOSSLESS" => "16-bit ⁄ 44.1kHz",
+            "HI_RES"   => "MQA",
+            other      => other,
+        }.to_string();
+        let downloadable_codec = downloadable.codec().to_string();
+
         let mut vars = std::collections::HashMap::new();
         vars.insert("title", title.clone());
         vars.insert("artist", artist.clone());
@@ -819,15 +842,15 @@ impl TidalClient {
         vars.insert("year", year.clone());
         vars.insert("genre", genre.clone());
         vars.insert("explicit", explicit_str);
+        vars.insert("isrc", isrc.clone());
+        vars.insert("label", label.clone());
+        vars.insert("date", date.clone());
+        vars.insert("quality", quality_label.clone());
+        vars.insert("format", match raw_quality { "LOW" | "HIGH" => "AAC", _ => "FLAC" }.to_string());
 
-        let ext = downloadable.ext().to_string();
-        let quality_label = downloadable.actual_quality().to_string();
-        let downloadable_codec = downloadable.codec().to_string();
         let vars_map: std::collections::HashMap<&str, String> = vars.iter().map(|(k, v): (&&str, &String)| (*k, v.clone())).collect();
         let file_stem = build_file_name(&track_template, &vars_map, restrict, truncate);
         let file_name = format!("{}.{}", file_stem, ext);
-
-        let label = album_meta.as_ref().and_then(|m| m["label"]["name"].as_str()).unwrap_or("").to_string();
         let track_dest = if !in_collection {
             let folder = crate::streamrip::build_album_folder(
                 &settings.filepaths_folder_format,
@@ -836,6 +859,8 @@ impl TidalClient {
                 &year,
                 &genre,
                 &label,
+                &quality_label,
+                match raw_quality { "LOW" | "HIGH" => "AAC", _ => "FLAC" },
             );
             let d = dest.join(folder);
             tokio::fs::create_dir_all(&d).await?;

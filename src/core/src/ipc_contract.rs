@@ -104,6 +104,8 @@ pub struct PlayMediaResponse {
     pub platform: String,
     pub duration_sec: Option<f64>,
     pub media_type: Option<String>, // "audio" | "video"
+    #[serde(default)]
+    pub is_live: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -416,6 +418,24 @@ pub struct AppErrorEvent {
 pub struct ProcessStdinPromptEvent {
     pub download_id: u64,
     pub prompt_lines: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetLyricsRequest {
+    pub url: String,
+    pub platform: String,
+    pub title: String,
+    pub artist: String,
+    pub duration: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetLyricsResponse {
+    pub synced: Option<String>,
+    pub plain: Option<String>,
+    pub word_synced: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

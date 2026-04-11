@@ -353,6 +353,14 @@ async fn open_external(
     app.shell().open(&url, None).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn get_lyrics(
+    state: State<'_, AppState>,
+    req: ipc_contract::GetLyricsRequest,
+) -> Result<ipc_contract::GetLyricsResponse, String> {
+    state.0.get_lyrics(req).await.map_err(|e| e.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -414,6 +422,7 @@ fn main() {
             write_orpheus_settings,
             send_process_stdin,
             open_external,
+            get_lyrics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running MediaHarbor application");

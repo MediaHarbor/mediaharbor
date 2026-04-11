@@ -130,6 +130,49 @@ impl AppleMusicService {
         Ok(token)
     }
 
+    pub async fn fetch_lyrics(&self, url: &str) -> Option<(Option<String>, Option<String>, Option<String>)> {
+        let cookies_path = self.cookies_path.as_deref()?;
+        let parsed = crate::meta::apple_music_meta::parse_apple_music_url(url)?;
+        let song_id = parsed.content_id.clone();
+
+        let media_user_token = get_media_user_token(cookies_path).ok()?;
+        let dev_token = self.get_dev_token().await.ok()?;
+        let client = build_apple_client().ok()?;
+
+        let account_storefront =
+            get_account_storefront(&client, &dev_token, &media_user_token).await;
+        let storefront = account_storefront.unwrap_or(parsed.storefront);
+
+        let lyrics_url = format!(
+            "{}/v1/catalog/{}/songs/{}/lyrics",
+            AMP_API_URL, storefront, song_id
+        );
+        let resp = client
+            .get(&lyrics_url)
+            .headers(apple_headers(&dev_token, &media_user_token))
+            .send()
+            .await
+            .ok()?;
+
+        if !resp.status().is_success() {
+            return Some((None, None, None));
+        }
+
+        let body: serde_json::Value = resp.json().await.ok()?;
+        let ttml_str = body["data"]
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|item| item["attributes"]["ttml"].as_str())
+            .map(|s| s.to_string());
+
+        if let Some(ref ttml) = ttml_str {
+            let (synced, plain, word_synced) = parse_ttml_to_lrc(ttml);
+            return Some((synced, plain, word_synced));
+        }
+
+        Some((None, None, None))
+    }
+
     pub async fn get_track_stream(
         &self,
         url: &str,
@@ -1428,4 +1471,122 @@ async fn get_gamdl_wvd_path(
          or ensure gamdl is installed in the venv."
             .into(),
     ))
+}
+
+fn parse_ttml_to_lrc(ttml: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let p_re = regex::Regex::new(r#"<p[^>]*begin="([^"]+)"[^>]*(?:end="([^"]+)")?[^>]*>(.*?)</p>"#).unwrap();
+    let span_re = regex::Regex::new(r#"<span[^>]*begin="([^"]+)"[^>]*(?:end="([^"]+)")?[^>]*>(.*?)</span>"#).unwrap();
+    let tag_strip = regex::Regex::new(r"<[^>]+>").unwrap();
+
+    let mut lrc_lines = Vec::new();
+    let mut plain_lines = Vec::new();
+    let mut word_lines: Vec<serde_json::Value> = Vec::new();
+
+    for cap in p_re.captures_iter(ttml) {
+        let begin = &cap[1];
+        let p_end = cap.get(2).map(|m| m.as_str());
+        let inner = &cap[3];
+        let text = tag_strip.replace_all(inner, "").trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        plain_lines.push(text.clone());
+
+        let spans: Vec<_> = span_re.captures_iter(inner).collect();
+        if !spans.is_empty() {
+            let mut words: Vec<serde_json::Value> = Vec::new();
+            for (si, sc) in spans.iter().enumerate() {
+                let sbegin = &sc[1];
+                let send = sc.get(2).map(|m| m.as_str());
+                let stext = tag_strip.replace_all(&sc[3], "").trim().to_string();
+                if stext.is_empty() {
+                    continue;
+                }
+                if let Some(ts) = ttml_time_to_lrc(sbegin) {
+                    lrc_lines.push(format!("{}{}", ts, stext));
+                }
+                if let Some(start_s) = ttml_time_to_secs(sbegin) {
+                    let end_s = send.and_then(ttml_time_to_secs)
+                        .or_else(|| spans.get(si + 1).and_then(|next| ttml_time_to_secs(&next[1])))
+                        .unwrap_or(start_s + 0.5);
+                    words.push(serde_json::json!({
+                        "start": start_s,
+                        "end": end_s,
+                        "text": stext
+                    }));
+                }
+            }
+            if !words.is_empty() {
+                let line_start = ttml_time_to_secs(begin).unwrap_or(0.0);
+                let line_end = p_end.and_then(ttml_time_to_secs)
+                    .or_else(|| words.last().and_then(|w| w["end"].as_f64()))
+                    .unwrap_or(line_start);
+                word_lines.push(serde_json::json!({
+                    "startTime": line_start,
+                    "endTime": line_end,
+                    "text": text,
+                    "words": words
+                }));
+            }
+        } else if let Some(ts) = ttml_time_to_lrc(begin) {
+            lrc_lines.push(format!("{}{}", ts, text));
+        }
+    }
+
+    let synced = if lrc_lines.is_empty() { None } else { Some(lrc_lines.join("\n")) };
+    let plain = if plain_lines.is_empty() { None } else { Some(plain_lines.join("\n")) };
+    let word_synced = if word_lines.is_empty() { None }
+        else { serde_json::to_string(&word_lines).ok() };
+    (synced, plain, word_synced)
+}
+
+fn ttml_time_to_secs(t: &str) -> Option<f64> {
+    let parts: Vec<&str> = t.split(':').collect();
+    if parts.len() == 3 {
+        let h: f64 = parts[0].parse().ok()?;
+        let m: f64 = parts[1].parse().ok()?;
+        let s: f64 = parts[2].parse().ok()?;
+        Some(h * 3600.0 + m * 60.0 + s)
+    } else if parts.len() == 2 {
+        let m: f64 = parts[0].parse().ok()?;
+        let s: f64 = parts[1].parse().ok()?;
+        Some(m * 60.0 + s)
+    } else {
+        None
+    }
+}
+
+fn ttml_time_to_lrc(t: &str) -> Option<String> {
+    let parts: Vec<&str> = t.split(':').collect();
+    if parts.len() == 3 {
+        let h: u64 = parts[0].parse().ok()?;
+        let m: u64 = parts[1].parse().ok()?;
+        let sec_parts: Vec<&str> = parts[2].split('.').collect();
+        let s: u64 = sec_parts[0].parse().ok()?;
+        let ms_str = if sec_parts.len() > 1 { sec_parts[1] } else { "0" };
+        let ms: u64 = match ms_str.len() {
+            1 => ms_str.parse::<u64>().ok()? * 100,
+            2 => ms_str.parse::<u64>().ok()? * 10,
+            3 => ms_str.parse::<u64>().ok()?,
+            _ => ms_str[..3].parse::<u64>().ok()?,
+        };
+        let total_min = h * 60 + m;
+        let cs = ms / 10;
+        Some(format!("[{:02}:{:02}.{:02}]", total_min, s, cs))
+    } else if parts.len() == 2 {
+        let m: u64 = parts[0].parse().ok()?;
+        let sec_parts: Vec<&str> = parts[1].split('.').collect();
+        let s: u64 = sec_parts[0].parse().ok()?;
+        let ms_str = if sec_parts.len() > 1 { sec_parts[1] } else { "0" };
+        let ms: u64 = match ms_str.len() {
+            1 => ms_str.parse::<u64>().ok()? * 100,
+            2 => ms_str.parse::<u64>().ok()? * 10,
+            3 => ms_str.parse::<u64>().ok()?,
+            _ => ms_str[..3].parse::<u64>().ok()?,
+        };
+        let cs = ms / 10;
+        Some(format!("[{:02}:{:02}.{:02}]", m, s, cs))
+    } else {
+        None
+    }
 }

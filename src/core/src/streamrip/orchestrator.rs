@@ -244,7 +244,8 @@ async fn download_deezer(
             let id = extract_deezer_id(url, ContentType::Album)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Deezer album ID from: {}", url)))?;
             let album_info = client.get_album_tracks(&id).await?;
-            let dest_dir = make_collection_dir(base_dir, settings, &album_info.title, &album_info.artist, &album_info.year, &album_info.genre, &album_info.label);
+            let deezer_format = match settings.deezer_quality.to_uppercase().as_str() { "FLAC" | "2" => "FLAC", _ => "MP3" };
+            let dest_dir = make_collection_dir(base_dir, settings, &album_info.title, &album_info.artist, &album_info.year, &album_info.genre, &album_info.label, super::deezer_quality_label(&settings.deezer_quality), deezer_format);
             tokio::fs::create_dir_all(&dest_dir).await?;
             let total = album_info.track_ids.len();
             on_log(format!("Album: {} — {} ({} tracks)", album_info.title, album_info.artist, total));
@@ -271,7 +272,8 @@ async fn download_deezer(
             let id = extract_deezer_id(url, ContentType::Playlist)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Deezer playlist ID from: {}", url)))?;
             let info = client.get_playlist_tracks(&id).await?;
-            let dest_dir = make_collection_dir(base_dir, settings, &info.title, &info.artist, "", "", "");
+            let deezer_format = match settings.deezer_quality.to_uppercase().as_str() { "FLAC" | "2" => "FLAC", _ => "MP3" };
+            let dest_dir = make_collection_dir(base_dir, settings, &info.title, &info.artist, "", "", "", super::deezer_quality_label(&settings.deezer_quality), deezer_format);
             tokio::fs::create_dir_all(&dest_dir).await?;
             let total = info.track_ids.len();
             on_log(format!("Playlist: {} ({} tracks)", info.title, total));
@@ -325,7 +327,15 @@ async fn download_qobuz(
             let id = extract_qobuz_id(url, ContentType::Album)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Qobuz album ID from: {}", url)))?;
             let album_info = client.get_album_tracks(&id).await?;
-            let dest_dir = make_collection_dir(base_dir, settings, &album_info.title, &album_info.artist, &album_info.year, &album_info.genre, &album_info.label);
+            let fid = super::qobuz_settings_to_format_id(quality);
+            let album_quality = {
+                let bd = album_info.bit_depth.unwrap_or(16);
+                let sr = album_info.sampling_rate.unwrap_or(44.1);
+                let ext = if fid == 5 { "mp3" } else { "flac" };
+                super::qobuz_audio_quality_label(ext, fid, bd, sr)
+            };
+            let qobuz_format = if fid == 5 { "MP3" } else { "FLAC" };
+            let dest_dir = make_collection_dir(base_dir, settings, &album_info.title, &album_info.artist, &album_info.year, &album_info.genre, &album_info.label, &album_quality, qobuz_format);
             tokio::fs::create_dir_all(&dest_dir).await?;
             let total = album_info.track_ids.len();
             on_log(format!("Album: {} — {} ({} tracks)", album_info.title, album_info.artist, total));
@@ -344,7 +354,9 @@ async fn download_qobuz(
             let id = extract_qobuz_id(url, ContentType::Playlist)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Qobuz playlist ID from: {}", url)))?;
             let info = client.get_playlist_tracks(&id).await?;
-            let dest_dir = make_collection_dir(base_dir, settings, &info.title, &info.artist, "", "", "");
+            let playlist_quality = super::qobuz_quality_label(quality as u32);
+            let qobuz_format = if quality == 5 { "MP3" } else { "FLAC" };
+            let dest_dir = make_collection_dir(base_dir, settings, &info.title, &info.artist, "", "", "", playlist_quality, qobuz_format);
             tokio::fs::create_dir_all(&dest_dir).await?;
             let total = info.track_ids.len();
             on_log(format!("Playlist: {} ({} tracks)", info.title, total));
@@ -406,7 +418,8 @@ async fn download_tidal(
             let id = extract_tidal_id(url, ContentType::Album)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Tidal album ID from: {}", url)))?;
             let album_info = client.get_album_tracks(&id).await?;
-            let dest_dir = make_collection_dir(base_dir, settings, &album_info.title, &album_info.artist, &album_info.year, &album_info.genre, &album_info.label);
+            let tidal_format = match quality { 0 | 1 => "AAC", _ => "FLAC" };
+            let dest_dir = make_collection_dir(base_dir, settings, &album_info.title, &album_info.artist, &album_info.year, &album_info.genre, &album_info.label, super::tidal_quality_label(quality), tidal_format);
             tokio::fs::create_dir_all(&dest_dir).await?;
             let total = album_info.track_ids.len();
             on_log(format!("Album: {} — {} ({} tracks)", album_info.title, album_info.artist, total));
@@ -433,7 +446,8 @@ async fn download_tidal(
             let id = extract_tidal_id(url, ContentType::Playlist)
                 .ok_or_else(|| MhError::Other(format!("Could not extract Tidal playlist ID from: {}", url)))?;
             let info = client.get_playlist_tracks(&id).await?;
-            let dest_dir = make_collection_dir(base_dir, settings, &info.title, &info.artist, "", "", "");
+            let tidal_format = match quality { 0 | 1 => "AAC", _ => "FLAC" };
+            let dest_dir = make_collection_dir(base_dir, settings, &info.title, &info.artist, "", "", "", super::tidal_quality_label(quality), tidal_format);
             tokio::fs::create_dir_all(&dest_dir).await?;
             let total = info.track_ids.len();
             on_log(format!("Playlist: {} ({} tracks)", info.title, total));
@@ -477,8 +491,10 @@ fn make_collection_dir(
     year: &str,
     genre: &str,
     label: &str,
+    quality: &str,
+    format: &str,
 ) -> PathBuf {
-    let folder_name = build_album_folder(&settings.filepaths_folder_format, artist, title, year, genre, label);
+    let folder_name = build_album_folder(&settings.filepaths_folder_format, artist, title, year, genre, label, quality, format);
     base.join(folder_name)
 }
 
