@@ -1,18 +1,26 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::time::Duration;
 
 use base64::Engine as _;
+use futures::stream::{self, StreamExt};
 use image::imageops::FilterType;
 use lofty::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
-use tokio::sync::Semaphore;
 
 use crate::errors::{MhError, MhResult};
 use crate::media::file_discovery::{discover_files, VIDEO_FORMATS};
+use crate::subprocess;
 
 const CACHE_VERSION: u32 = 2;
+
+#[cfg(target_os = "windows")]
+const SCAN_CONCURRENCY: usize = 4;
+#[cfg(not(target_os = "windows"))]
+const SCAN_CONCURRENCY: usize = 8;
+
+const FFMPEG_THUMB_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaItem {
@@ -83,20 +91,21 @@ impl CacheManager {
 }
 
 pub async fn scan_directory(dir: &Path, cache: &CacheManager, force: bool) -> MhResult<Vec<MediaItem>> {
-    if !force {
-        if let Some(cached) = cache.load(dir) {
-            return Ok(cached);
-        }
+    let cached = cache.load(dir).unwrap_or_default();
+    if !force && !cached.is_empty() {
+        return Ok(cached);
     }
 
     let files = discover_files(dir)?;
-    let sem = Arc::new(Semaphore::new(10));
-    let mut handles = Vec::with_capacity(files.len());
 
-    for path in files {
-        let sem = Arc::clone(&sem);
-        handles.push(tokio::spawn(async move {
-            let _permit = sem.acquire().await.ok()?;
+    let prior: HashMap<PathBuf, MediaItem> = cached
+        .into_iter()
+        .map(|item| (item.path.clone(), item))
+        .collect();
+
+    let items: Vec<MediaItem> = stream::iter(files.into_iter().map(|path| {
+        let prior_entry = prior.get(&path).cloned();
+        async move {
             let is_video = path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -104,19 +113,22 @@ pub async fn scan_directory(dir: &Path, cache: &CacheManager, force: bool) -> Mh
                 .unwrap_or(false);
 
             if is_video {
+                let cur_size = tokio::fs::metadata(&path).await.map(|m| m.len()).ok();
+                if let (Some(prev), Some(size)) = (prior_entry.as_ref(), cur_size) {
+                    if prev.is_video && prev.file_size == size {
+                        return Some(prev.clone());
+                    }
+                }
                 process_video_file(&path, "ffmpeg").await.ok()
             } else {
                 process_audio_file(&path).await.ok()
             }
-        }));
-    }
-
-    let mut items = Vec::new();
-    for h in handles {
-        if let Ok(Some(item)) = h.await {
-            items.push(item);
         }
-    }
+    }))
+    .buffer_unordered(SCAN_CONCURRENCY)
+    .filter_map(|x| async move { x })
+    .collect()
+    .await;
 
     cache.save(dir, &items);
     Ok(items)
@@ -230,36 +242,7 @@ pub async fn process_video_file(path: &Path, ffmpeg: &str) -> MhResult<MediaItem
         .unwrap_or("Unknown")
         .to_string();
 
-    let tmp = tempfile::Builder::new()
-        .suffix(".jpg")
-        .tempfile()
-        .map_err(|e| MhError::Io(e))?;
-    let tmp_path = tmp.path().to_path_buf();
-
-    let status = Command::new(ffmpeg)
-        .args([
-            "-ss", "1",
-            "-i", &path.to_string_lossy(),
-            "-vframes", "1",
-            "-vf", "scale=200:-1",
-            "-y",
-            &tmp_path.to_string_lossy(),
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await;
-
-    let cover_thumbnail: Option<String> = if status.map(|s| s.success()).unwrap_or(false) {
-        tokio::fs::read(&tmp_path)
-            .await
-            .ok()
-            .and_then(|b| resize_thumbnail(&b).ok())
-    } else {
-        None
-    };
-
-    Ok(MediaItem {
+    let mut item = MediaItem {
         path: path.to_path_buf(),
         title,
         artist: None,
@@ -269,10 +252,56 @@ pub async fn process_video_file(path: &Path, ffmpeg: &str) -> MhResult<MediaItem
         duration_secs: None,
         track_number: None,
         disc_number: None,
-        cover_thumbnail,
+        cover_thumbnail: None,
         is_video: true,
         file_size,
-    })
+    };
+
+    if file_size == 0 {
+        return Ok(item);
+    }
+
+    let tmp = tempfile::Builder::new()
+        .suffix(".jpg")
+        .tempfile()
+        .map_err(MhError::Io)?;
+    let tmp_path = tmp.path().to_path_buf();
+
+    let mut cmd = Command::new(ffmpeg);
+    cmd.args([
+        "-ss", "1",
+        "-i", &path.to_string_lossy(),
+        "-vframes", "1",
+        "-vf", "scale=200:-1",
+        "-y",
+        &tmp_path.to_string_lossy(),
+    ])
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .stdin(std::process::Stdio::null());
+    subprocess::apply_no_window(&mut cmd);
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => return Ok(item),
+    };
+
+    let success = match tokio::time::timeout(FFMPEG_THUMB_TIMEOUT, child.wait()).await {
+        Ok(Ok(status)) => status.success(),
+        _ => {
+            let _ = child.kill().await;
+            false
+        }
+    };
+
+    if success {
+        item.cover_thumbnail = tokio::fs::read(&tmp_path)
+            .await
+            .ok()
+            .and_then(|b| resize_thumbnail(&b).ok());
+    }
+
+    Ok(item)
 }
 
 fn resize_thumbnail(data: &[u8]) -> MhResult<String> {

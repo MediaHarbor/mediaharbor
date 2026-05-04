@@ -56,8 +56,11 @@ fn collect_all(dir: &Path) -> MhResult<Vec<PathBuf>> {
 }
 
 fn walk_sync(dir: &Path, out: &mut Vec<PathBuf>) -> MhResult<()> {
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| MhError::Io(e))?;
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(MhError::Io(e)),
+    };
 
     for entry in entries {
         let entry = entry.map_err(|e| MhError::Io(e))?;
