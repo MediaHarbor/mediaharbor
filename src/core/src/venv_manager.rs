@@ -85,6 +85,16 @@ pub fn resolve_ffmpeg() -> String {
                 return p.to_string();
             }
         }
+        let local_bin = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".local").join("bin").join("ffmpeg");
+        if local_bin.exists() {
+            return local_bin.to_string_lossy().to_string();
+        }
+        let app_bin = Path::new("/app/bin/ffmpeg");
+        if app_bin.exists() {
+            return app_bin.to_string_lossy().to_string();
+        }
         let mh_ffmpeg = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".mediaharbor")
@@ -132,22 +142,141 @@ pub async fn find_system_python() -> MhResult<String> {
         }
     }
 
+    if let Some(path) = scan_filesystem_python().await {
+        return Ok(path);
+    }
+
     Err(MhError::Subprocess(
         "No suitable Python 3.10+ installation found. Please install Python 3.10 or newer."
             .into(),
     ))
 }
 
+async fn scan_filesystem_python() -> Option<String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(local_app_data) = dirs::data_local_dir() {
+            let python_root = local_app_data.join("Programs").join("Python");
+            if let Ok(entries) = std::fs::read_dir(&python_root) {
+                let mut dir_entries: Vec<PathBuf> = entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.is_dir()
+                            && p.file_name()
+                                .and_then(|n| n.to_str())
+                                .map(|n| {
+                                    if let Some(digits) = n.strip_prefix("Python") {
+                                        if digits.len() >= 3 {
+                                            let mut chars = digits.chars();
+                                            let major: u32 =
+                                                chars.next().and_then(|c| c.to_digit(10)).unwrap_or(0);
+                                            let minor: u32 = chars.as_str().parse().unwrap_or(0);
+                                            return major == 3 && minor >= 10;
+                                        }
+                                    }
+                                    false
+                                })
+                                .unwrap_or(false)
+                    })
+                    .collect();
+                dir_entries.sort_by(|a, b| b.cmp(a));
+                for dir in dir_entries {
+                    candidates.push(dir.join("python.exe"));
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let fw_root = PathBuf::from("/Library/Frameworks/Python.framework/Versions");
+        if let Ok(entries) = std::fs::read_dir(&fw_root) {
+            let mut ver_dirs: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.is_dir()
+                        && p.file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|n| {
+                                let parts: Vec<&str> = n.split('.').collect();
+                                if parts.len() == 2 {
+                                    let major: u32 = parts[0].parse().unwrap_or(0);
+                                    let minor: u32 = parts[1].parse().unwrap_or(0);
+                                    return major == 3 && minor >= 10;
+                                }
+                                false
+                            })
+                            .unwrap_or(false)
+                })
+                .collect();
+            ver_dirs.sort_by(|a, b| b.cmp(a));
+            for dir in ver_dirs {
+                candidates.push(dir.join("bin").join("python3"));
+            }
+        }
+    }
+
+    for path in candidates {
+        if !path.exists() {
+            continue;
+        }
+        let path_str = path.to_string_lossy().to_string();
+        let Ok((stdout, stderr, code)) =
+            run_to_completion(&path_str, &["--version"], None, None).await
+        else {
+            continue;
+        };
+        if code != 0 {
+            continue;
+        }
+        let output = if stdout.is_empty() { &stderr } else { &stdout };
+        if let Some((major, minor)) = output.trim().strip_prefix("Python ").and_then(|v| {
+            let mut parts = v.split('.');
+            let major: u32 = parts.next()?.parse().ok()?;
+            let minor: u32 = parts.next()?.parse().ok()?;
+            Some((major, minor))
+        }) {
+            if major == 3 && minor >= 10 {
+                return Some(path_str);
+            }
+        }
+    }
+
+    None
+}
+
+pub async fn venv_pip_works() -> bool {
+    let py = get_venv_python();
+    if !py.exists() {
+        return false;
+    }
+    let py_str = py.to_string_lossy().to_string();
+    matches!(
+        run_to_completion(&py_str, &["-m", "pip", "--version"], None, None).await,
+        Ok((_, _, 0))
+    )
+}
+
 pub async fn ensure_venv<F>(on_progress: F) -> MhResult<()>
 where
     F: Fn(u8, &str) + Send,
 {
-    if is_venv_ready() {
+    if is_venv_ready() && venv_pip_works().await {
         return Ok(());
     }
 
-    let system_python = find_system_python().await?;
     let venv_dir = get_venv_dir();
+
+    if is_venv_ready() {
+        on_progress(2, "Rebuilding Python environment after system update...");
+        tokio::fs::remove_dir_all(&venv_dir).await.ok();
+    }
+
+    let system_python = find_system_python().await?;
 
     if let Some(parent) = venv_dir.parent() {
         tokio::fs::create_dir_all(parent).await?;

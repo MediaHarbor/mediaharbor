@@ -2985,6 +2985,28 @@ impl BackendState {
         &self,
         req: ipc_contract::InstallDepRequest,
     ) -> ipc_contract::InstallDepResponse {
+        async fn run_pip(mut c: tokio::process::Command) -> MhResult<()> {
+            let output = c
+                .output()
+                .await
+                .map_err(|e| MhError::Subprocess(e.to_string()))?;
+            if output.status.success() {
+                return Ok(());
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let detail = if !stderr.trim().is_empty() {
+                stderr.trim().to_string()
+            } else {
+                stdout.trim().to_string()
+            };
+            Err(MhError::Subprocess(format!(
+                "pip install failed (exit {}): {}",
+                output.status.code().unwrap_or(-1),
+                detail
+            )))
+        }
+
         let emitter = self.emitter.clone();
         let dep = req.dependency.clone();
 
@@ -3002,39 +3024,87 @@ impl BackendState {
                 r
             }
             "python" => {
-                venv_manager::ensure_venv(|pct, msg| make_progress(pct, msg)).await
+                match venv_manager::ensure_venv(|pct, msg| make_progress(pct, msg)).await {
+                    Ok(()) => Ok(()),
+                    Err(_) => {
+                        make_progress(1, "Fetching available Python versions…");
+                        match installers::python::fetch_python_versions().await {
+                            Err(e) => Err(e),
+                            Ok(versions) => {
+                                match versions
+                                    .into_iter()
+                                    .max_by_key(|(k, _)| {
+                                        k.split('.').nth(1).and_then(|m| m.parse::<u32>().ok()).unwrap_or(0)
+                                    })
+                                    .map(|(_, full)| full)
+                                {
+                                    None => Err(MhError::Other(
+                                        "No Python versions available on python.org".to_string(),
+                                    )),
+                                    Some(best_version) => {
+                                        make_progress(3, "Downloading Python…");
+                                        match installers::python::download_and_install_python(
+                                            &best_version,
+                                            |pct, msg| make_progress(3 + (pct as u16 * 85 / 100) as u8, msg),
+                                        )
+                                        .await
+                                        {
+                                            Err(e) => Err(e),
+                                            Ok(()) => {
+                                                make_progress(88, "Setting up Python environment…");
+                                                venv_manager::ensure_venv(|pct, msg| {
+                                                    make_progress(88u8.saturating_add((pct as u16 * 12 / 15) as u8), msg)
+                                                })
+                                                .await
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             "ffmpeg" => {
                 installers::ffmpeg::download_and_install_ffmpeg(|pct, msg| make_progress(pct, msg)).await
             }
             "yt_dlp" | "ytdlp" => {
-                let py = venv_manager::get_venv_python();
-                tokio::process::Command::new(py)
-                    .args(["-m", "pip", "install", "--upgrade", "yt-dlp", "isodate"])
-                    .output()
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| MhError::Subprocess(e.to_string()))
+                match venv_manager::ensure_venv(|pct, msg| make_progress(pct, msg)).await {
+                    Err(e) => Err(e),
+                    Ok(()) => {
+                        make_progress(50, "Installing yt-dlp...");
+                        let mut c = tokio::process::Command::new(venv_manager::get_venv_python());
+                        c.args(["-m", "pip", "install", "--upgrade", "yt-dlp", "isodate"]);
+                        subprocess::apply_no_window(&mut c);
+                        run_pip(c).await
+                    }
+                }
             }
             "apple" | "gamdl" => {
-                let _ = installers::bento4::download_and_install_bento4(|pct, msg| make_progress(pct, msg)).await;
-                let py = venv_manager::get_venv_python();
-                tokio::process::Command::new(py)
-                    .args(["-m", "pip", "install", "--upgrade", "gamdl"])
-                    .output()
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| MhError::Subprocess(e.to_string()))
+                match venv_manager::ensure_venv(|pct, msg| make_progress(pct, msg)).await {
+                    Err(e) => Err(e),
+                    Ok(()) => {
+                        let _ = installers::bento4::download_and_install_bento4(|pct, msg| make_progress(pct, msg)).await;
+                        make_progress(50, "Installing gamdl...");
+                        let mut c = tokio::process::Command::new(venv_manager::get_venv_python());
+                        c.args(["-m", "pip", "install", "--upgrade", "gamdl"]);
+                        subprocess::apply_no_window(&mut c);
+                        run_pip(c).await
+                    }
+                }
             }
             "spotify" | "votify" => {
-                let _ = installers::bento4::download_and_install_bento4(|pct, msg| make_progress(pct, msg)).await;
-                let py = venv_manager::get_venv_python();
-                tokio::process::Command::new(py)
-                    .args(["-m", "pip", "install", "--upgrade", "votify", "pywidevine"])
-                    .output()
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| MhError::Subprocess(e.to_string()))
+                match venv_manager::ensure_venv(|pct, msg| make_progress(pct, msg)).await {
+                    Err(e) => Err(e),
+                    Ok(()) => {
+                        let _ = installers::bento4::download_and_install_bento4(|pct, msg| make_progress(pct, msg)).await;
+                        make_progress(50, "Installing votify...");
+                        let mut c = tokio::process::Command::new(venv_manager::get_venv_python());
+                        c.args(["-m", "pip", "install", "--upgrade", "votify", "pywidevine"]);
+                        subprocess::apply_no_window(&mut c);
+                        run_pip(c).await
+                    }
+                }
             }
             "qobuz" | "deezer" | "tidal" | "ytmusic" | "googleapi" | "pyapplemusicapi" => {
                 make_progress(100, "built-in (native Rust)");

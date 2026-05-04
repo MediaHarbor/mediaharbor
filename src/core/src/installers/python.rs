@@ -64,17 +64,6 @@ fn get_download_details(full_version: &str) -> MhResult<(String, String)> {
     }
 }
 
-async fn url_exists(url: &str) -> bool {
-    let client = match build_mozilla_client() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    match client.head(url).send().await {
-        Ok(resp) => resp.status().is_success(),
-        Err(_) => false,
-    }
-}
-
 pub async fn fetch_python_versions() -> MhResult<HashMap<String, String>> {
     let client = build_mozilla_client()?;
 
@@ -106,13 +95,13 @@ pub async fn fetch_python_versions() -> MhResult<HashMap<String, String>> {
             continue;
         }
 
-        let full_version = stripped.to_string();
-        let download_url = match get_download_details(&full_version) {
-            Ok((url, _)) => url,
-            Err(_) => continue,
-        };
+        if !parts[2].chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
 
-        if !url_exists(&download_url).await {
+        let full_version = stripped.to_string();
+
+        if get_download_details(&full_version).is_err() {
             continue;
         }
 
