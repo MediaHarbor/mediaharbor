@@ -57,6 +57,12 @@ packaging/aur/*.tar.gz
 # Snap pre-built binaries
 packaging/snap/*.deb
 
+packaging/flatpak/*.deb
+packaging/flatpak/.flatpak-builder/
+packaging/flatpak/build-dir/
+packaging/flatpak/repo/
+packaging/flatpak/*/
+
 # Local data / secrets
 src/funcs/
 
