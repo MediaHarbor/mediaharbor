@@ -1,6 +1,6 @@
 [package]
 name = "mediaharbor-core"
-version = "0.1.0"
+version = "1.1.9"
 edition = "2021"
 description = "MediaHarbor backend library – async Rust port of the Electron backend"
 
