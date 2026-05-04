@@ -62,6 +62,11 @@ pub fn is_module_installed(id: &str) -> bool {
 }
 
 pub async fn install_orpheus<F: Fn(u8, &str) + Send>(progress: F) -> MhResult<()> {
+    if crate::sandbox::is_sandboxed() {
+        return Err(MhError::Unsupported(
+            "OrpheusDL cannot be installed inside a Flatpak or Snap sandbox because git is not available in the runtime environment.".to_string(),
+        ));
+    }
     let system_python = venv_manager::find_system_python().await?;
     let venv_dir = get_orpheus_venv_dir();
     let orpheus_dir = get_orpheus_dir();
@@ -101,6 +106,11 @@ pub async fn install_orpheus<F: Fn(u8, &str) + Send>(progress: F) -> MhResult<()
 }
 
 pub async fn install_module<F: Fn(u8, &str)>(module_id: &str, git_url: &str, progress: F) -> MhResult<()> {
+    if crate::sandbox::is_sandboxed() {
+        return Err(MhError::Unsupported(
+            "OrpheusDL modules cannot be installed inside a Flatpak or Snap sandbox because git is not available in the runtime environment.".to_string(),
+        ));
+    }
     let orpheus_dir = get_orpheus_dir();
     let module_dir = orpheus_dir.join("modules").join(module_id);
     let python = get_orpheus_python();

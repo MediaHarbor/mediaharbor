@@ -111,6 +111,9 @@ pub async fn update_system_path<F: Fn(u8, &str)>(
     bin_dir: &Path,
     on_progress: &F,
 ) -> MhResult<()> {
+    if crate::sandbox::is_sandboxed() {
+        return Ok(());
+    }
     let bin_dir_str = bin_dir.to_string_lossy().to_string();
 
     #[cfg(target_os = "windows")]
@@ -125,8 +128,10 @@ if ($current -notlike '*{dir}*') {{
             dir = bin_dir_str.replace('\'', "''")
         );
 
-        let status = Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
+        let mut cmd = Command::new("powershell.exe");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd]);
+        crate::subprocess::apply_no_window(&mut cmd);
+        let status = cmd
             .status()
             .await
             .map_err(|e| MhError::Subprocess(e.to_string()))?;

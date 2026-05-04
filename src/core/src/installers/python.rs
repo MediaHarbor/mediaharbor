@@ -172,14 +172,16 @@ async fn run_installer<F: Fn(u8, &str)>(
 ) -> MhResult<()> {
     #[cfg(target_os = "windows")]
     {
-        let status = tokio::process::Command::new(installer_path)
-            .args([
-                "/quiet",
-                "InstallAllUsers=0",
-                "PrependPath=1",
-                "Include_test=0",
-                "AssociateFiles=1",
-            ])
+        let mut cmd = tokio::process::Command::new(installer_path);
+        cmd.args([
+            "/quiet",
+            "InstallAllUsers=0",
+            "PrependPath=1",
+            "Include_test=0",
+            "AssociateFiles=1",
+        ]);
+        crate::subprocess::apply_no_window(&mut cmd);
+        let status = cmd
             .status()
             .await
             .map_err(|e| MhError::Subprocess(format!("Failed to run Python installer: {}", e)))?;
@@ -232,6 +234,10 @@ async fn run_installer<F: Fn(u8, &str)>(
 
 #[cfg(target_os = "macos")]
 fn update_macos_path<F: Fn(u8, &str)>(version: &str, on_progress: &F) -> MhResult<()> {
+    if crate::sandbox::is_sandboxed() {
+        return Ok(());
+    }
+
     let parts: Vec<&str> = version.split('.').collect();
     let version_key = if parts.len() >= 2 {
         format!("{}.{}", parts[0], parts[1])
@@ -258,10 +264,7 @@ fn update_macos_path<F: Fn(u8, &str)>(version: &str, on_progress: &F) -> MhResul
 
     let existing = std::fs::read_to_string(&rc_path).unwrap_or_default();
     if !existing.contains(&python_path) {
-        let line = format!(
-            "\n# Added by Python installer\nexport PATH=\"{}:$PATH\"\n",
-            python_path
-        );
+        let line = format!("\nexport PATH=\"{}:$PATH\"\n", python_path);
         use std::io::Write;
         let mut f = std::fs::OpenOptions::new()
             .create(true)

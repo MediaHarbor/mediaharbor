@@ -47,8 +47,10 @@ async fn fetch_git_windows_url() -> MhResult<String> {
 }
 
 async fn run_cmd(program: &str, args: &[&str]) -> MhResult<String> {
-    let output = tokio::process::Command::new(program)
-        .args(args)
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(args);
+    crate::subprocess::apply_no_window(&mut cmd);
+    let output = cmd
         .output()
         .await
         .map_err(|e| MhError::Subprocess(format!("Failed to run `{}`: {}", program, e)))?;
@@ -66,8 +68,10 @@ async fn run_cmd(program: &str, args: &[&str]) -> MhResult<String> {
 
 #[cfg(target_os = "macos")]
 async fn run_shell(cmd: &str) -> MhResult<String> {
-    let output = tokio::process::Command::new("sh")
-        .args(["-c", cmd])
+    let mut c = tokio::process::Command::new("sh");
+    c.args(["-c", cmd]);
+    crate::subprocess::apply_no_window(&mut c);
+    let output = c
         .output()
         .await
         .map_err(|e| MhError::Subprocess(format!("Shell command failed: {}", e)))?;
@@ -102,15 +106,17 @@ where
             let pct = total
                 .map(|t| (dl as u128 * 40 / t as u128) as u8)
                 .unwrap_or(0);
-            on_progress(pct, &format!("Downloading Git… {}%", pct * 100 / 40));
+            on_progress(pct, &format!("Downloading Git… {}%", pct as u32 * 100 / 40));
         })
         .await?;
 
         on_progress(50, "Installing Git…");
 
-        let status = tokio::process::Command::new(&installer_path)
-            .args(["/VERYSILENT", "/NORESTART", "/NOCANCEL", "/SP-",
-                   "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"])
+        let mut installer_cmd = tokio::process::Command::new(&installer_path);
+        installer_cmd.args(["/VERYSILENT", "/NORESTART", "/NOCANCEL", "/SP-",
+               "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"]);
+        crate::subprocess::apply_no_window(&mut installer_cmd);
+        let status = installer_cmd
             .status()
             .await
             .map_err(|e| MhError::Subprocess(format!("Failed to run Git installer: {}", e)))?;
@@ -158,6 +164,12 @@ where
 
     #[cfg(target_os = "linux")]
     {
+        if crate::sandbox::is_sandboxed() {
+            return Err(MhError::Unsupported(
+                "Git cannot be installed automatically inside a Flatpak or Snap sandbox. Please install git manually on your host system.".to_string(),
+            ));
+        }
+
         let os_release = tokio::fs::read_to_string("/etc/os-release")
             .await
             .unwrap_or_default();

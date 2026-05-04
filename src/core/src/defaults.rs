@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+pub fn default_download_dir() -> String {
+    dirs::download_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join("Downloads")))
+        .or_else(dirs::home_dir)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -211,13 +219,17 @@ pub struct Settings {
 
     pub crossfade_enabled: bool,
     pub crossfade_duration: u32,
+
+    pub onboarding_completed: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        let download_location = dirs::download_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
+        let download_location = if crate::sandbox::is_sandboxed() {
+            String::new()
+        } else {
+            default_download_dir()
+        };
 
         let apple_temp_path = std::env::temp_dir()
             .join("mediaharbor")
@@ -426,6 +438,8 @@ impl Default for Settings {
 
             crossfade_enabled: false,
             crossfade_duration: 6,
+
+            onboarding_completed: false,
         }
     }
 }

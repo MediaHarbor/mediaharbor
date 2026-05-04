@@ -149,6 +149,9 @@ fn symlink_to_usr_local_bin(bin_dir: &Path) -> MhResult<()> {
 }
 
 fn update_shell_path(bin_dir: &Path) -> MhResult<()> {
+    if crate::sandbox::is_sandboxed() {
+        return Ok(());
+    }
     let bin_dir_str = bin_dir.to_string_lossy().to_string();
 
     #[cfg(target_os = "macos")]
@@ -190,9 +193,10 @@ if ($userPath -split ';' -notcontains $binDir) {{
             dir = bin_dir_str.replace('\'', "''")
         );
 
-        std::process::Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
-            .status()?;
+        let mut cmd = std::process::Command::new("powershell.exe");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd]);
+        crate::subprocess::apply_no_window_std(&mut cmd);
+        cmd.status()?;
         return Ok(());
     }
 
@@ -286,7 +290,9 @@ where
     #[cfg(target_os = "macos")]
     {
         chmod_dir(&final_bin_dir)?;
-        let _ = symlink_to_usr_local_bin(&final_bin_dir);
+        if !crate::sandbox::is_sandboxed() {
+            let _ = symlink_to_usr_local_bin(&final_bin_dir);
+        }
     }
 
     on_progress(80, "Configuring system PATH…");

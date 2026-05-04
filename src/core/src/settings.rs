@@ -111,6 +111,10 @@ pub async fn load_settings(user_data: &Path) -> Settings {
         Err(_) => Settings::default(),
     };
 
+    if settings.download_location.is_empty() && !crate::sandbox::is_sandboxed() {
+        settings.download_location = crate::defaults::default_download_dir();
+    }
+
     if settings.apple_temp_path.is_empty() || !std::path::Path::new(&settings.apple_temp_path).is_absolute() {
         settings.apple_temp_path = std::env::temp_dir()
             .join("mediaharbor")
