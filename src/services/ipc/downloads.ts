@@ -15,7 +15,7 @@ interface DownloadParams {
   thumbnail?: string | null;
 }
 
-type DownloadFn = keyof typeof window.electron.downloads & `start${string}`;
+type DownloadFn = keyof NonNullable<typeof window.electron>['downloads'] & `start${string}`;
 
 const PLATFORM_METHOD: Record<string, DownloadFn> = {
   youtube:      'startYouTubeVideo',

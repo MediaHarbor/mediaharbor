@@ -198,6 +198,8 @@ export interface Settings {
 
   crossfade_enabled: boolean;
   crossfade_duration: number;
+
+  onboarding_completed: boolean;
 }
 
 export type SettingsSetter = (key: keyof Settings, value: unknown) => void;

@@ -1,6 +1,6 @@
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { ResultCard } from './ResultCard';
-import { Loader2, SearchX, AlertCircle } from 'lucide-react';
+import { Loader2, SearchX, CircleAlert } from 'lucide-react';
 import type { SearchResult } from '@/types';
 
 interface ResultsGridProps {
@@ -18,7 +18,7 @@ const listVariants = {
   show: { transition: { staggerChildren: 0.03 } },
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { opacity: 0, y: 8 },
   show:   { opacity: 1, y: 0, transition: { duration: 0.18, ease: 'easeOut' } },
 };
@@ -49,7 +49,7 @@ export function ResultsGrid({
     return (
       <div className="flex h-48 items-center justify-center">
         <div className="flex flex-col items-center gap-2 text-center">
-          <AlertCircle className="h-6 w-6 text-destructive/70" />
+          <CircleAlert className="h-6 w-6 text-destructive/70" />
           <p className="text-sm font-medium text-destructive">Search failed</p>
           <p className="text-xs text-muted-foreground">{error.message}</p>
         </div>

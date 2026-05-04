@@ -147,7 +147,7 @@ class AudioCrossfadeEngine {
   getHardwareLatency(): number {
     if (!this.ctx) return 0;
     const stamp = this.ctx.getOutputTimestamp?.();
-    if (!stamp || stamp.contextTime === 0) return 0;
+    if (!stamp || stamp.contextTime == null || stamp.contextTime === 0 || isNaN(stamp.contextTime)) return 0;
     const lag = this.ctx.currentTime - stamp.contextTime;
     return Math.min(0.5, Math.max(0, lag));
   }
