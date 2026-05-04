@@ -224,7 +224,8 @@ const tauriAPI = {
       const r = await invoke<{ success: boolean; error: string | null }>('install_dep', {
         req: { dependency: dep },
       });
-      return { success: r.success };
+      if (!r.success) throw new Error(r.error ?? 'Installation failed');
+      return { success: true };
     },
     updateDependencies: (_packages: string[]) => {
     },

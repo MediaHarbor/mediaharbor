@@ -710,12 +710,29 @@ impl BackendState {
 }
 
 impl BackendState {
+    fn emit_no_download_location(&self, download_id: u64) -> ipc_contract::StartDownloadResponse {
+        const MSG: &str = "No download location configured. Please select a download folder in Settings.";
+        self.emitter.emit_app_error(&ipc_contract::AppErrorEvent {
+            message: MSG.to_string(),
+            context: Some("download".to_string()),
+            needs_auth: None,
+        });
+        ipc_contract::StartDownloadResponse {
+            download_id,
+            success: false,
+            error: Some(MSG.to_string()),
+        }
+    }
+
     pub async fn start_orpheus_download(
         &self,
         req: ipc_contract::StartOrpheusDownloadRequest,
     ) -> ipc_contract::StartDownloadResponse {
         let download_id = self.next_download_id();
         let settings = self.settings.read().await.clone();
+        if settings.download_location.is_empty() {
+            return self.emit_no_download_location(download_id);
+        }
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.active_downloads.insert(download_id, cancel_flag.clone());
 
@@ -2027,6 +2044,9 @@ impl BackendState {
     ) -> ipc_contract::StartDownloadResponse {
         let download_id = self.next_download_id();
         let settings = self.settings.read().await.clone();
+        if settings.download_location.is_empty() {
+            return self.emit_no_download_location(download_id);
+        }
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.active_downloads.insert(download_id, cancel_flag.clone());
 
@@ -2124,6 +2144,9 @@ impl BackendState {
     ) -> ipc_contract::StartDownloadResponse {
         let download_id = self.next_download_id();
         let settings = self.settings.read().await.clone();
+        if settings.download_location.is_empty() {
+            return self.emit_no_download_location(download_id);
+        }
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.active_downloads.insert(download_id, cancel_flag.clone());
 
@@ -2224,6 +2247,9 @@ impl BackendState {
     ) -> ipc_contract::StartDownloadResponse {
         let download_id = self.next_download_id();
         let settings = self.settings.read().await.clone();
+        if settings.download_location.is_empty() {
+            return self.emit_no_download_location(download_id);
+        }
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.active_downloads.insert(download_id, cancel_flag.clone());
 
@@ -2306,6 +2332,9 @@ impl BackendState {
     ) -> ipc_contract::StartDownloadResponse {
         let download_id = self.next_download_id();
         let settings = self.settings.read().await.clone();
+        if settings.download_location.is_empty() {
+            return self.emit_no_download_location(download_id);
+        }
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.active_downloads.insert(download_id, cancel_flag.clone());
 
@@ -2388,6 +2417,9 @@ impl BackendState {
     ) -> ipc_contract::StartDownloadResponse {
         let download_id = self.next_download_id();
         let settings = self.settings.read().await.clone();
+        if settings.download_location.is_empty() {
+            return self.emit_no_download_location(download_id);
+        }
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.active_downloads.insert(download_id, cancel_flag.clone());
 
@@ -2543,6 +2575,9 @@ impl BackendState {
     ) -> ipc_contract::StartDownloadResponse {
         let download_id = self.next_download_id();
         let settings = self.settings.read().await.clone();
+        if settings.download_location.is_empty() {
+            return self.emit_no_download_location(download_id);
+        }
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.active_downloads.insert(download_id, cancel_flag.clone());
 
@@ -2719,6 +2754,9 @@ impl BackendState {
     ) -> ipc_contract::StartDownloadResponse {
         let download_id = self.next_download_id();
         let settings = self.settings.read().await.clone();
+        if settings.download_location.is_empty() {
+            return self.emit_no_download_location(download_id);
+        }
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.active_downloads.insert(download_id, cancel_flag.clone());
 
