@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Play, Pause, SkipBack, SkipForward,
   Volume2, Volume1, VolumeX,
@@ -174,23 +174,29 @@ const crossfadeAudioRef = useRef<HTMLAudioElement | null>(null);
     }
   }, [isPlaying]);
 
+  const noMediaSession = useMemo(() => '__TAURI_INTERNALS__' in window || !('mediaSession' in navigator), []);
+
   useEffect(() => {
-    if (!('mediaSession' in navigator)) return;
+    if (noMediaSession) return;
     navigator.mediaSession.metadata = new MediaMetadata({
       title: title || 'Unknown',
       artist: artist || '',
       artwork: thumbnail ? [{ src: thumbnail, sizes: '512x512', type: 'image/jpeg' }] : [],
     });
-  }, [title, artist, thumbnail]);
+  }, [noMediaSession, title, artist, thumbnail]);
 
   useEffect(() => {
-    if (!('mediaSession' in navigator)) return;
+    if (noMediaSession) return;
     navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  }, [noMediaSession, isPlaying]);
+
+  useEffect(() => {
+    if (noMediaSession) return;
     navigator.mediaSession.setActionHandler('play', () => setPlaying(true));
     navigator.mediaSession.setActionHandler('pause', () => setPlaying(false));
     navigator.mediaSession.setActionHandler('nexttrack', canNext ? playNext : null);
     navigator.mediaSession.setActionHandler('previoustrack', canPrev ? playPrev : null);
-  }, [isPlaying, canNext, canPrev, playNext, playPrev, setPlaying]);
+  }, [noMediaSession, canNext, canPrev, playNext, playPrev, setPlaying]);
 
   const resetIdlePrefetch = useCallback(() => {
     if (idlePrefetchRef.current) {
