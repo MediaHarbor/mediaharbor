@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
-  RefreshCw, ExternalLink, CheckCircle2, AlertCircle,
-  PackageCheck, Loader2, ArrowUpCircle, XCircle,
+  RefreshCw, ExternalLink, CircleCheckBig, CircleAlert,
+  PackageCheck, Loader2, CircleArrowUp, CircleX,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -72,7 +72,7 @@ function AppUpdateSection() {
 
       {status === 'up-to-date' && (
         <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
-          <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+          <CircleCheckBig className="h-4 w-4 text-emerald-500 shrink-0" />
           <div>
             <p className="text-sm font-medium">You&apos;re up to date</p>
             <p className="text-xs text-muted-foreground">{info?.latestVersion} is the latest release.</p>
@@ -82,7 +82,7 @@ function AppUpdateSection() {
 
       {status === 'error' && (
         <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
-          <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <CircleAlert className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
           <p className="text-sm text-destructive">{errorMsg}</p>
         </div>
       )}
@@ -91,7 +91,7 @@ function AppUpdateSection() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
-              <ArrowUpCircle className="h-4 w-4 text-primary shrink-0" />
+              <CircleArrowUp className="h-4 w-4 text-primary shrink-0" />
               <div>
                 <p className="text-sm font-semibold">Update available — <span className="text-primary">{info.latestVersion}</span></p>
                 {publishedDate && <p className="text-xs text-muted-foreground">Released {publishedDate}</p>}
@@ -114,15 +114,15 @@ function AppUpdateSection() {
 }
 
 const REQUIRED_DEPS = [
-  { id: 'python', label: 'Python',  desc: 'Required — 3.10+',                          pipName: null },
-  { id: 'git',    label: 'Git',     desc: 'Required — for git+ package installs',      pipName: null },
-  { id: 'ffmpeg', label: 'FFmpeg',  desc: 'Required — audio/video processing',         pipName: null },
-  { id: 'ytdlp',  label: 'yt-dlp', desc: 'Required — YouTube & audio downloader',     pipName: 'yt-dlp' },
+  { id: 'python', label: 'Python',  desc: 'Required — 3.10+',                          pipName: null, installable: true },
+  { id: 'git',    label: 'Git',     desc: 'Required — for git+ package installs',      pipName: null, installable: true },
+  { id: 'ffmpeg', label: 'FFmpeg',  desc: 'Required — audio/video processing',         pipName: null, installable: true },
+  { id: 'ytdlp',  label: 'yt-dlp', desc: 'Required — YouTube & audio downloader',     pipName: 'yt-dlp', installable: true },
 ];
 
 const OPTIONAL_DEPS = [
-  { id: 'apple',   label: 'Apple Music', desc: 'gamdl + Bento4 — Apple Music downloader', pipName: 'gamdl',  parent: null },
-  { id: 'spotify', label: 'Spotify',     desc: 'votify — Spotify downloader',             pipName: 'votify', parent: null },
+  { id: 'apple',   label: 'Apple Music', desc: 'gamdl + Bento4 — Apple Music downloader', pipName: 'gamdl',  parent: null, installable: true },
+  { id: 'spotify', label: 'Spotify',     desc: 'votify — Spotify downloader',             pipName: 'votify', parent: null, installable: true },
 ];
 
 const ALL_DEPS = [...REQUIRED_DEPS, ...OPTIONAL_DEPS];
@@ -224,14 +224,20 @@ function SystemDepsSection() {
     const statusTxt = installStatusText[dep.id] ?? '';
     const ver       = versions[dep.id];
 
+    let btnLabel: React.ReactNode;
+    if (!dep.installable)          btnLabel = 'Built-in';
+    else if (installing === dep.id) btnLabel = <><Loader2 className="h-3 w-3 animate-spin mr-1" />Installing…</>;
+    else if (dep.id === 'python')   btnLabel = installed ? 'Recreate' : 'Setup';
+    else                            btnLabel = installed ? 'Update' : 'Install';
+
     return (
       <div key={dep.id} className="flex items-center gap-3 py-3 px-4">
         <div className="shrink-0">
           {inst === 'installing' ? <Loader2      className="h-4 w-4 animate-spin text-muted-foreground" /> :
-           inst === 'done'       ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> :
-           inst === 'error'      ? <XCircle      className="h-4 w-4 text-destructive" /> :
-           installed             ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> :
-                                   <XCircle      className="h-4 w-4 text-muted-foreground/30" />}
+           inst === 'done'       ? <CircleCheckBig className="h-4 w-4 text-emerald-500" /> :
+           inst === 'error'      ? <CircleX      className="h-4 w-4 text-destructive" /> :
+           installed             ? <CircleCheckBig className="h-4 w-4 text-emerald-500" /> :
+                                   <CircleX      className="h-4 w-4 text-muted-foreground/30" />}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2">
@@ -252,14 +258,10 @@ function SystemDepsSection() {
           size="sm"
           variant={installed && inst !== 'error' ? 'outline' : 'default'}
           onClick={() => handleInstall(dep.id)}
-          disabled={!!installing || dep.pipName === null}
+          disabled={!!installing || !dep.installable}
           className="shrink-0"
         >
-          {dep.pipName === null
-            ? 'Built-in'
-            : installing === dep.id
-            ? <><Loader2 className="h-3 w-3 animate-spin mr-1" />Installing…</>
-            : installed ? 'Update' : 'Install'}
+          {btnLabel}
         </Button>
       </div>
     );
@@ -414,8 +416,8 @@ function OrpheusDLSection() {
             {installing === 'core'
               ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               : orpheusInstalled
-              ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-              : <XCircle className="h-4 w-4 text-muted-foreground/30" />}
+              ? <CircleCheckBig className="h-4 w-4 text-emerald-500" />
+              : <CircleX className="h-4 w-4 text-muted-foreground/30" />}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium">OrpheusDL</p>
@@ -460,8 +462,8 @@ function OrpheusDLSection() {
                   {isInstalling
                     ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                     : mod.installed
-                    ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                    : <XCircle className="h-4 w-4 text-muted-foreground/30" />}
+                    ? <CircleCheckBig className="h-4 w-4 text-emerald-500" />
+                    : <CircleX className="h-4 w-4 text-muted-foreground/30" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium">{mod.label}</p>

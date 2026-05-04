@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { CheckCircle, XCircle, X, FolderOpen, ScrollText, Square } from 'lucide-react';
+import { CircleCheck, CircleX, X, FolderOpen, ScrollText, Square } from 'lucide-react';
 import { downloadService } from '@/services/ipc/downloads';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { useDownloadStore } from '@/stores/useDownloadStore';
@@ -233,7 +233,7 @@ export default function DownloadPage() {
 
                   {item.status === 'complete' && (
                     <div className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <CircleCheck className="h-4 w-4 text-green-500" />
                       <span className="text-sm font-medium text-green-500">Complete</span>
                       {item.location && (
                         <Button
@@ -252,7 +252,7 @@ export default function DownloadPage() {
                   {item.status === 'error' && (
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 text-destructive">
-                        <XCircle className="h-4 w-4 shrink-0" />
+                        <CircleX className="h-4 w-4 shrink-0" />
                         <span className="text-sm truncate">{item.error}</span>
                       </div>
                       <Button

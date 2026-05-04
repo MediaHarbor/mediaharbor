@@ -2,14 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { useLogStore, type LogEntry, type LogSource } from '@/stores/useLogStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Trash2, AlertTriangle, XCircle, Info, ChevronDown, ChevronRight } from 'lucide-react';
+import { Trash2, TriangleAlert, CircleX, Info, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const LEVEL_CONFIG = {
   info:    { icon: Info,           color: 'text-blue-500',   bg: 'bg-blue-500/10',  border: 'border-blue-500/30' },
-  warning: { icon: AlertTriangle,  color: 'text-yellow-500', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30' },
-  error:   { icon: XCircle,        color: 'text-destructive',bg: 'bg-destructive/10',border: 'border-destructive/30' },
+  warning: { icon: TriangleAlert,  color: 'text-yellow-500', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30' },
+  error:   { icon: CircleX,        color: 'text-destructive',bg: 'bg-destructive/10',border: 'border-destructive/30' },
 };
 
 const SOURCE_CONFIG: Record<LogSource, { label: string; color: string }> = {

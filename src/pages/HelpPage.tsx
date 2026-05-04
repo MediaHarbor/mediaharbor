@@ -7,7 +7,7 @@ import {
   Keyboard,
   Disc3,
   ChevronRight,
-  HelpCircle,
+  CircleHelp,
   Heart,
   GitFork,
 } from 'lucide-react';
@@ -56,7 +56,7 @@ interface Section {
 }
 
 const sections: Section[] = [
-  { id: 'faq',        icon: HelpCircle, title: 'FAQ' },
+  { id: 'faq',        icon: CircleHelp, title: 'FAQ' },
   { id: 'search',     icon: Search,     title: 'Search' },
   { id: 'downloads',  icon: Download,   title: 'Downloads' },
   { id: 'library',    icon: Library,    title: 'Library' },
@@ -121,7 +121,7 @@ export default function HelpPage() {
         </p>
 
         <SectionAnchor id="faq" />
-        <H2 icon={HelpCircle}>FAQ</H2>
+        <H2 icon={CircleHelp}>FAQ</H2>
         <div className="space-y-3">
 
           <FaqGroup title="Credentials & Sign-in" icon={Settings}>

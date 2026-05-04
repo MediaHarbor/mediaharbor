@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, lazy, Suspense } from 'react';
-import { Search, Mic2, Disc3, User, ListEnd, Loader2 } from 'lucide-react';
+import { Search, Mic, Disc3, User, ListEnd, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ResultsGrid } from '@/features/search/components/ResultsGrid';
@@ -435,7 +435,7 @@ export default function SearchPage() {
           {showSuggestions && suggestions.length > 0 && (
             <div className="absolute z-50 left-0 right-16 mt-1 bg-card border border-border rounded-lg shadow-xl overflow-hidden">
               {suggestions.map((s, i) => {
-                const Icon = s.type === 'artist' ? User : s.type === 'album' ? Disc3 : Mic2;
+                const Icon = s.type === 'artist' ? User : s.type === 'album' ? Disc3 : Mic;
                 return (
                   <button
                     key={`${s.type}:${s.text}`}
