@@ -307,7 +307,8 @@ impl BackendState {
                     tokio::spawn(async move {
                         use tokio::io::AsyncReadExt;
                         let ffmpeg_bin = venv_manager::resolve_ffmpeg();
-                        let mut child = match tokio::process::Command::new(&ffmpeg_bin)
+                        let mut ffmpeg_cmd = tokio::process::Command::new(&ffmpeg_bin);
+                        ffmpeg_cmd
                             .args([
                                 "-loglevel", "error",
                                 "-i", &hls_url,
@@ -316,9 +317,9 @@ impl BackendState {
                                 "pipe:1",
                             ])
                             .stdout(Stdio::piped())
-                            .stderr(Stdio::null())
-                            .spawn()
-                        {
+                            .stderr(Stdio::null());
+                        crate::subprocess::apply_no_window(&mut ffmpeg_cmd);
+                        let mut child = match ffmpeg_cmd.spawn() {
                             Ok(c) => c,
                             Err(e) => { let _ = tx.send(Err(format!("ffmpeg: {}", e))).await; return; }
                         };
@@ -382,7 +383,8 @@ impl BackendState {
                     tokio::spawn(async move {
                         use tokio::io::AsyncReadExt;
                         let ffmpeg_bin = venv_manager::resolve_ffmpeg();
-                        let mut child = match tokio::process::Command::new(&ffmpeg_bin)
+                        let mut ffmpeg_cmd = tokio::process::Command::new(&ffmpeg_bin);
+                        ffmpeg_cmd
                             .args([
                                 "-loglevel", "error",
                                 "-i", &video_url,
@@ -393,9 +395,9 @@ impl BackendState {
                                 "pipe:1",
                             ])
                             .stdout(Stdio::piped())
-                            .stderr(Stdio::null())
-                            .spawn()
-                        {
+                            .stderr(Stdio::null());
+                        crate::subprocess::apply_no_window(&mut ffmpeg_cmd);
+                        let mut child = match ffmpeg_cmd.spawn() {
                             Ok(c) => c,
                             Err(e) => {
                                 let _ = tx.send(Err(format!("ffmpeg not found: {}", e))).await;
@@ -2948,8 +2950,10 @@ impl BackendState {
         let git_ok = which_binary("git");
 
         let (yt_dlp_ok, votify_ok, gamdl_ok, bento4_ok) = if python_ok {
-            let pip_list = tokio::process::Command::new(venv_manager::get_venv_python())
-                .args(["-m", "pip", "list"])
+            let mut pip_cmd = tokio::process::Command::new(venv_manager::get_venv_python());
+            pip_cmd.args(["-m", "pip", "list"]);
+            subprocess::apply_no_window(&mut pip_cmd);
+            let pip_list = pip_cmd
                 .output()
                 .await
                 .ok()
@@ -3154,10 +3158,10 @@ impl BackendState {
         if venv_manager::is_venv_ready() {
             let py = venv_manager::get_venv_python();
             for pkg in &["yt-dlp", "gamdl", "votify"] {
-                let out = tokio::process::Command::new(&py)
-                    .args(["-m", "pip", "show", pkg])
-                    .output()
-                    .await;
+                let mut c = tokio::process::Command::new(&py);
+                c.args(["-m", "pip", "show", pkg]);
+                subprocess::apply_no_window(&mut c);
+                let out = c.output().await;
                 if let Ok(output) = out {
                     let text = String::from_utf8_lossy(&output.stdout);
                     if let Some(m) = regex::Regex::new(r"(?m)^Version:\s+(.+)$")
@@ -3222,19 +3226,19 @@ fn file_modified_date(path: &std::path::Path) -> String {
 }
 
 fn which_binary(name: &str) -> bool {
-    std::process::Command::new(name)
-        .arg("--version")
+    let mut cmd = std::process::Command::new(name);
+    cmd.arg("--version")
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok()
+        .stderr(std::process::Stdio::null());
+    subprocess::apply_no_window_std(&mut cmd);
+    cmd.status().is_ok()
 }
 
 fn binary_version(name: &str) -> Option<String> {
-    let output = std::process::Command::new(name)
-        .arg("--version")
-        .output()
-        .ok()?;
+    let mut cmd = std::process::Command::new(name);
+    cmd.arg("--version");
+    subprocess::apply_no_window_std(&mut cmd);
+    let output = cmd.output().ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
     text.lines().next().map(|l| l.trim().to_string())
 }

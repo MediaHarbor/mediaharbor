@@ -1435,7 +1435,8 @@ impl LibrespotService {
             .await?;
 
         let ffmpeg_bin = crate::venv_manager::resolve_ffmpeg();
-        let mut child = Command::new(&ffmpeg_bin)
+        let mut ffmpeg_cmd = Command::new(&ffmpeg_bin);
+        ffmpeg_cmd
             .args([
                 "-y",
                 "-loglevel",
@@ -1451,7 +1452,9 @@ impl LibrespotService {
                 "pipe:1",
             ])
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        crate::subprocess::apply_no_window(&mut ffmpeg_cmd);
+        let mut child = ffmpeg_cmd
             .spawn()
             .map_err(|e| MhError::Subprocess(format!("ffmpeg spawn failed: {e}")))?;
 
@@ -1523,12 +1526,15 @@ sys.stdout.write(json.dumps({"key": key_hex, "kid": kid_hex}) + "\n")
         .map_err(|e| MhError::Parse(e.to_string()))?
             + "\n";
 
-        let mut child = Command::new(venv_python)
+        let mut py_cmd = Command::new(venv_python);
+        py_cmd
             .arg("-c")
             .arg(py_script)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        crate::subprocess::apply_no_window(&mut py_cmd);
+        let mut child = py_cmd
             .spawn()
             .map_err(|e| MhError::Subprocess(format!("pywidevine spawn failed: {e}")))?;
 

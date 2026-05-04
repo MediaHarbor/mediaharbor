@@ -451,12 +451,14 @@ impl TidalClient {
 
         if needs_remux {
             let ffmpeg_bin = crate::venv_manager::resolve_ffmpeg();
-            let output = tokio::process::Command::new(&ffmpeg_bin)
+            let mut ffmpeg_cmd = tokio::process::Command::new(&ffmpeg_bin);
+            ffmpeg_cmd
                 .args(&["-y", "-loglevel", "error", "-i"])
                 .arg(&tmp)
                 .args(&["-vn", "-c:a", "flac"])
-                .arg(dest_path)
-                .output().await
+                .arg(dest_path);
+            crate::subprocess::apply_no_window(&mut ffmpeg_cmd);
+            let output = ffmpeg_cmd.output().await
                 .map_err(|e| MhError::Subprocess(e.to_string()))?;
             let _ = tokio::fs::remove_file(&tmp).await;
             if !output.status.success() {

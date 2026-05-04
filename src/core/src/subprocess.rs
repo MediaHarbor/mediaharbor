@@ -130,6 +130,23 @@ pub async fn run_to_completion(
     Ok((stdout, stderr, code))
 }
 
+#[cfg(target_os = "windows")]
+pub fn apply_no_window(cmd: &mut Command) {
+    cmd.creation_flags(0x08000000);
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn apply_no_window(_cmd: &mut Command) {}
+
+#[cfg(target_os = "windows")]
+pub fn apply_no_window_std(cmd: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt as _;
+    cmd.creation_flags(0x08000000);
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn apply_no_window_std(_cmd: &mut std::process::Command) {}
+
 pub async fn probe_version(program: &str) -> Option<String> {
     let (stdout, stderr, code) =
         run_to_completion(program, &["--version"], None, None).await.ok()?;

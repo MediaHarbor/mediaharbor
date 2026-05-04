@@ -228,10 +228,10 @@ pub async fn tag_file(
     args.extend(meta_args);
     args.push(tmp_out.to_string_lossy().into_owned());
 
-    let status = Command::new(ffmpeg)
-        .args(&args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+    let mut ffmpeg_cmd = Command::new(ffmpeg);
+    ffmpeg_cmd.args(&args).stdout(Stdio::null()).stderr(Stdio::piped());
+    crate::subprocess::apply_no_window(&mut ffmpeg_cmd);
+    let status = ffmpeg_cmd
         .status()
         .await
         .map_err(|e| MhError::Subprocess(format!("failed to spawn ffmpeg: {}", e)))?;

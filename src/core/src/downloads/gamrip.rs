@@ -185,6 +185,7 @@ async fn spawn_gamdl_process(
         .env("PYTHONIOENCODING", "utf-8")
         .env("LANG", "en_US.UTF-8")
         .env("LC_ALL", "en_US.UTF-8");
+    crate::subprocess::apply_no_window(&mut cmd);
 
     let mut child = cmd.spawn().map_err(|e| {
         MhError::Subprocess(format!("Failed to spawn `{}`: {}", command, e))

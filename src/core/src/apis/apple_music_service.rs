@@ -1141,11 +1141,14 @@ async fn get_widevine_key_via_python(
     .unwrap()
         + "\n";
 
-    let mut child = tokio::process::Command::new(&python)
+    let mut py_cmd = tokio::process::Command::new(&python);
+    py_cmd
         .args(["-c", WIDEVINE_PYTHON_SCRIPT])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    crate::subprocess::apply_no_window(&mut py_cmd);
+    let mut child = py_cmd
         .spawn()
         .map_err(|e| MhError::Subprocess(format!("pywidevine spawn failed: {}", e)))?;
 
@@ -1275,7 +1278,8 @@ async fn decrypt_and_collect_hls(
             .map_err(MhError::Io)?;
 
         let ffmpeg_bin = crate::venv_manager::resolve_ffmpeg();
-        let ffmpeg_out = tokio::process::Command::new(&ffmpeg_bin)
+        let mut ffmpeg_cmd = tokio::process::Command::new(&ffmpeg_bin);
+        ffmpeg_cmd
             .args([
                 "-y", "-loglevel", "error",
                 "-i", dec_file.to_str().unwrap_or(""),
@@ -1283,7 +1287,9 @@ async fn decrypt_and_collect_hls(
             ])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        crate::subprocess::apply_no_window(&mut ffmpeg_cmd);
+        let ffmpeg_out = ffmpeg_cmd
             .output()
             .await
             .map_err(|e| MhError::Subprocess(format!("ffmpeg remux: {}", e)))?;

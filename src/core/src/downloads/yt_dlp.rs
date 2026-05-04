@@ -468,6 +468,7 @@ pub async fn prefetch_metadata(url: &str, yt_dlp_cmd: &str) -> MhResult<MediaMet
         .stderr(std::process::Stdio::null())
         .stdin(std::process::Stdio::null())
         .env("PYTHONIOENCODING", "utf-8");
+    crate::subprocess::apply_no_window(&mut cmd);
 
     let output = cmd.output().await.map_err(|e| {
         MhError::Subprocess(format!("Failed to run yt-dlp prefetch: {}", e))
@@ -514,6 +515,7 @@ pub async fn prefetch_playlist_metadata(url: &str, yt_dlp_cmd: &str) -> MhResult
         .stderr(std::process::Stdio::null())
         .stdin(std::process::Stdio::null())
         .env("PYTHONIOENCODING", "utf-8");
+    crate::subprocess::apply_no_window(&mut cmd);
 
     let output = cmd.output().await.map_err(|e| {
         MhError::Subprocess(format!("Failed to run yt-dlp playlist prefetch: {}", e))

@@ -147,11 +147,12 @@ async fn run_ytdlp(cmd_str: &str, extra_args: &[&str], url: &str) -> MhResult<Ve
     args.extend_from_slice(extra_args);
     args.push(url);
 
+    let mut ytdlp_cmd = Command::new(program);
+    ytdlp_cmd.args(&args);
+    crate::subprocess::apply_no_window(&mut ytdlp_cmd);
     let output = tokio::time::timeout(
         YTDLP_TIMEOUT,
-        Command::new(program)
-            .args(&args)
-            .output(),
+        ytdlp_cmd.output(),
     )
     .await
     .map_err(|_| MhError::Subprocess("yt-dlp timed out".to_string()))?
