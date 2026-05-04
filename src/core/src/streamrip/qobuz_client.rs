@@ -184,11 +184,13 @@ impl QobuzSpoofer {
     }
 }
 
+#[derive(Clone)]
 pub struct QobuzClient {
     pub app_id: String,
     pub secret: String,
     pub auth_token: String,
     pub client: reqwest::Client,
+    pub download_client: reqwest::Client,
 }
 
 impl QobuzClient {
@@ -204,6 +206,7 @@ impl QobuzClient {
         }
 
         let client = build_mozilla_client()?;
+        let download_client = crate::http_client::build_audio_client()?;
         let (app_id, secrets) = QobuzSpoofer::get_app_id_and_secrets(&client).await?;
 
         let mut params: Vec<(&str, String)> = vec![
@@ -240,7 +243,7 @@ impl QobuzClient {
 
         let secret = Self::find_valid_secret(&client, &app_id, &auth_token, &secrets).await?;
 
-        Ok(Self { app_id, secret, auth_token, client })
+        Ok(Self { app_id, secret, auth_token, client, download_client })
     }
 
     async fn find_valid_secret(
@@ -649,7 +652,7 @@ impl QobuzClient {
         };
 
         let headers = self.api_headers()?;
-        download_file(&self.client, &stream_url, &dest_path, Some(&headers), on_progress).await?;
+        download_file(&self.download_client, &stream_url, &dest_path, Some(&headers), on_progress).await?;
 
         if save_cover {
             if let Some(ref tmp) = cover_tmp {

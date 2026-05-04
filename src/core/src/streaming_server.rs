@@ -55,7 +55,7 @@ pub struct StreamingServer {
 impl StreamingServer {
     pub async fn start() -> MhResult<Self> {
         let streams: StreamMap = Arc::new(DashMap::new());
-        let http = crate::http_client::build_client()?;
+        let http = crate::http_client::build_audio_client()?;
         let state = AppState { streams: streams.clone(), http };
 
         let cors = CorsLayer::new()
@@ -420,8 +420,14 @@ async fn serve_stream(
     };
 
     if let ResolvedStream::Proxied { content_type, url: cdn_url, auth_headers } = resolved {
+        let initial_offset: u64 = headers.get(header::RANGE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.strip_prefix("bytes="))
+            .and_then(|s| s.split('-').next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
 
-        let mut upstream_req = state.http.get(&cdn_url).headers(auth_headers);
+        let mut upstream_req = state.http.get(&cdn_url).headers(auth_headers.clone());
         if let Some(range) = headers.get(header::RANGE) {
             upstream_req = upstream_req.header(reqwest::header::RANGE, range.clone());
         }
@@ -443,16 +449,38 @@ async fn serve_stream(
             .unwrap_or(&content_type)
             .to_string();
 
-        let body_stream = futures_util::stream::unfold(upstream_resp, |mut resp| async move {
-            match resp.chunk().await {
-                Ok(Some(chunk)) => Some((Ok::<Bytes, std::io::Error>(chunk), resp)),
-                Ok(None) => None,
-                Err(e) => Some((
-                    Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
-                    resp,
-                )),
-            }
-        });
+        let http = state.http.clone();
+
+        let body_stream = futures_util::stream::unfold(
+            (upstream_resp, initial_offset, http, cdn_url, auth_headers, 0u32),
+            |(mut resp, mut byte_pos, http, url, auth, mut consec_err)| async move {
+                loop {
+                    match resp.chunk().await {
+                        Ok(Some(chunk)) => {
+                            byte_pos += chunk.len() as u64;
+                            return Some((Ok::<Bytes, std::io::Error>(chunk), (resp, byte_pos, http, url, auth, 0)));
+                        }
+                        Ok(None) => return None,
+                        Err(_) if consec_err < 3 => {
+                            consec_err += 1;
+                            match http
+                                .get(&url)
+                                .headers(auth.clone())
+                                .header(reqwest::header::RANGE, format!("bytes={}-", byte_pos))
+                                .send()
+                                .await
+                            {
+                                Ok(r) if r.status().is_success() || r.status().as_u16() == 206 => {
+                                    resp = r;
+                                }
+                                _ => return None,
+                            }
+                        }
+                        Err(_) => return None,
+                    }
+                }
+            },
+        );
 
         let mut builder = axum::http::Response::builder()
             .status(axum_status)

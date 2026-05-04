@@ -94,6 +94,21 @@ pub fn build_client() -> MhResult<Client> {
     base_builder().build().map_err(|e| MhError::Network(e))
 }
 
+pub fn build_audio_client() -> MhResult<Client> {
+    use reqwest::header::{HeaderMap as HMap, HeaderValue, ACCEPT_ENCODING};
+    let mut headers = HMap::new();
+    headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+    Client::builder()
+        .timeout(Duration::from_secs(300))
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .gzip(false)
+        .deflate(false)
+        .default_headers(headers)
+        .build()
+        .map_err(MhError::Network)
+}
+
 pub async fn fetch_json<T: DeserializeOwned>(client: &Client, url: &str) -> MhResult<T> {
     let res = client.get(url).send().await?;
     require_success(&res)?;

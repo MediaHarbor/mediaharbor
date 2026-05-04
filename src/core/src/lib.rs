@@ -70,6 +70,7 @@ pub struct BackendState {
     pub logger: Logger,
     pub emitter: Arc<dyn EventEmitter>,
     pub yt_stream_cache: Arc<apis::yt_audio_stream::YtAudioStreamCache>,
+    pub qobuz_client_cache: Arc<RwLock<Option<streamrip::qobuz_client::QobuzClient>>>,
 }
 
 impl BackendState {
@@ -117,7 +118,14 @@ impl BackendState {
             logger,
             emitter,
             yt_stream_cache: Arc::new(apis::yt_audio_stream::YtAudioStreamCache::new()),
+            qobuz_client_cache: Arc::new(RwLock::new(None)),
         };
+
+        tokio::spawn(async {
+            if let Err(e) = venv_manager::ensure_venv(|_, _| {}).await {
+                eprintln!("[mediaharbor] venv init failed: {e}");
+            }
+        });
 
         Ok(state)
     }
@@ -127,6 +135,18 @@ impl BackendState {
             srv.stop();
         }
         self.logger.info("system", "Backend shutdown complete");
+    }
+
+    async fn cached_qobuz_client(&self, settings: &Settings) -> MhResult<streamrip::qobuz_client::QobuzClient> {
+        {
+            let lock = self.qobuz_client_cache.read().await;
+            if let Some(ref c) = *lock {
+                return Ok(c.clone());
+            }
+        }
+        let client = streamrip::qobuz_client::QobuzClient::authenticate(settings).await?;
+        *self.qobuz_client_cache.write().await = Some(client.clone());
+        Ok(client)
     }
 }
 
@@ -571,14 +591,23 @@ impl BackendState {
             }
 
             "qobuz" => {
-                let client =
-                    streamrip::qobuz_client::QobuzClient::authenticate(&settings).await?;
                 let track_id = streamrip::orchestrator::extract_platform_id(
                     &req.url,
                     streamrip::orchestrator::Platform::Qobuz,
                     streamrip::orchestrator::ContentType::Track,
                 ).ok_or_else(|| MhError::Parse("Could not extract Qobuz track ID".into()))?;
-                let cdn_url = client.get_file_url(&track_id, 27).await?;
+
+                let mut client = self.cached_qobuz_client(&settings).await?;
+                let cdn_url = match client.get_file_url(&track_id, 27).await {
+                    Ok(u) => u,
+                    Err(MhError::Auth(_)) => {
+                        *self.qobuz_client_cache.write().await = None;
+                        client = streamrip::qobuz_client::QobuzClient::authenticate(&settings).await?;
+                        *self.qobuz_client_cache.write().await = Some(client.clone());
+                        client.get_file_url(&track_id, 27).await?
+                    }
+                    Err(e) => return Err(e),
+                };
                 let auth_headers = client.api_headers()?;
 
                 let server = self
@@ -1373,6 +1402,15 @@ impl BackendState {
                 success: false,
                 error: Some(e.to_string()),
             };
+        }
+
+        {
+            let old = self.settings.read().await;
+            if old.qobuz_email_or_userid != req.settings.qobuz_email_or_userid
+                || old.qobuz_password_or_token != req.settings.qobuz_password_or_token
+            {
+                *self.qobuz_client_cache.write().await = None;
+            }
         }
 
         {
@@ -2389,26 +2427,37 @@ impl BackendState {
 
         let emitter = self.emitter.clone();
         let active = self.active_downloads.clone();
+        let qobuz_cache = self.qobuz_client_cache.clone();
         tokio::spawn(async move {
             let mut settings = settings;
             settings.download_location = req.output_dir.clone();
             if let Some(q) = req.quality {
                 settings.qobuz_quality = q;
             }
-            let qobuz_client = match streamrip::qobuz_client::QobuzClient::authenticate(&settings).await {
-                Ok(c) => c,
-                Err(e) => {
-                    active.remove(&download_id);
-                    emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                        download_id,
-                        percent: 0.0,
-                        speed: None,
-                        eta: None,
-                        status: format!("error: {}", e),
-                        item_index: None,
-                        item_total: None,
-                    });
-                    return;
+            let qobuz_client = {
+                let cached = qobuz_cache.read().await.clone();
+                if let Some(c) = cached {
+                    c
+                } else {
+                    match streamrip::qobuz_client::QobuzClient::authenticate(&settings).await {
+                        Ok(c) => {
+                            *qobuz_cache.write().await = Some(c.clone());
+                            c
+                        }
+                        Err(e) => {
+                            active.remove(&download_id);
+                            emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
+                                download_id,
+                                percent: 0.0,
+                                speed: None,
+                                eta: None,
+                                status: format!("error: {}", e),
+                                item_index: None,
+                                item_total: None,
+                            });
+                            return;
+                        }
+                    }
                 }
             };
 
