@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Download, Library, Settings, HelpCircle, SwatchBook, ScrollText, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Search, Download, Library, Settings, CircleHelp, SwatchBook, ScrollText, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { SiDiscord } from 'react-icons/si';
 import { motion } from 'framer-motion';
 import { cn } from '@/utils/cn';
@@ -11,29 +11,31 @@ type NavItemConfig = {
   href?: string;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
+  tourId?: string;
 };
 
 const TOP_NAV: NavItemConfig[] = [
-  { path: '/search',    icon: Search,   label: 'Search' },
-  { path: '/downloads', icon: Download, label: 'Downloads' },
-  { path: '/library',   icon: Library,  label: 'Library' },
+  { path: '/search',    icon: Search,   label: 'Search',    tourId: 'nav-search' },
+  { path: '/downloads', icon: Download, label: 'Downloads', tourId: 'nav-downloads' },
+  { path: '/library',   icon: Library,  label: 'Library',   tourId: 'nav-library' },
 ];
 
 const BOTTOM_NAV: NavItemConfig[] = [
   { href: 'http://discord.gg/Kc97D86TeZ', icon: SiDiscord, label: 'Discord' },
-  { path: '/updates',  icon: SwatchBook,  label: 'Dependencies' },
-  { path: '/logs',     icon: ScrollText, label: 'Logs' },
-  { path: '/help',     icon: HelpCircle, label: 'Help' },
-  { path: '/settings', icon: Settings,   label: 'Settings' },
+  { path: '/updates',  icon: SwatchBook,  label: 'Dependencies', tourId: 'nav-updates' },
+  { path: '/logs',     icon: ScrollText, label: 'Logs',          tourId: 'nav-logs' },
+  { path: '/help',     icon: CircleHelp, label: 'Help' },
+  { path: '/settings', icon: Settings,   label: 'Settings',      tourId: 'nav-settings' },
 ];
 
-function NavItem({ path, href, icon: Icon, label, isActive, collapsed }: {
+function NavItem({ path, href, icon: Icon, label, isActive, collapsed, tourId }: {
   path?: string;
   href?: string;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   isActive: boolean;
   collapsed: boolean;
+  tourId?: string;
 }) {
   const classes = cn(
     'relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150',
@@ -63,6 +65,7 @@ function NavItem({ path, href, icon: Icon, label, isActive, collapsed }: {
       to={path!}
       title={collapsed ? label : undefined}
       className={classes}
+      data-tour-id={tourId}
     >
       {isActive && (
         <motion.div
@@ -86,6 +89,7 @@ export function Sidebar() {
 
   return (
     <aside
+      data-tour-id="sidebar"
       className={cn(
         'shrink-0 flex flex-col border-r border-border bg-card/40 select-none transition-all duration-200',
         collapsed ? 'w-14' : 'w-56'

@@ -19,6 +19,8 @@ import { usePlayerStore } from '@/stores/usePlayerStore';
 import { useLogStore, type LogSource } from '@/stores/useLogStore';
 import { logError, logWarning } from '@/utils/logger';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { OnboardingWizard, SpotlightTour } from '@/features/onboarding';
+import { useOnboardingStore } from '@/features/onboarding/stores/useOnboardingStore';
 
 import SearchPage from '@/pages/SearchPage';
 
@@ -111,6 +113,14 @@ function AppInner() {
   useEffect(() => {
     window.electron?.settings.get().then((data) => {
       if (!data?.theme) return;
+
+      if (!data.onboarding_completed) {
+        const store = useOnboardingStore.getState();
+        store.setDownloadLocation(data.downloadLocation ?? '');
+        store.setTheme((data.theme as 'auto' | 'dark' | 'light') ?? 'auto');
+        store.open();
+      }
+
       if (data.theme === 'dark') {
         setTheme('dark');
       } else if (data.theme === 'light') {
@@ -203,6 +213,8 @@ function AppInner() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <OnboardingWizard />
+      <SpotlightTour />
     </MainLayout>
   );
 }
