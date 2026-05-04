@@ -277,7 +277,12 @@ async fn get_version(
 async fn check_updates(
     state: State<'_, AppState>,
 ) -> Result<ipc_contract::CheckUpdatesResponse, String> {
-    state.0.check_updates().await.map_err(|e| e.to_string())
+    Ok(state.0.check_updates().await.unwrap_or_else(|_| ipc_contract::CheckUpdatesResponse {
+        update_available: false,
+        latest_version: None,
+        release_url: None,
+        release_notes: None,
+    }))
 }
 
 #[tauri::command]
@@ -371,7 +376,7 @@ fn main() {
             let emitter: Arc<dyn EventEmitter> = Arc::new(TauriEmitter(app_handle));
 
             let user_data = app.path().app_data_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                .unwrap_or_else(|_| std::env::temp_dir().join("mediaharbor"));
 
             let state = tauri::async_runtime::block_on(async {
                 BackendState::init(user_data, emitter).await
