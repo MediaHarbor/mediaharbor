@@ -196,16 +196,16 @@ jobs:
         shell: bash
         run: |
           mkdir -p out
-          # Linux
-          find src/app/target -path '*/bundle/deb/*.deb'            -exec cp {} out/ \; 2>/dev/null || true
-          find src/app/target -path '*/bundle/rpm/*.rpm'            -exec cp {} out/ \; 2>/dev/null || true
-          find src/app/target -path '*/bundle/appimage/*.AppImage'  -exec cp {} out/ \; 2>/dev/null || true
+          # Linux (workspace target dir is at repo root, not src/app/target)
+          find target -path '*/bundle/deb/*.deb'            -exec cp {} out/ \; 2>/dev/null || true
+          find target -path '*/bundle/rpm/*.rpm'            -exec cp {} out/ \; 2>/dev/null || true
+          find target -path '*/bundle/appimage/*.AppImage'  -exec cp {} out/ \; 2>/dev/null || true
           # Windows
-          find src/app/target -path '*/bundle/msi/*.msi'            -exec cp {} out/ \; 2>/dev/null || true
-          find src/app/target -path '*/bundle/nsis/*.exe'           -exec cp {} out/ \; 2>/dev/null || true
+          find target -path '*/bundle/msi/*.msi'            -exec cp {} out/ \; 2>/dev/null || true
+          find target -path '*/bundle/nsis/*.exe'           -exec cp {} out/ \; 2>/dev/null || true
           cp *.msix out/ 2>/dev/null || true
           # macOS
-          find src/app/target -path '*/bundle/dmg/*.dmg'            -exec cp {} out/ \; 2>/dev/null || true
+          find target -path '*/bundle/dmg/*.dmg'            -exec cp {} out/ \; 2>/dev/null || true
           echo "=== artifacts ==="
           ls -lh out/
 
@@ -216,16 +216,23 @@ jobs:
           retention-days: 7
 
   # ── 3. Flatpak ────────────────────────────────────────────────────────────
-  # Extracts the binary from the Linux DEB and wraps it in a Flatpak bundle.
-  # Uses the GNOME 47 runtime which ships WebKit2GTK 4.1 (required by Tauri).
+
+  # Builds from source using the Rust and Node SDK extensions.
+  # Runs independently — does not depend on the tauri binary job.
   flatpak:
     name: Flatpak
-    needs: tauri
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install flatpak-builder and GNOME 47 runtime
+      - name: Cache flatpak-builder state
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/flatpak-builder
+          key: flatpak-builder-${{ hashFiles('packaging/flatpak/cargo-sources.json', 'packaging/flatpak/generated-sources.json') }}
+          restore-keys: flatpak-builder-
+
+      - name: Install flatpak-builder, GNOME 47 runtime, and SDK extensions
         run: |
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
@@ -233,17 +240,9 @@ jobs:
             https://flathub.org/repo/flathub.flatpakrepo
           sudo flatpak install -y --noninteractive flathub \
             org.gnome.Platform//47 \
-            org.gnome.Sdk//47
-
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: tauri-linux-x64
-          path: packaging/flatpak/input/
-
-      - name: Stage DEB for Flatpak manifest
-        run: |
-          cp packaging/flatpak/input/MediaHarbor_*.deb packaging/flatpak/mediaharbor.deb
+            org.gnome.Sdk//47 \
+            org.freedesktop.Sdk.Extension.rust-stable//24.08 \
+            org.freedesktop.Sdk.Extension.node20//24.08
 
       - name: Build Flatpak bundle
         run: |
@@ -251,12 +250,12 @@ jobs:
             --repo=flatpak-repo \
             --force-clean \
             flatpak-build-dir \
-            packaging/flatpak/net.mediaharbor.MediaHarbor.yml
+            packaging/flatpak/org.mediaharbor.MediaHarbor.yml
 
           flatpak build-bundle \
             flatpak-repo \
             MediaHarbor.flatpak \
-            net.mediaharbor.MediaHarbor
+            org.mediaharbor.MediaHarbor
 
       - uses: actions/upload-artifact@v4
         with:
@@ -306,10 +305,100 @@ jobs:
             | **Linux (Fedora/RHEL)** | `*.rpm` | `sudo rpm -i MediaHarbor_*.rpm` |
             | **Linux (universal)** | `*.AppImage` | `chmod +x *.AppImage && ./MediaHarbor_*.AppImage` |
             | **Linux (Flatpak)** | `MediaHarbor.flatpak` | `flatpak install MediaHarbor.flatpak` |
-            | **Arch Linux / AUR** | — | `paru -S mediaharbor-bin` |
+            | **Linux (Snap)** | — | `sudo snap install mediaharbor` |
+            | **Arch Linux / AUR** | — | `paru -S mediaharbor` |
             | **Windows (installer)** | `*-setup.exe` | Run the setup wizard |
             | **Windows (MSI)** | `*.msi` | `msiexec /i MediaHarbor_*.msi` |
             | **Windows (Microsoft Store)** | `*.msix` | Double-click or `Add-AppxPackage` |
             | **macOS Intel** | `*_x64.dmg` | Open DMG and drag to Applications |
             | **macOS Apple Silicon** | `*_aarch64.dmg` | Open DMG and drag to Applications |
           files: assets/**
+
+  # ── 5. Update snapcraft.yaml → triggers Snapcraft build service ───────────
+  snap-update:
+    name: Update snapcraft.yaml
+    needs: [release]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Read version
+        id: ver
+        run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp version and DEB URL
+        run: |
+          V="${{ steps.ver.outputs.v }}"
+          sed -i "s/^version:.*/version: '${V}'/" snap/snapcraft.yaml
+          sed -i "s|releases/download/v[^/]*/MediaHarbor_[^/]*_amd64.deb|releases/download/v${V}/MediaHarbor_${V}_amd64.deb|" snap/snapcraft.yaml
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add snap/snapcraft.yaml
+          git diff --cached --quiet || git commit -m "chore: bump snap to v${{ steps.ver.outputs.v }} [skip ci]"
+          git push origin HEAD:main
+
+  # ── 6. Publish to AUR ─────────────────────────────────────────────────────
+  aur:
+    name: Publish to AUR
+    needs: [release]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA256 of source tarball
+        id: tarball
+        run: |
+          VERSION="${{ steps.ver.outputs.v }}"
+          URL="https://github.com/MediaHarbor/mediaharbor/archive/refs/tags/v${VERSION}.tar.gz"
+          SHA256=$(curl -fsSL "$URL" | sha256sum | awk '{print $1}')
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Set up SSH for AUR
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+          EOF
+
+      - name: Clone AUR repository
+        run: git clone ssh://aur@aur.archlinux.org/mediaharbor.git aur-repo
+
+      - name: Update PKGBUILD and .SRCINFO
+        run: |
+          VERSION="${{ steps.ver.outputs.v }}"
+          SHA256="${{ steps.tarball.outputs.sha256 }}"
+
+          cp packaging/aur/PKGBUILD aur-repo/PKGBUILD
+          cd aur-repo
+
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/"          PKGBUILD
+          sed -i "s/sha256sums=('[^']*')/sha256sums=('${SHA256}')/" PKGBUILD
+
+          docker run --rm -v "$PWD:/pkg" -w /pkg archlinux:latest bash -c \
+            "pacman -Sy --noconfirm --needed base-devel 2>/dev/null && HOME=/root makepkg --printsrcinfo > .SRCINFO"
+
+      - name: Commit and push to AUR
+        run: |
+          cd aur-repo
+          git config user.email "cigdemucak44@gmail.com"
+          git config user.name "Utku"
+          git add PKGBUILD .SRCINFO
+          git commit -m "update to v${{ steps.ver.outputs.v }}"
+          git push
