@@ -1,11 +1,9 @@
 
 
 pub mod defaults;
-pub mod download_order;
 pub mod sandbox;
 pub mod errors;
 pub mod orpheus;
-pub mod fetchers;
 pub mod http_client;
 pub mod ipc_contract;
 pub mod logger;

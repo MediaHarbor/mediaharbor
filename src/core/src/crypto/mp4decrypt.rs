@@ -2,8 +2,7 @@
 use aes::Aes128;
 use cbc::cipher::{BlockDecryptMut, KeyIvInit as CbcKeyIvInit};
 use cbc::cipher::block_padding::NoPadding;
-#[allow(unused_imports)]
-use ctr::cipher::{KeyIvInit as CtrKeyIvInit, StreamCipher};
+use ctr::cipher::StreamCipher;
 
 use crate::errors::{MhError, MhResult};
 

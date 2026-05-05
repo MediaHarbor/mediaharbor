@@ -1,8 +1,6 @@
 use aes::Aes128;
 use cbc::cipher::{BlockDecryptMut, KeyIvInit as CbcKeyIvInit};
 use ctr::cipher::StreamCipher;
-#[allow(unused_imports)]
-use ctr::cipher::KeyIvInit as CtrKeyIvInit;
 
 pub const TIDAL_MASTER_KEY: &[u8] = &[
     0x50, 0x89, 0x53, 0x4c, 0x43, 0x26, 0x98, 0xb7,

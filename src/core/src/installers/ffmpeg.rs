@@ -1,4 +1,3 @@
-#[allow(unused_imports)]
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 #[cfg(target_os = "linux")]
