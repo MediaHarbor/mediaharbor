@@ -22,7 +22,7 @@
   "author": "CrossyAtom46",
   "license": "GPL-3.0-or-later",
   "description": "MediaHarbor",
-  "homepage": "https://mediaharbor.github.io",
+  "homepage": "https://mediaharbor.org",
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.4",
     "@tauri-apps/cli": "^2.11.0",
