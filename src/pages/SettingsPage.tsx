@@ -134,8 +134,8 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<Partial<Settings>>({});
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isFirstLoad = useRef(true);
   const setTheme = useThemeStore((s) => s.setTheme);
 
