@@ -1,0 +1,61 @@
+name: mediaharbor
+base: core24
+version: 'dev'
+summary: Stream music and manage your local media library
+description: |
+  MediaHarbor is a music downloader and player. Connect to Spotify, Tidal, Qobuz,
+  Deezer, Apple Music, YouTube Music, and SoundCloud to download tracks at native
+  quality and play them from a unified local library.
+
+  Features: high-quality audio downloads, built-in player with crossfade and
+  visualizer, synced lyrics, automatic metadata tagging, MPRIS media key support.
+
+  Note: the removable-media interface is not auto-connected. To scan music libraries
+  on external drives, run: snap connect mediaharbor:removable-media
+
+grade: stable
+confinement: strict
+
+plugs:
+  desktop:
+  desktop-legacy:
+  wayland:
+  x11:
+  opengl:
+  audio-playback:
+  network:
+  network-bind:
+  home:
+  removable-media:
+  browser-support:
+    allow-sandbox: false
+
+apps:
+  mediaharbor:
+    command: bin/mediaharbor
+    extensions: [gnome]
+    plugs:
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+      - opengl
+      - audio-playback
+      - network
+      - network-bind
+      - home
+      - removable-media
+      - browser-support
+    environment:
+      WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
+      GDK_BACKEND: wayland,x11
+
+parts:
+  mediaharbor:
+    plugin: dump
+    source: https://github.com/MediaHarbor/mediaharbor/releases/download/v1.1.9/MediaHarbor_1.1.9_amd64.deb
+    source-type: deb
+    organize:
+      usr/bin/mediaharbor: bin/mediaharbor
+    stage-packages:
+      - libayatana-appindicator3-1
