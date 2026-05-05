@@ -457,13 +457,17 @@ where
 {
     on_progress(0, "Starting FFmpeg download…");
 
-    let home = dirs::home_dir()
-        .ok_or_else(|| MhError::Other("Cannot determine home directory".to_string()))?;
-
     #[cfg(target_os = "windows")]
-    let ffmpeg_dir = home.join("ffmpeg").join("bin");
+    let ffmpeg_dir = {
+        let home = dirs::home_dir()
+            .ok_or_else(|| MhError::Other("Cannot determine home directory".to_string()))?;
+        home.join("ffmpeg").join("bin")
+    };
     #[cfg(not(target_os = "windows"))]
-    let ffmpeg_dir = home.join(".local").join("bin");
+    let ffmpeg_dir = dirs::data_local_dir()
+        .ok_or_else(|| MhError::Other("Cannot determine data directory".to_string()))?
+        .join("mediaharbor")
+        .join("bin");
 
     std::fs::create_dir_all(&ffmpeg_dir)?;
 

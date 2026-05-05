@@ -59,8 +59,10 @@ fn default_install_dir() -> PathBuf {
 
     #[cfg(not(target_os = "macos"))]
     {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
-        home.join("Bento4")
+        dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("mediaharbor")
+            .join("bento4")
     }
 }
 

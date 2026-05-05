@@ -31,16 +31,16 @@ pub const KNOWN_MODULES: &[(&str, &str, &str)] = &[
 ];
 
 pub fn get_orpheus_dir() -> PathBuf {
-    dirs::home_dir()
+    dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".mediaharbor")
+        .join("mediaharbor")
         .join("orpheusdl")
 }
 
 pub fn get_orpheus_venv_dir() -> PathBuf {
-    dirs::home_dir()
+    dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".mediaharbor")
+        .join("mediaharbor")
         .join("orpheus_venv")
 }
 

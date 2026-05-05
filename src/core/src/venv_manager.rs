@@ -6,9 +6,9 @@ use crate::{
 };
 
 pub fn get_venv_dir() -> PathBuf {
-    dirs::home_dir()
+    dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".mediaharbor")
+        .join("mediaharbor")
         .join("venv")
 }
 
@@ -68,10 +68,10 @@ pub fn resolve_ffmpeg() -> String {
         if local.exists() {
             return local.to_string_lossy().to_string();
         }
-        let mh_ffmpeg = dirs::home_dir()
+        let mh_ffmpeg = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".mediaharbor")
-            .join("ffmpeg")
+            .join("mediaharbor")
+            .join("bin")
             .join("ffmpeg.exe");
         if mh_ffmpeg.exists() {
             return mh_ffmpeg.to_string_lossy().to_string();
@@ -80,28 +80,18 @@ pub fn resolve_ffmpeg() -> String {
 
     #[cfg(not(target_os = "windows"))]
     {
-        for p in &["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg"] {
+        for p in &["/app/bin/ffmpeg", "/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg"] {
             if Path::new(p).exists() {
                 return p.to_string();
             }
         }
-        let local_bin = dirs::home_dir()
+        let mh_bin = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".local").join("bin").join("ffmpeg");
-        if local_bin.exists() {
-            return local_bin.to_string_lossy().to_string();
-        }
-        let app_bin = Path::new("/app/bin/ffmpeg");
-        if app_bin.exists() {
-            return app_bin.to_string_lossy().to_string();
-        }
-        let mh_ffmpeg = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".mediaharbor")
-            .join("ffmpeg")
+            .join("mediaharbor")
+            .join("bin")
             .join("ffmpeg");
-        if mh_ffmpeg.exists() {
-            return mh_ffmpeg.to_string_lossy().to_string();
+        if mh_bin.exists() {
+            return mh_bin.to_string_lossy().to_string();
         }
     }
 
@@ -307,10 +297,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn venv_dir_is_in_home() {
+    fn venv_dir_is_in_data_local() {
         let dir = get_venv_dir();
-        let home = dirs::home_dir().unwrap();
-        assert!(dir.starts_with(home));
+        let data = dirs::data_local_dir().unwrap();
+        assert!(dir.starts_with(data));
     }
 
     #[test]

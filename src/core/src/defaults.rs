@@ -225,11 +225,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        let download_location = if crate::sandbox::is_sandboxed() {
-            String::new()
-        } else {
-            default_download_dir()
-        };
+        let download_location = default_download_dir();
 
         let apple_temp_path = std::env::temp_dir()
             .join("mediaharbor")
