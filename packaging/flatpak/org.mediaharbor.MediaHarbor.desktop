@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=MediaHarbor
+Comment=Stream music and manage your local media library
+Exec=mediaharbor
+Icon=org.mediaharbor.MediaHarbor
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Music;Player;Network;
+Keywords=music;downloader;player;tidal;spotify;qobuz;deezer;youtube;flac;lossless;
+StartupWMClass=mediaharbor

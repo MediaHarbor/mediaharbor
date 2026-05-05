@@ -1,0 +1,107 @@
+app-id: org.mediaharbor.MediaHarbor
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.node20
+command: mediaharbor
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=x11
+  - --device=dri
+  - --socket=pulseaudio
+  - --share=network
+  - --filesystem=xdg-download
+  - --socket=pipewire
+  - --talk-name=org.freedesktop.Notifications
+  - --own-name=org.mpris.MediaPlayer2.mediaharbor
+  # WebKitGTK 2.46+ refuses to start inside Flatpak's user-namespace sandbox because it
+  # tries to create a nested namespace, which is not permitted. This flag disables
+  # WebKit's internal sandbox; the app remains inside Flatpak's outer sandbox.
+  - --env=WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+
+modules:
+  - name: mediaharbor
+    buildsystem: simple
+
+    build-options:
+      num-jobs: $FLATPAK_BUILDER_N_JOBS
+      env:
+        CARGO_HOME: /run/build/mediaharbor/cargo-home
+        RUSTUP_HOME: /usr/lib/sdk/rust-stable
+        RUSTUP_TOOLCHAIN: stable
+        npm_config_cache: /run/build/mediaharbor/npm-cache
+        CARGO_BUILD_JOBS: ${FLATPAK_BUILDER_N_JOBS}
+
+    sources:
+      - type: dir
+        path: ../..
+
+      - cargo-sources.json
+
+      - generated-sources.json
+
+      - type: file
+        path: org.mediaharbor.MediaHarbor.metainfo.xml
+
+      - type: file
+        path: org.mediaharbor.MediaHarbor.desktop
+
+      - type: file
+        path: ../../src/app/icons/32x32.png
+        dest-filename: icon-32.png
+
+      - type: file
+        path: ../../src/app/icons/64x64.png
+        dest-filename: icon-64.png
+
+      - type: file
+        path: ../../src/app/icons/128x128.png
+        dest-filename: icon-128.png
+
+      - type: file
+        path: ../../src/app/icons/128x128@2x.png
+        dest-filename: icon-256.png
+
+      - type: file
+        path: ../../src/app/icons/icon.png
+        dest-filename: icon-512.png
+
+    build-commands:
+      # Wire up Cargo vendor directory so cargo never touches the network
+      - mkdir -p .cargo
+      - |
+        printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source."vendored-sources"]\ndirectory = "cargo/vendor"\n' > .cargo/config.toml
+
+      # Install npm packages from the pre-generated offline cache.
+      # --ignore-scripts skips postinstall hooks in ffmpeg-static and
+      # @ffmpeg-installer/ffmpeg that would download prebuilt binaries at
+      # install time — those downloads are not possible without network access.
+      - npm ci --ignore-scripts
+
+      - node node_modules/.bin/patch-package
+
+      # Run the librespot patch manually since the postinstall hook was skipped.
+      - node scripts/patch-librespot.js
+
+      # Build the React frontend into dist-react/
+      - npm run build:react
+
+      # Build only the raw ELF binary. --bundles none skips .deb/.rpm/.AppImage
+      # packaging which requires patchelf and linuxdeploy (not in the SDK).
+      - cd src/app && cargo tauri build --bundles none
+
+      - install -Dm755 src/app/target/release/mediaharbor /app/bin/mediaharbor
+      - install -Dm644 org.mediaharbor.MediaHarbor.desktop /app/share/applications/org.mediaharbor.MediaHarbor.desktop
+      - install -Dm644 org.mediaharbor.MediaHarbor.metainfo.xml /app/share/metainfo/org.mediaharbor.MediaHarbor.metainfo.xml
+      - install -Dm644 icon-32.png /app/share/icons/hicolor/32x32/apps/org.mediaharbor.MediaHarbor.png
+      - install -Dm644 icon-64.png /app/share/icons/hicolor/64x64/apps/org.mediaharbor.MediaHarbor.png
+      - install -Dm644 icon-128.png /app/share/icons/hicolor/128x128/apps/org.mediaharbor.MediaHarbor.png
+      - install -Dm644 icon-256.png /app/share/icons/hicolor/256x256/apps/org.mediaharbor.MediaHarbor.png
+      - install -Dm644 icon-512.png /app/share/icons/hicolor/512x512/apps/org.mediaharbor.MediaHarbor.png

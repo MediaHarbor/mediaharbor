@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.mediaharbor.MediaHarbor</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>MediaHarbor</name>
+  <summary>Stream music and manage your local media library</summary>
+
+  <description>
+    <p>
+      MediaHarbor is a cross-platform music downloader and player. It connects to Spotify,
+      Tidal, Qobuz, Deezer, Apple Music, and more, letting you download
+      tracks at their native source quality and play them from a local library.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>High-quality audio downloads from major streaming services</li>
+      <li>Built-in player with shuffle, repeat, crossfade, and visualizer</li>
+      <li>Lyrics display with word-level and line-level sync</li>
+      <li>Automatic metadata tagging and cover art embedding</li>
+      <li>Local library management with file watching</li>
+    </ul>
+  </description>
+
+  <url type="homepage">https://mediaharbor.org</url>
+  <url type="bugtracker">https://github.com/MediaHarbor/mediaharbor/issues</url>
+  <url type="vcs-browser">https://github.com/MediaHarbor/mediaharbor</url>
+  <url type="contact">https://discord.gg/Kc97D86TeZ</url>
+  <update_contact>utkugurbuz464@gmail.com</update_contact>
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_downloads.png</image>
+      <caption>Downloads page with active and completed tracks</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_nowplaying.png</image>
+      <caption>Now-playing full-screen with visualizer and synced lyrics</caption>    
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_library.png</image>
+      <caption>Local music library browser</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_search.png</image>
+      <caption>Search across connected streaming services</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_artistpage.png</image>
+      <caption>Artist page with full discography</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/dark_downloads.png</image>
+      <caption>Downloads in dark mode</caption>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="2.0.0" date="2026-05-05">
+      <description>
+        <p>Full rewrite as a native desktop app using Tauri v2, React, and TypeScript:</p>
+        <ul>
+          <li>Native streaming and downloading from Spotify, Tidal, Qobuz, Deezer, Apple Music, and YouTube</li>
+          <li>Built-in player with shuffle, repeat, crossfade, and audio visualizer</li>
+          <li>Synced lyrics (word-level and line-level) and full-screen now-playing view</li>
+          <li>Local library management with automatic file watching and metadata tagging</li>
+          <li>OrpheusDL integration for additional service support</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.1.9" date="2026-03-17">
+      <description>
+        <p>Complete rewrite using Tauri + React + TypeScript:</p>
+        <ul>
+          <li>Native streaming clients for Spotify, Apple Music, Tidal, Qobuz, and Deezer</li>
+          <li>Built-in player with shuffle, repeat, crossfade, and audio visualizer</li>
+          <li>Synced lyrics (word-level and line-level) and now-playing full-screen mode</li>
+          <li>Local library management with automatic file watching and metadata tagging</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.1.0" date="2025-04-12">
+      <description>
+        <ul>
+          <li>Improved Python dependency installer</li>
+          <li>Fixed Bento4 and FFmpeg not being added to PATH</li>
+          <li>New hamburger navigation menu</li>
+          <li>Track list support for playlists and albums</li>
+          <li>Various bug fixes and UI improvements</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.9" date="2024-11-19">
+      <description>
+        <ul>
+          <li>Redesigned first-start setup page to fix installation problems</li>
+          <li>Added mediaharbor:// protocol support</li>
+          <li>Fixed database folder creation</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.0" date="2024-10-24">
+      <description>
+        <p>Initial public release.</p>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-info">mild</content_attribute>
+  </content_rating>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Music</category>
+    <category>Player</category>
+    <category>Network</category>
+  </categories>
+
+  <keywords>
+    <keyword>music</keyword>
+    <keyword>downloader</keyword>
+    <keyword>player</keyword>
+    <keyword>tidal</keyword>
+    <keyword>spotify</keyword>
+    <keyword>qobuz</keyword>
+    <keyword>deezer</keyword>
+    <keyword>youtube</keyword>
+    <keyword>apple music</keyword>
+    <keyword>lossless</keyword>
+    <keyword>flac</keyword>
+    <keyword>yt-dlp</keyword>
+    <keyword>orpheusdl</keyword>
+  </keywords>
+
+  <developer id="org.mediaharbor">
+    <name>MediaHarbor Team</name>
+  </developer>
+  <contributors>
+    <name>CrossyAtom46</name>
+    <name>eltociear</name>
+    <name>Phenix66</name>
+  </contributors>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#fef3d8</color>
+    <color type="primary" scheme_preference="dark">#1e0f38</color>
+  </branding>
+
+  <launchable type="desktop-id">org.mediaharbor.MediaHarbor.desktop</launchable>
+</component>
