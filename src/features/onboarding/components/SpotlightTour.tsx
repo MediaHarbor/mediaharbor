@@ -51,7 +51,10 @@ function popoverPosition(
   }
   switch (placement) {
     case 'right':
-      return clamp(rect.top + rect.height / 2 - popHeight / 2, rect.left + rect.width + POPOVER_GAP);
+      return clamp(
+        rect.top + rect.height / 2 - popHeight / 2,
+        rect.left + rect.width + POPOVER_GAP
+      );
     case 'left':
       return clamp(rect.top + rect.height / 2 - popHeight / 2, rect.left - POPOVER_GAP - popWidth);
     case 'bottom':
@@ -75,7 +78,11 @@ export function SpotlightTour() {
 
   useEffect(() => {
     if (!isOpen || !step) return;
-    if (step.route && location.pathname !== step.route && lastNavigatedRoute.current !== step.route) {
+    if (
+      step.route &&
+      location.pathname !== step.route &&
+      lastNavigatedRoute.current !== step.route
+    ) {
       lastNavigatedRoute.current = step.route;
       navigate(step.route);
     }
@@ -132,10 +139,7 @@ export function SpotlightTour() {
   return createPortal(
     <div className="fixed inset-0 z-[100] pointer-events-none">
       {/* Spotlight backdrop */}
-      <svg
-        className="absolute inset-0 w-full h-full pointer-events-auto"
-        onClick={() => next()}
-      >
+      <svg className="absolute inset-0 w-full h-full pointer-events-auto" onClick={() => next()}>
         <defs>
           <mask id="tour-mask">
             <rect width="100%" height="100%" fill="white" />

@@ -20,7 +20,7 @@ const listVariants = {
 
 const itemVariants: Variants = {
   hidden: { opacity: 0, y: 8 },
-  show:   { opacity: 1, y: 0, transition: { duration: 0.18, ease: 'easeOut' } },
+  show: { opacity: 1, y: 0, transition: { duration: 0.18, ease: 'easeOut' } },
 };
 
 export function ResultsGrid({
@@ -77,12 +77,7 @@ export function ResultsGrid({
         <div className="w-[4.5rem]" />
       </div>
 
-      <motion.div
-        className="space-y-0.5"
-        variants={listVariants}
-        initial="hidden"
-        animate="show"
-      >
+      <motion.div className="space-y-0.5" variants={listVariants} initial="hidden" animate="show">
         <AnimatePresence>
           {safeResults.map((result, index) => (
             <motion.div key={`${result.id}-${index}`} variants={itemVariants}>

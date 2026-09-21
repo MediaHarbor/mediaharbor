@@ -34,7 +34,11 @@ pub struct UpdateChecker {
 }
 
 impl UpdateChecker {
-    pub fn new(owner: impl Into<String>, repo: impl Into<String>, current_version: impl Into<String>) -> Self {
+    pub fn new(
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+        current_version: impl Into<String>,
+    ) -> Self {
         Self {
             owner: owner.into(),
             repo: repo.into(),
@@ -55,7 +59,7 @@ impl UpdateChecker {
             .header("Accept", "application/vnd.github+json")
             .send()
             .await
-            .map_err(|e| MhError::Network(e))?;
+            .map_err(MhError::Network)?;
 
         if !resp.status().is_success() {
             return Err(MhError::Other(format!(
@@ -64,7 +68,7 @@ impl UpdateChecker {
             )));
         }
 
-        let releases: Vec<GhRelease> = resp.json().await.map_err(|e| MhError::Network(e))?;
+        let releases: Vec<GhRelease> = resp.json().await.map_err(MhError::Network)?;
 
         let latest = match releases.into_iter().find(|r| !r.prerelease) {
             Some(r) => r,
