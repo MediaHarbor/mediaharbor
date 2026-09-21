@@ -30,6 +30,7 @@ use crate::{Error, Result};
 /// A complex number, as used by the SBR subband domain (§4.6.18.2.2:
 /// the subband samples are complex-valued).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+
 pub struct Complex {
     /// Real part.
     pub re: f64,
@@ -335,15 +336,23 @@ impl AnalysisQmf {
             }
             *un = acc;
         }
-        // W[k] = Σ_n u[n] · 2·exp(i·π/64·(k + 0.5)(2n − 0.5)).
+        // W[k] = Σ_n u[n] · 2·exp(i·π/64·(k + 0.5)(2n − 0.5)), evaluated as
+        // a 64-point FFT: the (k + 0.5) modulation splits into a per-input
+        // pre-twiddle and a per-output post-twiddle, leaving a plain DFT.
+        let mut buf = [rustfft::num_complex::Complex64::new(0.0, 0.0); 64];
+        for (n, slot) in buf.iter_mut().enumerate() {
+            let (sin, cos) = (core::f64::consts::PI * n as f64 / 64.0).sin_cos();
+            // Conjugated so a forward FFT gives the positive-exponent sum.
+            *slot = rustfft::num_complex::Complex64::new(u[n] * cos, -u[n] * sin);
+        }
+        qmf_fft(64).process(&mut buf);
+
         let mut w = [Complex::default(); 32];
         for (k, wk) in w.iter_mut().enumerate() {
-            let row = &self.m[k * 64..(k + 1) * 64];
-            let mut acc = Complex::default();
-            for (n, cell) in row.iter().enumerate() {
-                acc += *cell * u[n];
-            }
-            *wk = acc;
+            let (sin, cos) =
+                (-core::f64::consts::PI * (k as f64 + 0.5) / 128.0).sin_cos();
+            let v = buf[k].conj();
+            *wk = Complex::new(2.0 * (cos * v.re - sin * v.im), 2.0 * (cos * v.im + sin * v.re));
         }
         Ok(w)
     }
@@ -392,15 +401,24 @@ impl SynthesisQmf {
         }
         // Shift v by 128 (discard the oldest 128 samples).
         self.v.copy_within(0..1152, 128);
-        // v[n] = Σ_k Real(X[k]/64 · exp(i·π/128·(k + 0.5)(2n − 255))).
-        for n in 0..128 {
-            let row = &self.n_mat[n * 64..(n + 1) * 64];
-            let mut acc = 0.0;
-            for (k, cell) in row.iter().enumerate() {
-                let x = bands[k];
-                acc += x.re * cell.re - x.im * cell.im;
-            }
-            self.v[n] = acc;
+        // v[n] = Σ_k Real(X[k]/64 · exp(i·π/128·(k + 0.5)(2n − 255))), taken
+        // as a 128-point FFT with the (k + 0.5) and −255 phases folded into
+        // pre/post twiddles.
+        let mut buf = [rustfft::num_complex::Complex64::new(0.0, 0.0); 128];
+        for (k, x) in bands.iter().enumerate() {
+            let (sin, cos) =
+                (-core::f64::consts::PI * 255.0 * (k as f64 + 0.5) / 128.0).sin_cos();
+            let re = (x.re * cos - x.im * sin) / 64.0;
+            let im = (x.re * sin + x.im * cos) / 64.0;
+            // Conjugated so a forward FFT gives the positive-exponent sum.
+            buf[k] = rustfft::num_complex::Complex64::new(re, -im);
+        }
+        qmf_fft(128).process(&mut buf);
+
+        for (n, slot) in self.v.iter_mut().take(128).enumerate() {
+            let (sin, cos) = (core::f64::consts::PI * n as f64 / 128.0).sin_cos();
+            let v = buf[n].conj();
+            *slot = cos * v.re - sin * v.im;
         }
         // Extract g from v, window by c, and sum the ten taps.
         let mut out = [0.0f64; 64];
@@ -485,6 +503,22 @@ impl DownsampledSynthesisQmf {
         }
         Ok(out)
     }
+}
+
+
+/// Cached FFT plans for the QMF banks, keyed by transform length.
+fn qmf_fft(len: usize) -> std::sync::Arc<dyn rustfft::Fft<f64>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    static PLANS: OnceLock<Mutex<HashMap<usize, Arc<dyn rustfft::Fft<f64>>>>> = OnceLock::new();
+
+    let plans = PLANS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut plans = plans.lock().expect("qmf plan cache poisoned");
+    plans
+        .entry(len)
+        .or_insert_with(|| rustfft::FftPlanner::<f64>::new().plan_fft_forward(len))
+        .clone()
 }
 
 #[cfg(test)]

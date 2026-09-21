@@ -44,3 +44,6 @@ path = "src/lib.rs"
 
 [dependencies.oxideav-core]
 version = "0.1"
+
+[dependencies.rustfft]
+version = "6"

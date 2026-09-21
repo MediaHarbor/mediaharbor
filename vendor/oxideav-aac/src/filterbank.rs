@@ -70,21 +70,59 @@ type Result<T> = core::result::Result<T, Error>;
 /// the spec attaches to the inverse transform; the energy-correcting
 /// window then follows in the per-sequence windowing step.
 fn imdct(spec: &[f64], n_transform: usize) -> Vec<f64> {
+    use rustfft::num_complex::Complex64;
+
     let half = n_transform / 2;
     debug_assert_eq!(spec.len(), half);
     let n0 = (half + 1) as f64 / 2.0;
     let scale = 2.0 / n_transform as f64;
     let phase_step = 2.0 * core::f64::consts::PI / n_transform as f64;
-    let mut out = vec![0.0f64; n_transform];
-    for (n, slot) in out.iter_mut().enumerate() {
-        let np = n as f64 + n0;
-        let mut acc = 0.0f64;
-        for (k, &c) in spec.iter().enumerate() {
-            acc += c * (phase_step * np * (k as f64 + 0.5)).cos();
-        }
-        *slot = scale * acc;
+
+    // Evaluated as one length-N FFT instead of the O(N^2) sum the spec
+    // states directly. Folding the n0 phase into the coefficients turns
+    // the definition into a plain DFT:
+    //
+    //   x[n] = scale * Re{ e^(i*pi*n/N) * SUM_k A[k] * e^(i*2*pi*n*k/N) }
+    //   A[k] = spec[k] * e^(i*step*n0*(k + 1/2))
+    //
+    // Identical to floating-point noise, but it replaces roughly two
+    // million cosine evaluations per long window with a single transform.
+    let mut buf = vec![Complex64::new(0.0, 0.0); n_transform];
+    for (k, slot) in buf.iter_mut().enumerate().take(half) {
+        let (sin, cos) = (phase_step * n0 * (k as f64 + 0.5)).sin_cos();
+        // Conjugated so a forward FFT evaluates the positive-exponent sum.
+        *slot = Complex64::new(spec[k] * cos, -spec[k] * sin);
     }
-    out
+
+    imdct_fft(n_transform).process(&mut buf);
+
+    let post_step = core::f64::consts::PI / n_transform as f64;
+    buf.iter()
+        .enumerate()
+        .map(|(n, v)| {
+            let (sin, cos) = (post_step * n as f64).sin_cos();
+            // Re{ e^(i*pi*n/N) * conj(v) }, undoing the conjugation above.
+            scale * (cos * v.re + sin * v.im)
+        })
+        .collect()
+}
+
+/// Cached FFT plans, keyed by transform length.
+///
+/// AAC only ever uses the long and short window lengths, so planning
+/// happens a couple of times per process rather than once per frame.
+fn imdct_fft(n_transform: usize) -> std::sync::Arc<dyn rustfft::Fft<f64>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    static PLANS: OnceLock<Mutex<HashMap<usize, Arc<dyn rustfft::Fft<f64>>>>> = OnceLock::new();
+
+    let plans = PLANS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut plans = plans.lock().expect("imdct plan cache poisoned");
+    plans
+        .entry(n_transform)
+        .or_insert_with(|| rustfft::FftPlanner::<f64>::new().plan_fft_forward(n_transform))
+        .clone()
 }
 
 /// §4.6.15.3.3 / §4.6.11.3.1 — the forward (analysis) MDCT for a
