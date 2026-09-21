@@ -26,6 +26,7 @@ import {
   useThemeStore,
   type ThemePreference,
 } from '@/stores/useThemeStore';
+import { useRadioSources } from '@/features/radio/hooks/useRadioQueries';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '@/utils/cn';
 import type { WrapperProbeResult } from '@/tauri-bridge';
@@ -924,6 +925,42 @@ function FormatGuide() {
 /**
  * Which station directories the Radio page asks.
  *
+ * The same list has chips on the Radio page itself — this is the canonical place
+ * to find it, that is the place you are standing when you want to change it.
+ * The user's own stations are not listed: they are data, not a feed.
+ */
+function RadioDirectories({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
+  const { sources, isPending, isError } = useRadioSources();
+  const enabled = s.radioDirectorySources ?? [];
+  const toggleable = sources.filter((d) => d.toggleable);
+
+  if (isPending) {
+    return <p className="py-1 text-xs text-muted-foreground">Loading directories…</p>;
+  }
+  if (isError || toggleable.length === 0) {
+    return (
+      <p className="py-1 text-xs text-muted-foreground">No station directories are available.</p>
+    );
+  }
+  return (
+    <>
+      {toggleable.map((directory) => (
+        <Check2
+          key={directory.id}
+          id={`radio-source-${directory.id}`}
+          label={directory.label}
+          checked={enabled.includes(directory.id)}
+          onChange={(on) =>
+            set(
+              'radioDirectorySources',
+              on ? [...enabled, directory.id] : enabled.filter((id) => id !== directory.id)
+            )
+          }
+        />
+      ))}
+    </>
+  );
+}
 
 function GeneralTab({
   s,
@@ -984,6 +1021,10 @@ function GeneralTab({
             </Select>
           </Row>
         )}
+      </Section>
+
+      <Section title="Radio">
+        <RadioDirectories s={s} set={set} />
       </Section>
 
       <Section title="Downloads">

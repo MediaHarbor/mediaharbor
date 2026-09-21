@@ -51,6 +51,7 @@ impl EventEmitter for TauriEmitter {
         emit_download_summary => DownloadSummaryEvent, "download-summary";
         emit_library_scan_progress => LibraryScanProgressEvent, "library-scan-progress";
         emit_library_changed => LibraryChangedEvent, "library-changed";
+        emit_radio_metadata => RadioMetadataEvent, "radio-metadata";
         emit_saved_state_changed => SavedStateChangedEvent, "saved-state-changed";
         emit_service_playlist_changed => ServicePlaylistChangedEvent, "service-playlist-changed";
         emit_player_position => PlayerPositionEvent, "player-position";
@@ -172,6 +173,34 @@ tauri_delegates! {
     library_record_play(ipc_contract::LibraryRecordPlayRequest) -> ();
     library_write_tags(ipc_contract::LibraryWriteTagsRequest) -> ();
     library_radio(ipc_contract::LibraryRadioRequest) -> Vec<mediaharbor_core::media::library::LibraryTrackDto>;
+    radio_sources -> Vec<mediaharbor_core::services::radio::DirectorySource>;
+    radio_set_sources(ipc_contract::RadioSetSourcesRequest) -> ();
+    radio_search(ipc_contract::RadioSearchRequest) -> Vec<mediaharbor_core::services::radio::Station>;
+    radio_facets(ipc_contract::RadioFacetRequest) -> Vec<mediaharbor_core::services::radio::Facet>;
+    radio_suggest(ipc_contract::RadioSuggestRequest) -> Vec<mediaharbor_core::services::radio::Facet>;
+    radio_station(ipc_contract::RadioStationRequest) -> Option<mediaharbor_core::services::radio::Station>;
+    radio_favorites -> Vec<mediaharbor_core::services::radio::Station>;
+    radio_recent -> Vec<mediaharbor_core::services::radio::Station>;
+    radio_set_favorite(ipc_contract::RadioFavoriteRequest) -> ();
+    radio_forget(ipc_contract::RadioForgetRequest) -> ();
+    radio_lists -> Vec<mediaharbor_core::services::radio::RadioListRow>;
+    radio_list_create(ipc_contract::RadioListCreateRequest) -> ipc_contract::RadioListCreateResponse;
+    radio_list_rename(ipc_contract::RadioListRenameRequest) -> ();
+    radio_list_delete(ipc_contract::RadioListIdRequest) -> ();
+    radio_list_get(ipc_contract::RadioListIdRequest) -> Option<mediaharbor_core::services::radio::RadioListDetail>;
+    radio_list_add(ipc_contract::RadioListAddRequest) -> ();
+    radio_list_remove(ipc_contract::RadioListRemoveRequest) -> ();
+    radio_list_reorder(ipc_contract::RadioListReorderRequest) -> ();
+    radio_import_url(ipc_contract::RadioImportUrlRequest) -> mediaharbor_core::services::radio::Station;
+    radio_import_playlist(ipc_contract::RadioImportPlaylistRequest) -> mediaharbor_core::services::radio::Station;
+    radio_import_icecast(ipc_contract::RadioImportIcecastRequest) -> Vec<mediaharbor_core::services::radio::Station>;
+    radio_save_stations(ipc_contract::RadioSaveStationsRequest) -> ();
+    radio_station_detail(ipc_contract::RadioStationRequest) -> Option<mediaharbor_core::services::radio::RadioStationDetail>;
+    radio_update_station(ipc_contract::RadioStationEditRequest) -> ();
+    radio_reset_station(ipc_contract::RadioStationRequest) -> ();
+    radio_set_cover(ipc_contract::RadioSetCoverRequest) -> ();
+    radio_test_stream(ipc_contract::RadioTestStreamRequest) -> mediaharbor_core::services::radio::import::StreamProbe;
+    radio_parse_curl(ipc_contract::RadioParseCurlRequest) -> mediaharbor_core::services::radio::curl_parse::ParsedCurl;
     service_library_capabilities(ipc_contract::ServicePlatformRequest) -> mediaharbor_core::services::common::library::ServiceCapabilities;
     service_library_query(ipc_contract::ServiceLibraryQueryRequest) -> serde_json::Value;
     service_library_recommendations(ipc_contract::ServicePlatformRequest) -> mediaharbor_core::services::common::library::RecommendationsPage;
@@ -552,6 +581,34 @@ fn main() {
             library_record_play,
             library_write_tags,
             library_radio,
+            radio_sources,
+            radio_set_sources,
+            radio_search,
+            radio_facets,
+            radio_suggest,
+            radio_station,
+            radio_favorites,
+            radio_recent,
+            radio_set_favorite,
+            radio_forget,
+            radio_lists,
+            radio_list_create,
+            radio_list_rename,
+            radio_list_delete,
+            radio_list_get,
+            radio_list_add,
+            radio_list_remove,
+            radio_list_reorder,
+            radio_import_url,
+            radio_import_playlist,
+            radio_import_icecast,
+            radio_save_stations,
+            radio_station_detail,
+            radio_update_station,
+            radio_reset_station,
+            radio_set_cover,
+            radio_test_stream,
+            radio_parse_curl,
             service_library_capabilities,
             service_library_query,
             service_library_recommendations,

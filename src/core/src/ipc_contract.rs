@@ -488,6 +488,178 @@ pub struct LibraryWriteTagsRequest {
     pub bpm: Option<u32>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioSearchRequest {
+    pub name: Option<String>,
+    pub tag: Option<String>,
+    pub country_code: Option<String>,
+    pub language: Option<String>,
+    pub codec: Option<String>,
+    pub bitrate_min: Option<u32>,
+    pub order: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    /// Directory ids to ask. Absent means every enabled source.
+    pub sources: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioFacetRequest {
+    pub kind: String,
+    pub limit: Option<u32>,
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioSuggestRequest {
+    pub prefix: String,
+    pub limit: Option<u32>,
+}
+
+/// A station's qualified `"{source}:{id}"` key.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioStationRequest {
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioFavoriteRequest {
+    pub key: String,
+    pub favorite: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioSetSourcesRequest {
+    pub sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioListCreateRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioListCreateResponse {
+    pub id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioListIdRequest {
+    pub id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioListRenameRequest {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioListAddRequest {
+    pub id: i64,
+    pub keys: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioListRemoveRequest {
+    pub id: i64,
+    pub position: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioListReorderRequest {
+    pub id: i64,
+    pub from: i64,
+    pub to: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioImportUrlRequest {
+    pub url: String,
+    pub name: Option<String>,
+    /// Headers the stream needs — a broadcaster that checks `Referer` answers
+    /// 403 without them, so the probe has to send them too.
+    #[serde(default)]
+    pub headers: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioStationEditRequest {
+    pub key: String,
+    pub edit: crate::services::radio::StationEdit,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioSetCoverRequest {
+    pub key: String,
+    /// A base64 JPEG, or `None` to go back to the directory's own icon.
+    pub jpeg_base64: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioTestStreamRequest {
+    pub url: String,
+    #[serde(default)]
+    pub headers: std::collections::BTreeMap<String, String>,
+}
+
+/// A pasted stream URL, or a whole `curl` command copied from a browser.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioParseCurlRequest {
+    pub input: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioImportPlaylistRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioImportIcecastRequest {
+    pub host: String,
+}
+
+/// Stations the user picked out of an import preview. Nothing is written to the
+/// library until this arrives, so a mistyped host costs nothing.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioSaveStationsRequest {
+    pub stations: Vec<crate::services::radio::Station>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioForgetRequest {
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioMetadataEvent {
+    pub station_uuid: String,
+    pub title: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CheckDepsResponse {
     pub ffmpeg: bool,

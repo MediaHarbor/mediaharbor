@@ -369,6 +369,137 @@ const filesChangedHub = makeHub<FilesChangedPayload>();
 const appErrorHub = makeHub<AppErrorPayload>();
 const backendLogHub = makeHub<BackendLogPayload>();
 const stdinPromptHub = makeHub<{ downloadId: number; promptLines: string[] }>();
+const radioMetadataHub = makeHub<RadioMetadataPayload>();
+
+export interface RadioMetadataPayload {
+  stationUuid: string;
+  title: string;
+}
+
+export type RadioStreamKind = 'direct' | 'hls' | 'playlistFile';
+
+/** The one station shape every directory answers with. */
+export interface RadioStation {
+  /** `"{source}:{sourceId}"` — the identity used everywhere, including playback. */
+  key: string;
+  source: string;
+  sourceId: string;
+  name: string;
+  streamUrl: string;
+  streamKind: RadioStreamKind;
+  altUrls: string[];
+  homepage?: string | null;
+  favicon?: string | null;
+  tags?: string | null;
+  country?: string | null;
+  countryCode?: string | null;
+  language?: string | null;
+  codec?: string | null;
+  bitrate?: number | null;
+  votes?: number | null;
+  clickcount?: number | null;
+  /** A cover the user supplied, resolved through `library.coverUrl`. */
+  coverId?: string | null;
+  headers: Record<string, string>;
+}
+
+export type RadioFacetKind = 'tags' | 'countries' | 'languages' | 'codecs';
+
+/** Only the fields the user changed; everything absent still tracks the directory. */
+export interface RadioStationOverrides {
+  name?: string;
+  streamUrl?: string;
+  streamKind?: RadioStreamKind;
+  altUrls?: string[];
+  favicon?: string;
+  tags?: string;
+  country?: string;
+  countryCode?: string;
+  language?: string;
+  codec?: string;
+  bitrate?: number;
+  homepage?: string;
+}
+
+/** An edit as the editor sends it. The backend stores the diff against `base`. */
+export interface RadioStationEdit extends RadioStationOverrides {
+  headers?: Record<string, string>;
+}
+
+export interface RadioStationDetail {
+  /** The station as the directory published it. */
+  base: RadioStation;
+  overrides: RadioStationOverrides;
+}
+
+export interface RadioStreamProbe {
+  ok: boolean;
+  status: number;
+  contentType?: string | null;
+  codec?: string | null;
+  bitrate?: number | null;
+  icyName?: string | null;
+  /** `icy-genre`, which becomes the imported station's tags. */
+  genre?: string | null;
+  streamKind: RadioStreamKind;
+  message?: string | null;
+}
+
+export interface ParsedCurl {
+  url: string;
+  headers: Record<string, string>;
+}
+
+export interface RadioFacet {
+  /** What a query filters on — an ISO code for a country. */
+  name: string;
+  /** What a human reads. */
+  label: string;
+  stationCount: number;
+}
+
+export interface RadioDirectoryCapabilities {
+  /** Which browse lists this directory can fill. */
+  facets: RadioFacetKind[];
+  /** Whether asking for a second page returns anything new. */
+  paginates: boolean;
+}
+
+export interface RadioDirectorySource {
+  id: string;
+  label: string;
+  capabilities: RadioDirectoryCapabilities;
+  enabled: boolean;
+  toggleable: boolean;
+  /** `loading` while a directory is building its first mirror. */
+  status: 'ready' | 'loading';
+}
+
+export interface RadioList {
+  id: number;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  stationCount: number;
+  favicons: string[];
+}
+
+export interface RadioListDetail extends RadioList {
+  stations: RadioStation[];
+}
+
+export interface RadioSearchRequest {
+  name?: string;
+  tag?: string;
+  countryCode?: string;
+  language?: string;
+  codec?: string;
+  bitrateMin?: number;
+  order?: string;
+  limit?: number;
+  offset?: number;
+  sources?: string[];
+}
 
 export interface SavedStateChangedPayload {
   platform: string;
@@ -423,6 +554,7 @@ function registerAppEvents() {
     });
   });
   bindHub<FilesChangedPayload>('library-changed', filesChangedHub);
+  bindHub<RadioMetadataPayload>('radio-metadata', radioMetadataHub);
   bindHub<AppErrorPayload>('app-error', appErrorHub);
   bindHub<BackendLogPayload>('backend-log', backendLogHub);
   bindHub<{ downloadId: number; promptLines: string[] }>('process-stdin-prompt', stdinPromptHub);
@@ -661,6 +793,73 @@ export const tauriAPI = {
     },
   },
 
+
+  radio: {
+    sources: async () => invoke<RadioDirectorySource[]>('radio_sources'),
+    setSources: async (sources: string[]) => {
+      await invoke('radio_set_sources', { req: { sources } });
+    },
+    search: async (req: RadioSearchRequest) => invoke<RadioStation[]>('radio_search', { req }),
+    facets: async (kind: RadioFacetKind, limit?: number, source?: string) =>
+      invoke<RadioFacet[]>('radio_facets', { req: { kind, limit, source } }),
+    suggest: async (prefix: string, limit?: number) =>
+      invoke<RadioFacet[]>('radio_suggest', { req: { prefix, limit } }),
+    station: async (key: string) => invoke<RadioStation | null>('radio_station', { req: { key } }),
+    favorites: async () => invoke<RadioStation[]>('radio_favorites'),
+    recent: async () => invoke<RadioStation[]>('radio_recent'),
+    setFavorite: async (key: string, favorite: boolean) => {
+      await invoke('radio_set_favorite', { req: { key, favorite } });
+    },
+    forget: async (key: string) => {
+      await invoke('radio_forget', { req: { key } });
+    },
+    lists: async () => invoke<RadioList[]>('radio_lists'),
+    listCreate: async (name: string) =>
+      invoke<{ id: number }>('radio_list_create', { req: { name } }),
+    listRename: async (id: number, name: string) => {
+      await invoke('radio_list_rename', { req: { id, name } });
+    },
+    listDelete: async (id: number) => {
+      await invoke('radio_list_delete', { req: { id } });
+    },
+    listGet: async (id: number) =>
+      invoke<RadioListDetail | null>('radio_list_get', { req: { id } }),
+    listAdd: async (id: number, keys: string[]) => {
+      await invoke('radio_list_add', { req: { id, keys } });
+    },
+    listRemove: async (id: number, position: number) => {
+      await invoke('radio_list_remove', { req: { id, position } });
+    },
+    listReorder: async (id: number, from: number, to: number) => {
+      await invoke('radio_list_reorder', { req: { id, from, to } });
+    },
+    importUrl: async (url: string, name?: string, headers?: Record<string, string>) =>
+      invoke<RadioStation>('radio_import_url', { req: { url, name, headers } }),
+    stationDetail: async (key: string) =>
+      invoke<RadioStationDetail | null>('radio_station_detail', { req: { key } }),
+    updateStation: async (key: string, edit: RadioStationEdit) => {
+      await invoke('radio_update_station', { req: { key, edit } });
+    },
+    resetStation: async (key: string) => {
+      await invoke('radio_reset_station', { req: { key } });
+    },
+    setCover: async (key: string, jpegBase64: string | null) => {
+      await invoke('radio_set_cover', { req: { key, jpegBase64 } });
+    },
+    testStream: async (url: string, headers?: Record<string, string>) =>
+      invoke<RadioStreamProbe>('radio_test_stream', { req: { url, headers } }),
+    /** Accepts a bare stream URL or a whole `curl` command copied from DevTools. */
+    parseCurl: async (input: string) => invoke<ParsedCurl>('radio_parse_curl', { req: { input } }),
+    importPlaylist: async (path: string) =>
+      invoke<RadioStation>('radio_import_playlist', { req: { path } }),
+    importIcecast: async (host: string) =>
+      invoke<RadioStation[]>('radio_import_icecast', { req: { host } }),
+    saveStations: async (stations: RadioStation[]) => {
+      await invoke('radio_save_stations', { req: { stations } });
+    },
+    onMetadata: (cb: (e: { stationUuid: string; title: string }) => void) =>
+      radioMetadataHub.on(cb),
+  },
   library: {
     scanIncremental: async (directory: string, force = false) => {
       await invoke('library_scan', { req: { directory, force } });

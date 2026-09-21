@@ -30,6 +30,10 @@ use media::library::{
     LibraryAlbumDetail, LibraryArtistDetail, LibraryArtistDto, LibraryPlaylistDetail,
     LibraryTrackDto,
 };
+use services::radio::{
+    import as radio_import, DirectorySource, Facet, FacetKind, RadioListDetail, RadioListRow,
+    RadioStore, Station, StationQuery,
+};
 
 pub trait EventEmitter: Send + Sync {
     fn emit_log(&self, entry: &ipc_contract::BackendLogEvent);
@@ -46,6 +50,9 @@ pub trait EventEmitter: Send + Sync {
         let _ = event;
     }
     fn emit_library_changed(&self, event: &ipc_contract::LibraryChangedEvent) {
+        let _ = event;
+    }
+    fn emit_radio_metadata(&self, event: &ipc_contract::RadioMetadataEvent) {
         let _ = event;
     }
     fn emit_saved_state_changed(&self, event: &ipc_contract::SavedStateChangedEvent) {
@@ -231,6 +238,7 @@ impl BackendState {
         if let Some(ref srv) = streaming_server {
             srv.set_covers_dir(library.covers_dir().to_path_buf());
             srv.set_cover_resolver(library.clone());
+            srv.set_radio_emitter(emitter.clone());
         }
 
         let license_limiter =
@@ -432,6 +440,251 @@ impl BackendState {
         req: ipc_contract::LibraryRecordPlayRequest,
     ) -> MhResult<()> {
         self.library.record_play(&req.path)
+    }
+
+    /// The radio directories as the user currently has them configured. Cheap to
+    /// build — the adapters hold a cloned handle to the shared HTTP client — and
+    /// built per call so a settings change takes effect on the next request.
+    async fn radio(&self) -> services::radio::Federation {
+        services::radio::Federation::new(
+            self.library.clone(),
+            self.settings.read().await.radio_directory_sources.clone(),
+        )
+    }
+
+    pub async fn radio_sources(&self) -> MhResult<Vec<DirectorySource>> {
+        Ok(self.radio().await.sources())
+    }
+
+    /// Patches the one setting rather than round-tripping the whole object, so a
+    /// source chip on the radio page cannot overwrite an unrelated edit made in
+    /// Settings a moment earlier.
+    pub async fn radio_set_sources(
+        &self,
+        req: ipc_contract::RadioSetSourcesRequest,
+    ) -> MhResult<()> {
+        {
+            let mut settings = self.settings.write().await;
+            settings.radio_directory_sources = req.sources;
+        }
+        let snapshot = self.settings.read().await.clone();
+        crate::settings::save_settings(&snapshot, &self.user_data).await
+    }
+
+    pub async fn radio_search(
+        &self,
+        req: ipc_contract::RadioSearchRequest,
+    ) -> MhResult<Vec<Station>> {
+        self.radio()
+            .await
+            .search(&StationQuery {
+                name: req.name,
+                tag: req.tag,
+                country_code: req.country_code,
+                language: req.language,
+                codec: req.codec,
+                bitrate_min: req.bitrate_min,
+                order: req.order,
+                limit: req.limit,
+                offset: req.offset,
+                sources: req.sources,
+            })
+            .await
+    }
+
+    pub async fn radio_facets(&self, req: ipc_contract::RadioFacetRequest) -> MhResult<Vec<Facet>> {
+        let kind = FacetKind::parse(&req.kind)
+            .ok_or_else(|| MhError::Other(format!("unknown radio facet {}", req.kind)))?;
+        self.radio()
+            .await
+            .facets(kind, req.source, req.limit)
+            .await
+    }
+
+    pub async fn radio_suggest(
+        &self,
+        req: ipc_contract::RadioSuggestRequest,
+    ) -> MhResult<Vec<Facet>> {
+        Ok(self
+            .radio()
+            .await
+            .suggest(&req.prefix, req.limit)
+            .await)
+    }
+
+    pub async fn radio_station(
+        &self,
+        req: ipc_contract::RadioStationRequest,
+    ) -> MhResult<Option<Station>> {
+        self.radio().await.station(&req.key).await
+    }
+
+    pub async fn radio_favorites(&self) -> MhResult<Vec<Station>> {
+        RadioStore::favorites(self.library.db())
+    }
+
+    pub async fn radio_recent(&self) -> MhResult<Vec<Station>> {
+        RadioStore::recent(self.library.db())
+    }
+
+    /// Favouriting a station the user has only seen in a search result has to
+    /// store the station itself first, or the row it flags does not exist yet.
+    pub async fn radio_set_favorite(
+        &self,
+        req: ipc_contract::RadioFavoriteRequest,
+    ) -> MhResult<()> {
+        if req.favorite {
+            self.radio().await.ensure_station(&req.key).await?;
+        }
+        RadioStore::set_favorite(self.library.db(), &req.key, req.favorite)
+    }
+
+    pub async fn radio_forget(&self, req: ipc_contract::RadioForgetRequest) -> MhResult<()> {
+        RadioStore::forget(self.library.db(), &req.key)
+    }
+
+    pub async fn radio_lists(&self) -> MhResult<Vec<RadioListRow>> {
+        RadioStore::lists(self.library.db())
+    }
+
+    pub async fn radio_list_create(
+        &self,
+        req: ipc_contract::RadioListCreateRequest,
+    ) -> MhResult<ipc_contract::RadioListCreateResponse> {
+        let id = RadioStore::list_create(self.library.db(), req.name.trim())?;
+        Ok(ipc_contract::RadioListCreateResponse { id })
+    }
+
+    pub async fn radio_list_rename(
+        &self,
+        req: ipc_contract::RadioListRenameRequest,
+    ) -> MhResult<()> {
+        RadioStore::list_rename(self.library.db(), req.id, req.name.trim())
+    }
+
+    pub async fn radio_list_delete(&self, req: ipc_contract::RadioListIdRequest) -> MhResult<()> {
+        RadioStore::list_delete(self.library.db(), req.id)
+    }
+
+    pub async fn radio_list_get(
+        &self,
+        req: ipc_contract::RadioListIdRequest,
+    ) -> MhResult<Option<RadioListDetail>> {
+        RadioStore::list_get(self.library.db(), req.id)
+    }
+
+    /// A station has to exist in the store before a list can point at it — the
+    /// same pre-insert favouriting does.
+    pub async fn radio_list_add(&self, req: ipc_contract::RadioListAddRequest) -> MhResult<()> {
+        self.radio().await.ensure_stations(&req.keys).await?;
+        RadioStore::list_add(self.library.db(), req.id, &req.keys)
+    }
+
+    pub async fn radio_list_remove(
+        &self,
+        req: ipc_contract::RadioListRemoveRequest,
+    ) -> MhResult<()> {
+        RadioStore::list_remove_at(self.library.db(), req.id, req.position)
+    }
+
+    pub async fn radio_list_reorder(
+        &self,
+        req: ipc_contract::RadioListReorderRequest,
+    ) -> MhResult<()> {
+        RadioStore::list_reorder(self.library.db(), req.id, req.from, req.to)
+    }
+
+    pub async fn radio_import_url(
+        &self,
+        req: ipc_contract::RadioImportUrlRequest,
+    ) -> MhResult<Station> {
+        radio_import::from_url(&req.url, req.name.as_deref(), &req.headers).await
+    }
+
+    pub async fn radio_import_playlist(
+        &self,
+        req: ipc_contract::RadioImportPlaylistRequest,
+    ) -> MhResult<Station> {
+        radio_import::from_playlist_file(&req.path).await
+    }
+
+    pub async fn radio_import_icecast(
+        &self,
+        req: ipc_contract::RadioImportIcecastRequest,
+    ) -> MhResult<Vec<Station>> {
+        radio_import::from_icecast(&req.host).await
+    }
+
+    pub async fn radio_save_stations(
+        &self,
+        req: ipc_contract::RadioSaveStationsRequest,
+    ) -> MhResult<()> {
+        for station in &req.stations {
+            RadioStore::remember(self.library.db(), station)?;
+            // Headers arrive on the station itself from the import dialog, and
+            // `remember` deliberately never touches that column.
+            if !station.headers.is_empty() {
+                RadioStore::update(
+                    self.library.db(),
+                    &station.key,
+                    &services::radio::StationEdit {
+                        headers: Some(station.headers.clone()),
+                        ..Default::default()
+                    },
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn radio_station_detail(
+        &self,
+        req: ipc_contract::RadioStationRequest,
+    ) -> MhResult<Option<services::radio::RadioStationDetail>> {
+        self.radio().await.station_detail(&req.key).await
+    }
+
+    pub async fn radio_update_station(
+        &self,
+        req: ipc_contract::RadioStationEditRequest,
+    ) -> MhResult<()> {
+        RadioStore::update(self.library.db(), &req.key, &req.edit)
+    }
+
+    pub async fn radio_reset_station(
+        &self,
+        req: ipc_contract::RadioStationRequest,
+    ) -> MhResult<()> {
+        RadioStore::reset(self.library.db(), &req.key)
+    }
+
+    /// Stores a cover the user picked in the shared cover cache and points the
+    /// station at it. The same cache backs album and playlist art, so one image
+    /// used twice is kept once.
+    pub async fn radio_set_cover(&self, req: ipc_contract::RadioSetCoverRequest) -> MhResult<()> {
+        let Some(base64_jpeg) = req.jpeg_base64.filter(|b| !b.is_empty()) else {
+            return RadioStore::set_cover(self.library.db(), &req.key, None);
+        };
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(base64_jpeg.as_bytes())
+            .map_err(|e| MhError::Parse(format!("cover is not valid base64: {e}")))?;
+        let cover_id = self.library.covers().ingest_bytes(&bytes)?;
+        RadioStore::set_cover(self.library.db(), &req.key, Some(&cover_id))
+    }
+
+    pub async fn radio_test_stream(
+        &self,
+        req: ipc_contract::RadioTestStreamRequest,
+    ) -> MhResult<radio_import::StreamProbe> {
+        Ok(radio_import::probe(&req.url, &req.headers).await)
+    }
+
+    pub async fn radio_parse_curl(
+        &self,
+        req: ipc_contract::RadioParseCurlRequest,
+    ) -> MhResult<services::radio::curl_parse::ParsedCurl> {
+        services::radio::curl_parse::parse(&req.input)
     }
 }
 
