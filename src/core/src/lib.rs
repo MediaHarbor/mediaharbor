@@ -24,7 +24,12 @@ pub use logger::{LogEmitter, Logger, NoopEmitter};
 
 use std::sync::Arc;
 
+use crate::services::common::library::{RecommendationsPage, ServiceCapabilities};
 use crate::services::common::lyrics::{embedded_lyrics, found_to_response, sidecar_lyrics};
+use media::library::{
+    LibraryAlbumDetail, LibraryArtistDetail, LibraryArtistDto, LibraryPlaylistDetail,
+    LibraryTrackDto,
+};
 
 pub trait EventEmitter: Send + Sync {
     fn emit_log(&self, entry: &ipc_contract::BackendLogEvent);
@@ -37,6 +42,18 @@ pub trait EventEmitter: Send + Sync {
     fn emit_install_progress(&self, event: &ipc_contract::InstallationProgressEvent);
     fn emit_app_error(&self, event: &ipc_contract::AppErrorEvent);
     fn emit_stdin_prompt(&self, event: &ipc_contract::ProcessStdinPromptEvent);
+    fn emit_library_scan_progress(&self, event: &ipc_contract::LibraryScanProgressEvent) {
+        let _ = event;
+    }
+    fn emit_library_changed(&self, event: &ipc_contract::LibraryChangedEvent) {
+        let _ = event;
+    }
+    fn emit_saved_state_changed(&self, event: &ipc_contract::SavedStateChangedEvent) {
+        let _ = event;
+    }
+    fn emit_service_playlist_changed(&self, event: &ipc_contract::ServicePlaylistChangedEvent) {
+        let _ = event;
+    }
     fn emit_player_position(&self, event: &ipc_contract::PlayerPositionEvent) {
         let _ = event;
     }
@@ -87,6 +104,9 @@ pub struct BackendState {
     pub emitter: Arc<dyn EventEmitter>,
     pub yt_stream_cache: Arc<crate::services::youtube::stream::YtAudioStreamCache>,
     pub qobuz_client_cache: Arc<RwLock<Option<crate::services::qobuz::client::QobuzClient>>>,
+    pub library: Arc<media::library::Library>,
+    pub mirror_refresh_in_flight:
+        Arc<std::sync::Mutex<std::collections::HashSet<(String, String)>>>,
     pub spotify_stream_memo: Arc<crate::services::spotify::session::SpotifyStreamMemo>,
     pub player: Arc<player::NativePlayer>,
 }
@@ -188,6 +208,11 @@ impl BackendState {
         let log_emitter = Arc::new(LogEventBridge(emitter.clone()));
         let logger = Logger::new(&user_data, log_emitter);
 
+        let library_task = {
+            let user_data = user_data.clone();
+            let emitter = emitter.clone();
+            tokio::task::spawn_blocking(move || media::library::Library::open(&user_data, emitter))
+        };
         let (loaded, streaming_server) = tokio::join!(
             settings::load_settings(&user_data),
             streaming_server::StreamingServer::start(),
@@ -200,6 +225,13 @@ impl BackendState {
             logger.info("system", &format!("Streaming server on port {}", srv.port));
         }
 
+        let library = library_task
+            .await
+            .map_err(|e| MhError::Other(format!("library init task failed: {e}")))??;
+        if let Some(ref srv) = streaming_server {
+            srv.set_covers_dir(library.covers_dir().to_path_buf());
+            srv.set_cover_resolver(library.clone());
+        }
 
         let license_limiter =
             std::sync::Arc::new(crate::services::spotify::rate_limit::LicenseRateLimiter::new());
@@ -249,6 +281,10 @@ impl BackendState {
             emitter,
             yt_stream_cache: Arc::new(crate::services::youtube::stream::YtAudioStreamCache::new()),
             qobuz_client_cache: Arc::new(RwLock::new(None)),
+            library,
+            mirror_refresh_in_flight: Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
             spotify_stream_memo: Arc::new(Default::default()),
             player: player::NativePlayer::new(
                 http_client::build_audio_client()?,
@@ -375,6 +411,27 @@ impl BackendState {
             _ => (None, None),
         };
         self.player.set_track_gain(gain, peak);
+    }
+
+    pub async fn library_write_tags(
+        &self,
+        req: ipc_contract::LibraryWriteTagsRequest,
+    ) -> MhResult<()> {
+        self.library.write_tags(&req).await
+    }
+
+    pub async fn library_radio(
+        &self,
+        req: ipc_contract::LibraryRadioRequest,
+    ) -> MhResult<Vec<crate::media::library::LibraryTrackDto>> {
+        self.library.radio_from(&req.path)
+    }
+
+    pub async fn library_record_play(
+        &self,
+        req: ipc_contract::LibraryRecordPlayRequest,
+    ) -> MhResult<()> {
+        self.library.record_play(&req.path)
     }
 }
 
@@ -1138,364 +1195,6 @@ impl BackendState {
     }
 }
 
-impl BackendState {
-    pub async fn get_album_details(
-        &self,
-        req: ipc_contract::GetAlbumDetailsRequest,
-    ) -> MhResult<ipc_contract::MediaDetailsResponse> {
-        let settings = self.settings.read().await.clone();
-        let album_id = &req.album_id;
-        let data = match req.platform {
-            ipc_contract::SearchPlatform::Spotify => {
-                let client_id = if settings.spotify_client_id.is_empty() {
-                    self.credentials.spotify_client_id.clone()
-                } else {
-                    settings.spotify_client_id.clone()
-                };
-                let client_secret = if settings.spotify_client_secret.is_empty() {
-                    self.credentials.spotify_client_secret.clone()
-                } else {
-                    settings.spotify_client_secret.clone()
-                };
-                let client = apis::spotify_api::SpotifyApiClient::new(client_id, client_secret)?;
-                if album_id.starts_with("audiobook::") {
-                    let ab_id = &album_id["audiobook::".len()..];
-                    client.get_audiobook_chapters(ab_id).await?
-                } else {
-                    client.get_album_tracks(album_id).await?
-                }
-            }
-            ipc_contract::SearchPlatform::Tidal => {
-                let client = self.authenticate_tidal(&settings).await?;
-                client.get_album_details_json(album_id).await?
-            }
-            ipc_contract::SearchPlatform::Deezer => {
-                let client = apis::deezer_api::DeezerApiClient::new()?;
-                client.get_track_list(album_id, "album").await?
-            }
-            ipc_contract::SearchPlatform::Qobuz => {
-                let client = if settings.qobuz_app_id.is_empty() {
-                    apis::qobuz_api::QobuzApiClient::with_bundled_credentials()?
-                } else {
-                    apis::qobuz_api::QobuzApiClient::new(
-                        settings.qobuz_app_id.clone(),
-                        settings.qobuz_password_or_token.clone(),
-                        settings.qobuz_app_secret.clone(),
-                    )?
-                };
-                let raw = client.get_track_list(album_id, "album").await?;
-                let tracks = raw["tracks"]["items"].clone();
-                serde_json::json!({
-                    "tracks": if tracks.is_array() { tracks } else { serde_json::json!([]) },
-                    "thumbnail": raw["image"]["large"],
-                    "album": {
-                        "title": raw["title"],
-                        "artist": raw["artist"]["name"],
-                        "releaseDate": raw["release_date_original"],
-                        "coverUrl": raw["image"]["large"],
-                    }
-                })
-            }
-            ipc_contract::SearchPlatform::YoutubeMusic => {
-                let client = apis::ytmusic_search_api::YtMusicClient::init().await?;
-                let (tracks, album_title, cover_url) = client.get_album_details(album_id).await?;
-                serde_json::json!({
-                    "tracks": tracks,
-                    "album": {
-                        "title": album_title,
-                        "coverUrl": cover_url,
-                    },
-                    "url": format!("https://music.youtube.com/browse/{}", album_id),
-                })
-            }
-            ipc_contract::SearchPlatform::AppleMusic => {
-                let client = apis::apple_music_api::AppleMusicApiClient::new(None)?;
-                client.get_album_tracks(album_id, "us").await?
-            }
-            ipc_contract::SearchPlatform::Youtube => {
-                return Err(MhError::Unsupported("Album details not supported for YouTube".into()));
-            }
-        };
-        Ok(ipc_contract::MediaDetailsResponse { data })
-    }
-
-    pub async fn get_playlist_details(
-        &self,
-        req: ipc_contract::GetPlaylistDetailsRequest,
-    ) -> MhResult<ipc_contract::MediaDetailsResponse> {
-        let settings = self.settings.read().await.clone();
-        let playlist_id = &req.playlist_id;
-        let data = match req.platform {
-            ipc_contract::SearchPlatform::Spotify => {
-                let client_id = if settings.spotify_client_id.is_empty() {
-                    self.credentials.spotify_client_id.clone()
-                } else {
-                    settings.spotify_client_id.clone()
-                };
-                let client_secret = if settings.spotify_client_secret.is_empty() {
-                    self.credentials.spotify_client_secret.clone()
-                } else {
-                    settings.spotify_client_secret.clone()
-                };
-                let client = apis::spotify_api::SpotifyApiClient::new(client_id, client_secret)?;
-                client.get_playlist_tracks(playlist_id).await?
-            }
-            ipc_contract::SearchPlatform::Deezer => {
-                let client = apis::deezer_api::DeezerApiClient::new()?;
-                client.get_track_list(playlist_id, "playlist").await?
-            }
-            ipc_contract::SearchPlatform::Qobuz => {
-                let client = if settings.qobuz_app_id.is_empty() {
-                    apis::qobuz_api::QobuzApiClient::with_bundled_credentials()?
-                } else {
-                    apis::qobuz_api::QobuzApiClient::new(
-                        settings.qobuz_app_id.clone(),
-                        settings.qobuz_password_or_token.clone(),
-                        settings.qobuz_app_secret.clone(),
-                    )?
-                };
-                let raw = client.get_track_list(playlist_id, "playlist").await?;
-                let tracks = raw["tracks"]["items"].clone();
-                serde_json::json!({
-                    "tracks": if tracks.is_array() { tracks } else { serde_json::json!([]) },
-                    "thumbnail": raw["image_rectangle_mini"].clone(),
-                    "playlist": {
-                        "title": raw["name"],
-                        "creator": raw["owner"]["name"],
-                        "coverUrl": raw["image_rectangle_mini"],
-                    }
-                })
-            }
-            ipc_contract::SearchPlatform::YoutubeMusic => {
-                let client = apis::ytmusic_search_api::YtMusicClient::init().await?;
-                if playlist_id.starts_with("podcast::") {
-                    let browse_id = &playlist_id["podcast::".len()..];
-                    let (episodes, title, cover_url) = client.get_podcast_details(browse_id).await?;
-                    serde_json::json!({
-                        "tracks": episodes,
-                        "playlist": { "title": title, "coverUrl": cover_url },
-                        "url": format!("https://music.youtube.com/browse/{}", browse_id),
-                    })
-                } else {
-                    let (tracks, title, cover_url) = client.get_playlist_details(playlist_id).await?;
-                    let list_id = if playlist_id.starts_with("VL") {
-                        playlist_id[2..].to_string()
-                    } else {
-                        playlist_id.to_string()
-                    };
-                    serde_json::json!({
-                        "tracks": tracks,
-                        "playlist": { "title": title, "coverUrl": cover_url },
-                        "url": format!("https://music.youtube.com/playlist?list={}", list_id),
-                    })
-                }
-            }
-            ipc_contract::SearchPlatform::Tidal => {
-                let client = self.authenticate_tidal(&settings).await?;
-                client.get_playlist_details_json(playlist_id).await?
-            }
-            ipc_contract::SearchPlatform::AppleMusic => {
-                return Err(MhError::Unsupported("Apple Music playlist details not yet implemented".into()));
-            }
-            ipc_contract::SearchPlatform::Youtube => {
-                let yt_key = if settings.youtube_api_key.is_empty() {
-                    self.credentials.youtube_api_key.clone()
-                } else {
-                    settings.youtube_api_key.clone()
-                };
-                let client = apis::yt_search_api::YtSearchClient::new(yt_key)?;
-                client.get_playlist_videos(playlist_id).await?
-            }
-        };
-        Ok(ipc_contract::MediaDetailsResponse { data })
-    }
-
-    pub async fn get_artist_details(
-        &self,
-        req: ipc_contract::GetArtistDetailsRequest,
-    ) -> MhResult<ipc_contract::MediaDetailsResponse> {
-        let settings = self.settings.read().await.clone();
-        let artist_id = &req.artist_id;
-        let data = match req.platform {
-            ipc_contract::SearchPlatform::Spotify => {
-                let client_id = if settings.spotify_client_id.is_empty() {
-                    self.credentials.spotify_client_id.clone()
-                } else {
-                    settings.spotify_client_id.clone()
-                };
-                let client_secret = if settings.spotify_client_secret.is_empty() {
-                    self.credentials.spotify_client_secret.clone()
-                } else {
-                    settings.spotify_client_secret.clone()
-                };
-                let client = apis::spotify_api::SpotifyApiClient::new(client_id, client_secret)?;
-                let raw = client.get_artist_albums(artist_id).await?;
-                let items = raw["items"].as_array().cloned().unwrap_or_default();
-                let albums: Vec<serde_json::Value> = items.iter().map(|a| serde_json::json!({
-                    "id": a["id"],
-                    "title": a["name"],
-                    "thumbnail": a["images"][0]["url"],
-                    "releaseDate": a["release_date"],
-                    "trackCount": a["total_tracks"],
-                    "url": a["external_urls"]["spotify"].as_str().or_else(|| a["uri"].as_str()),
-                    "explicit": a["explicit"].as_bool().unwrap_or(false),
-                })).collect();
-                serde_json::json!({ "albums": albums })
-            }
-            ipc_contract::SearchPlatform::Tidal => {
-                let client_id = if settings.tidal_client_id.is_empty() {
-                    self.credentials.tidal_client_id.clone()
-                } else {
-                    settings.tidal_client_id.clone()
-                };
-                let client_secret = if settings.tidal_client_secret.is_empty() {
-                    self.credentials.tidal_client_secret.clone()
-                } else {
-                    settings.tidal_client_secret.clone()
-                };
-                let client = apis::tidal_api::TidalApiClient::new(client_id, client_secret)?;
-                let cc = if settings.tidal_country_code.is_empty() {
-                    "US"
-                } else {
-                    &settings.tidal_country_code
-                };
-                let user_tok = if settings.tidal_access_token.is_empty() {
-                    None
-                } else {
-                    Some(settings.tidal_access_token.as_str())
-                };
-                let raw = client.get_artist_albums(artist_id, cc, user_tok).await?;
-                let items = raw["items"].as_array().cloned().unwrap_or_default();
-                let albums: Vec<serde_json::Value> = items.iter().map(|a| {
-                    let album_id = a["id"].as_i64().map(|n| n.to_string())
-                        .or_else(|| a["id"].as_str().map(|s| s.to_string()))
-                        .unwrap_or_default();
-                    let thumbnail = a["cover"].as_str().map(|c| {
-                        format!(
-                            "https://resources.tidal.com/images/{}/640x640.jpg",
-                            c.replace('-', "/")
-                        )
-                    });
-                    let url = format!("https://tidal.com/browse/album/{}", album_id);
-                    serde_json::json!({
-                        "id": album_id,
-                        "title": a["title"].as_str(),
-                        "thumbnail": thumbnail,
-                        "releaseDate": a["releaseDate"].as_str(),
-                        "trackCount": a["numberOfTracks"].as_i64(),
-                        "url": url,
-                        "explicit": a["explicit"].as_bool().unwrap_or(false),
-                    })
-                }).collect();
-                serde_json::json!({ "albums": albums })
-            }
-            ipc_contract::SearchPlatform::Deezer => {
-                let client = apis::deezer_api::DeezerApiClient::new()?;
-                let raw = client.get_artist_albums(artist_id).await?;
-                let items = if raw.is_array() {
-                    raw.as_array().cloned().unwrap_or_default()
-                } else {
-                    raw["data"].as_array().cloned().unwrap_or_default()
-                };
-                let albums: Vec<serde_json::Value> = items.iter().map(|a| {
-                    let id = a["id"].as_i64().map(|n| n.to_string())
-                        .or_else(|| a["id"].as_str().map(|s| s.to_string()))
-                        .unwrap_or_default();
-                    let url = a["link"].as_str().map(|s| s.to_string())
-                        .unwrap_or_else(|| format!("https://www.deezer.com/album/{}", id));
-                    serde_json::json!({
-                        "id": id,
-                        "title": a["title"],
-                        "thumbnail": a["cover_xl"].as_str().or_else(|| a["cover_big"].as_str()),
-                        "releaseDate": a["release_date"],
-                        "trackCount": a["nb_tracks"],
-                        "url": url,
-                        "explicit": a["explicit_lyrics"].as_i64().map(|v| v == 1).unwrap_or(false),
-                    })
-                }).collect();
-                serde_json::json!({ "albums": albums })
-            }
-            ipc_contract::SearchPlatform::Qobuz => {
-                let client = if settings.qobuz_app_id.is_empty() {
-                    apis::qobuz_api::QobuzApiClient::with_bundled_credentials()?
-                } else {
-                    apis::qobuz_api::QobuzApiClient::new(
-                        settings.qobuz_app_id.clone(),
-                        settings.qobuz_password_or_token.clone(),
-                        settings.qobuz_app_secret.clone(),
-                    )?
-                };
-                let raw = client.get_artist_albums(artist_id).await?;
-                let items = raw["items"].as_array().cloned().unwrap_or_default();
-                let albums: Vec<serde_json::Value> = items.iter().map(|a| {
-                    let id = a["id"].as_i64().map(|n| n.to_string())
-                        .or_else(|| a["id"].as_str().map(|s| s.to_string()))
-                        .unwrap_or_default();
-                    let release_date = a["released_at"].as_i64()
-                        .filter(|&ts| ts > 0)
-                        .and_then(|ts| {
-                            use std::time::{UNIX_EPOCH, Duration};
-                            let secs = if ts > 9_999_999_999 { ts / 1000 } else { ts };
-                            UNIX_EPOCH.checked_add(Duration::from_secs(secs as u64))
-                                .map(|d| {
-                                    let dt = chrono::DateTime::<chrono::Utc>::from(d);
-                                    dt.format("%Y-%m-%d").to_string()
-                                })
-                        })
-                        .or_else(|| a["release_date_original"].as_str().map(|s| s.to_string()));
-                    serde_json::json!({
-                        "id": id,
-                        "title": a["title"],
-                        "thumbnail": a["image"]["large"].as_str().or_else(|| a["image"]["small"].as_str()),
-                        "releaseDate": release_date,
-                        "trackCount": a["tracks_count"],
-                        "url": format!("https://play.qobuz.com/album/{}", id),
-                        "explicit": a["parental_warning"].as_bool().unwrap_or(false),
-                        "hires": a["hires_streamable"].as_bool().unwrap_or(false),
-                    })
-                }).collect();
-                serde_json::json!({ "albums": albums })
-            }
-            ipc_contract::SearchPlatform::AppleMusic => {
-                let client = apis::apple_music_api::AppleMusicApiClient::new(None)?;
-                let raw = client.get_artist_albums(artist_id, "us").await?;
-                let items = raw.as_array().cloned().unwrap_or_default();
-                let albums: Vec<serde_json::Value> = items.iter().map(|a| {
-                    let id = a["collectionId"].as_i64().map(|n| n.to_string())
-                        .or_else(|| a["collectionId"].as_str().map(|s| s.to_string()))
-                        .unwrap_or_default();
-                    let thumbnail = a["artworkUrl100"].as_str()
-                        .map(|s| s.replace("100x100", "640x640"));
-                    serde_json::json!({
-                        "id": id,
-                        "title": a["collectionName"],
-                        "thumbnail": thumbnail,
-                        "releaseDate": a["releaseDate"],
-                        "trackCount": a["trackCount"],
-                        "url": a["collectionViewUrl"],
-                        "explicit": a["collectionExplicitness"].as_str() == Some("explicit"),
-                    })
-                }).collect();
-                serde_json::json!({ "albums": albums })
-            }
-            ipc_contract::SearchPlatform::YoutubeMusic => {
-                let client = apis::ytmusic_search_api::YtMusicClient::init().await?;
-                let albums = client.get_artist_albums(artist_id).await.unwrap_or_default();
-                serde_json::json!({ "albums": albums })
-            }
-            ipc_contract::SearchPlatform::Youtube => {
-                let yt_key = if settings.youtube_api_key.is_empty() {
-                    self.credentials.youtube_api_key.clone()
-                } else {
-                    settings.youtube_api_key.clone()
-                };
-                let client = apis::yt_search_api::YtSearchClient::new(yt_key)?;
-                client.get_channel_uploads(artist_id).await?
-            }
-        };
-        Ok(ipc_contract::MediaDetailsResponse { data })
-    }
-}
 /// `start_download` pass-throughs. The `+ quality` arm backfills `meta.quality` from the
 /// request's own tier when the download dialog left it empty.
 macro_rules! start_downloads {
@@ -1972,90 +1671,272 @@ impl BackendState {
             .await
     }
 }
+
+/// Thin `ServiceLibrary` pass-throughs: resolve the platform, run one method, return.
+macro_rules! service_calls {
+    ($( $name:ident($req:ident) -> $ret:ty = |$svc:ident, $r:ident| $body:expr; )*) => {
+        impl BackendState {
+            $(
+                pub async fn $name(&self, $r: ipc_contract::$req) -> MhResult<$ret> {
+                    self.with_service(&$r.platform, |$svc| async move { $body }).await
+                }
+            )*
+        }
+    };
+}
+
+service_calls! {
+    service_library_capabilities(ServicePlatformRequest) -> ServiceCapabilities
+        = |svc, req| Ok(svc.capabilities());
+    service_library_recommendations(ServicePlatformRequest) -> RecommendationsPage
+        = |svc, req| svc.recommendations().await;
+    service_library_explore(ServicePlatformRequest) -> RecommendationsPage
+        = |svc, req| svc.explore().await;
+    service_library_activity_feed(ServicePlatformRequest) -> serde_json::Value
+        = |svc, req| svc.activity_feed(20).await;
+    service_library_album_page(ServiceLibraryIdRequest) -> serde_json::Value
+        = |svc, req| svc.album_page(&req.id).await;
+    service_library_artist_page(ServiceLibraryIdRequest) -> serde_json::Value
+        = |svc, req| svc.artist_page(&req.id).await;
+    service_library_explore_page(ServiceLibraryIdRequest) -> RecommendationsPage
+        = |svc, req| svc.explore_page(&req.id).await;
+    service_library_episode_bookmarks(ServicePlatformRequest) -> Vec<LibraryTrackDto>
+        = |svc, req| svc.episode_bookmarks().await;
+    service_library_followers(ServicePlatformRequest) -> Vec<LibraryArtistDto>
+        = |svc, req| svc.followers().await;
+    service_library_following(ServicePlatformRequest) -> Vec<LibraryArtistDto>
+        = |svc, req| svc.following().await;
+    service_library_report_playback(ServiceLibraryPlaybackRequest) -> ()
+        = |svc, req| svc.report_playback(
+            &req.id, req.duration_secs, req.context_uri.as_deref(), req.track_index).await;
+    service_library_set_cover(ServiceLibraryCoverRequest) -> ()
+        = |svc, req| svc.set_playlist_cover(&req.id, &req.jpeg_base64).await;
+    service_library_transcript(ServiceLibraryIdRequest) -> serde_json::Value
+        = |svc, req| svc.podcast_transcript(&req.id).await;
+    service_library_album(ServiceLibraryIdRequest) -> LibraryAlbumDetail
+        = |svc, req| svc.album_detail(&req.id).await;
+    service_library_artist(ServiceLibraryIdRequest) -> LibraryArtistDetail
+        = |svc, req| svc.artist_detail(&req.id).await;
+    service_library_playlist(ServiceLibraryIdRequest) -> LibraryPlaylistDetail
+        = |svc, req| svc.playlist_detail(&req.id).await;
+}
+
 impl BackendState {
-    pub async fn scan_directory(
+    pub async fn library_query(
         &self,
-        req: ipc_contract::ScanDirectoryRequest,
-    ) -> MhResult<serde_json::Value> {
-        let dir = PathBuf::from(&req.directory);
-        let force = req.force.unwrap_or(false);
-        let cache = media::scanner::CacheManager::new(self.user_data.clone());
-        let flat_items = media::scanner::scan_directory(&dir, &cache, force).await?;
-
-        let (audio_items, video_items): (Vec<_>, Vec<_>) =
-            flat_items.into_iter().partition(|i| !i.is_video);
-
-        let albums = media::scanner::organize_into_albums(&audio_items);
-
-        let mut result: Vec<serde_json::Value> = Vec::new();
-
-        for album in albums {
-            let thumbnail = album
-                .tracks
-                .iter()
-                .find_map(|t| t.cover_thumbnail.as_ref())
-                .map(|b64| serde_json::json!({ "data": b64, "format": "jpeg" }));
-
-            let tracks: Vec<serde_json::Value> = album
-                .tracks
-                .iter()
-                .map(|t| {
-                    let size = format_file_size(t.file_size);
-                    let date = file_modified_date(&t.path);
-                    let thumb = t.cover_thumbnail.as_ref().map(|b64| {
-                        serde_json::json!({ "data": b64, "format": "jpeg" })
-                    });
-                    serde_json::json!({
-                        "type": "music",
-                        "title": t.title,
-                        "size": size,
-                        "date": date,
-                        "path": t.path,
-                        "duration": t.duration_secs,
-                        "thumbnail": thumb,
-                        "metadata": {
-                            "artist": t.artist.clone().unwrap_or_default(),
-                            "album": t.album.clone().unwrap_or_default(),
-                            "year": t.year.clone().unwrap_or_default(),
-                        }
-                    })
-                })
-                .collect();
-
-            result.push(serde_json::json!({
-                "type": "music",
-                "album": album.title,
-                "artist": album.artist,
-                "year": album.year,
-                "thumbnail": thumbnail,
-                "tracks": tracks,
-            }));
-        }
-
-        for item in video_items {
-            let size = format_file_size(item.file_size);
-            let date = file_modified_date(&item.path);
-            let thumb = item.cover_thumbnail.as_ref().map(|b64| {
-                serde_json::json!({ "data": b64, "format": "jpeg" })
-            });
-            result.push(serde_json::json!({
-                "type": "video",
-                "title": item.title,
-                "size": size,
-                "date": date,
-                "path": item.path,
-                "duration": item.duration_secs,
-                "thumbnail": thumb,
-                "metadata": {},
-            }));
-        }
-
-        Ok(serde_json::Value::Array(result))
+        req: ipc_contract::LibraryQueryRequest,
+    ) -> MhResult<media::library::LibraryQueryResult> {
+        self.library.query(&req)
     }
 
-    pub fn clear_database(&self, _failed: bool, _downloads: bool) -> ipc_contract::ClearDatabaseResponse {
+    pub async fn library_album(
+        &self,
+        req: ipc_contract::LibraryAlbumRequest,
+    ) -> MhResult<Option<media::library::LibraryAlbumDetail>> {
+        self.library.album_detail(&req.album_key)
+    }
+
+    pub async fn library_scan(&self, req: ipc_contract::ScanDirectoryRequest) -> MhResult<()> {
+        let dir = PathBuf::from(&req.directory);
+        let force = req.force.unwrap_or(false);
+        self.library.scan(&dir, force).await?;
+        Ok(())
+    }
+
+    pub async fn library_set_watch(&self, req: ipc_contract::LibraryWatchRequest) -> MhResult<()> {
+        let roots: Vec<PathBuf> = req.roots.into_iter().map(PathBuf::from).collect();
+        self.library.set_watch_roots(roots).await
+    }
+
+    pub async fn library_cover_url(
+        &self,
+        req: ipc_contract::LibraryCoverUrlRequest,
+    ) -> Option<String> {
+        let server = self.streaming_server.as_ref()?;
+        if req.cover_id.contains(':') {
+            return server.service_cover_url(&req.cover_id);
+        }
+        Some(server.cover_url(&req.cover_id))
+    }
+
+    pub async fn library_artist(
+        &self,
+        req: ipc_contract::LibraryArtistRequest,
+    ) -> MhResult<Option<media::library::LibraryArtistDetail>> {
+        self.library.artist_detail(&req.key)
+    }
+
+    pub async fn library_playlist_create(
+        &self,
+        req: ipc_contract::LibraryPlaylistCreateRequest,
+    ) -> MhResult<ipc_contract::LibraryPlaylistCreateResponse> {
+        let id = self.library.playlist_create(&req.name)?;
+        self.emit_library_playlist_changed();
+        Ok(ipc_contract::LibraryPlaylistCreateResponse { id })
+    }
+
+    pub async fn library_playlist_rename(
+        &self,
+        req: ipc_contract::LibraryPlaylistRenameRequest,
+    ) -> MhResult<()> {
+        self.library.playlist_rename(req.id, &req.name)?;
+        self.emit_library_playlist_changed();
+        Ok(())
+    }
+
+    pub async fn library_playlist_delete(
+        &self,
+        req: ipc_contract::LibraryPlaylistIdRequest,
+    ) -> MhResult<()> {
+        self.library.playlist_delete(req.id)?;
+        self.emit_library_playlist_changed();
+        Ok(())
+    }
+
+    pub async fn library_playlist_get(
+        &self,
+        req: ipc_contract::LibraryPlaylistIdRequest,
+    ) -> MhResult<Option<media::library::LibraryPlaylistDetail>> {
+        self.library.playlist_get(req.id)
+    }
+
+    pub async fn library_playlist_add_tracks(
+        &self,
+        req: ipc_contract::LibraryPlaylistAddTracksRequest,
+    ) -> MhResult<()> {
+        self.library.playlist_add_tracks(req.id, &req.paths)?;
+        self.emit_library_playlist_changed();
+        Ok(())
+    }
+
+    pub async fn library_playlist_remove_track(
+        &self,
+        req: ipc_contract::LibraryPlaylistRemoveTrackRequest,
+    ) -> MhResult<()> {
+        self.library.playlist_remove_at(req.id, req.position)?;
+        self.emit_library_playlist_changed();
+        Ok(())
+    }
+
+    pub async fn library_playlist_reorder(
+        &self,
+        req: ipc_contract::LibraryPlaylistReorderRequest,
+    ) -> MhResult<()> {
+        self.library.playlist_reorder(req.id, req.from, req.to)?;
+        self.emit_library_playlist_changed();
+        Ok(())
+    }
+
+    pub async fn library_playlist_import_m3u(
+        &self,
+        req: ipc_contract::LibraryPlaylistImportRequest,
+    ) -> MhResult<ipc_contract::LibraryPlaylistCreateResponse> {
+        let id = self
+            .library
+            .playlist_import_m3u(std::path::Path::new(&req.source))?;
+        self.emit_library_playlist_changed();
+        Ok(ipc_contract::LibraryPlaylistCreateResponse { id })
+    }
+
+    pub async fn library_playlist_export_m3u(
+        &self,
+        req: ipc_contract::LibraryPlaylistExportRequest,
+    ) -> MhResult<()> {
+        self.library
+            .playlist_export_m3u(req.id, std::path::Path::new(&req.dest))
+    }
+
+    fn emit_library_playlist_changed(&self) {
+        self.emitter
+            .emit_library_changed(&ipc_contract::LibraryChangedEvent {
+                directory: "playlists".to_string(),
+                added: 0,
+                updated: 0,
+                removed: 0,
+            });
+    }
+
+    pub fn clear_database(
+        &self,
+        _failed: bool,
+        _downloads: bool,
+    ) -> ipc_contract::ClearDatabaseResponse {
         self.active_downloads.clear();
         ipc_contract::ClearDatabaseResponse { success: true }
+    }
+
+    /// Resolves `platform`, builds its `ServiceLibrary`, runs `f` against it, and
+    /// reports both the build and the call to `note_service_result` so an auth
+    /// failure anywhere on the path can trigger a credential re-check.
+    async fn with_service<T, F, Fut>(&self, platform: &str, f: F) -> MhResult<T>
+    where
+        F: FnOnce(std::sync::Arc<dyn crate::services::common::library::ServiceLibrary>) -> Fut,
+        Fut: std::future::Future<Output = MhResult<T>>,
+    {
+        use std::str::FromStr;
+        let plat = crate::services::common::library::ServicePlatform::from_str(platform)?;
+        let built = crate::services::common::library::build(plat, self).await;
+        let svc = self.note_service_result(plat, built).await?;
+        let res = f(svc).await;
+        self.note_service_result(plat, res).await
+    }
+
+    async fn note_service_result<T>(
+        &self,
+        plat: crate::services::common::library::ServicePlatform,
+        res: MhResult<T>,
+    ) -> MhResult<T> {
+        res
+    }
+
+    pub async fn service_library_query(
+        &self,
+        req: ipc_contract::ServiceLibraryQueryRequest,
+    ) -> MhResult<serde_json::Value> {
+        use std::str::FromStr;
+        let kind = crate::services::common::library::ServiceKind::from_str(&req.kind)?;
+        let page = crate::services::common::library::Page {
+            offset: req.offset,
+            limit: req.limit.unwrap_or(25),
+        };
+        fn to_val<T: serde::Serialize>(r: MhResult<T>) -> MhResult<serde_json::Value> {
+            Ok(serde_json::to_value(r?)?)
+        }
+        self.with_service(&req.platform, |svc| async move {
+            use crate::services::common::library::ServiceKind::*;
+            match kind {
+                Albums => to_val(svc.albums(page).await),
+                Tracks => to_val(svc.tracks(page).await),
+                Artists => to_val(svc.artists(page).await),
+                Playlists => to_val(svc.playlists(page).await),
+                Videos => to_val(svc.videos(page).await),
+            }
+        })
+        .await
+    }
+
+    pub async fn service_library_canvas(
+        &self,
+        req: ipc_contract::ServiceLibraryIdRequest,
+    ) -> MhResult<Option<String>> {
+        let content_id = req.id.clone();
+        let cdn_url = self
+            .with_service(&req.platform, move |svc| async move {
+                svc.canvas_url(&content_id).await
+            })
+            .await?;
+        let (Some(cdn_url), Some(srv)) = (cdn_url, self.streaming_server.as_ref()) else {
+            return Ok(None);
+        };
+        let id = format!("canvas-{}-{}", req.platform, req.id);
+        Ok(Some(srv.register(
+            &id,
+            streaming_server::StreamContent::Proxied {
+                url: cdn_url,
+                auth_headers: reqwest::header::HeaderMap::new(),
+            },
+            "video/mp4",
+        )))
     }
 }
 
@@ -2401,52 +2282,6 @@ impl BackendState {
 
         ipc_contract::GetDependencyVersionsResponse { versions }
     }
-}
-
-fn format_file_size(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = 1024 * KB;
-    const GB: u64 = 1024 * MB;
-    if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.0} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} B", bytes)
-    }
-}
-
-fn file_modified_date(path: &std::path::Path) -> String {
-    use std::time::UNIX_EPOCH;
-    let meta = std::fs::metadata(path).ok();
-    let modified = meta
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    if modified == 0 {
-        return String::from("Unknown");
-    }
-    let days = modified / 86400;
-    let mut y = 1970u32;
-    let mut rem_days = days as u32;
-    loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-        if rem_days < days_in_year {
-            break;
-        }
-        rem_days -= days_in_year;
-        y += 1;
-    }
-    let month_days = [31u32, if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut m = 0usize;
-    while m < 12 && rem_days >= month_days[m] {
-        rem_days -= month_days[m];
-        m += 1;
-    }
-    format!("{:04}-{:02}-{:02}", y, m + 1, rem_days + 1)
 }
 
 fn which_binary(name: &str) -> bool {

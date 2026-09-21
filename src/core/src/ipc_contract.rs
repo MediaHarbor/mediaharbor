@@ -214,35 +214,6 @@ pub struct TidalExchangeCodeResponse {
     pub country_code: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetArtistDetailsRequest {
-    #[serde(deserialize_with = "de_string_or_int")]
-    pub artist_id: String,
-    pub platform: SearchPlatform,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetAlbumDetailsRequest {
-    #[serde(deserialize_with = "de_string_or_int")]
-    pub album_id: String,
-    pub platform: SearchPlatform,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetPlaylistDetailsRequest {
-    #[serde(deserialize_with = "de_string_or_int")]
-    pub playlist_id: String,
-    pub platform: SearchPlatform,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MediaDetailsResponse {
-    pub data: serde_json::Value,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadMetadata {
@@ -479,9 +450,42 @@ pub struct ScanDirectoryRequest {
     pub force: Option<bool>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ClearDatabaseResponse {
-    pub success: bool,
+#[derive(Debug, Clone, Deserialize)]
+pub struct LibraryRecordPlayRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LibraryRadioRequest {
+    pub path: String,
+}
+
+/// An edit to one file's tags. Every field is optional; an absent one keeps whatever the
+/// file already carries, an empty one clears it.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryWriteTagsRequest {
+    pub path: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub album_artist: Option<String>,
+    pub year: Option<String>,
+    pub genre: Option<String>,
+    pub track_no: Option<u32>,
+    pub track_total: Option<u32>,
+    pub disc_no: Option<u32>,
+    pub disc_total: Option<u32>,
+    pub composer: Option<String>,
+    pub lyricist: Option<String>,
+    pub producer: Option<String>,
+    pub label: Option<String>,
+    pub copyright: Option<String>,
+    pub isrc: Option<String>,
+    pub barcode: Option<String>,
+    pub comment: Option<String>,
+    pub grouping: Option<String>,
+    pub bpm: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -494,6 +498,116 @@ pub struct CheckDepsResponse {
     pub bento4: bool,
     pub is_sandboxed: bool,
 }
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LibraryScanProgressEvent {
+    pub directory: String,
+    pub done: u64,
+    pub total: u64,
+    pub current_path: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LibraryChangedEvent {
+    pub directory: String,
+    pub added: u64,
+    pub updated: u64,
+    pub removed: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct LibraryQueryRequest {
+    pub kind: Option<String>,
+    pub offset: Option<i64>,
+    pub limit: Option<i64>,
+    pub sort: Option<String>,
+    pub search: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LibraryAlbumRequest {
+    pub album_key: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LibraryCoverUrlRequest {
+    pub cover_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LibraryWatchRequest {
+    pub roots: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryArtistRequest {
+    pub key: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPlaylistCreateRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPlaylistCreateResponse {
+    pub id: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPlaylistRenameRequest {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPlaylistIdRequest {
+    pub id: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPlaylistAddTracksRequest {
+    pub id: i64,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPlaylistRemoveTrackRequest {
+    pub id: i64,
+    pub position: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPlaylistReorderRequest {
+    pub id: i64,
+    pub from: i64,
+    pub to: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPlaylistImportRequest {
+    pub source: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPlaylistExportRequest {
+    pub id: i64,
+    pub dest: String,
+}
+
+pub type ClearDatabaseResponse = SuccessResponse;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GetVersionResponse {
@@ -741,4 +855,171 @@ pub struct InstallOrpheusModuleRequest {
 pub struct InstallOrpheusModuleResponse {
     pub success: bool,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibraryQueryRequest {
+    pub platform: String,
+    pub kind: String,
+    #[serde(default)]
+    pub offset: u32,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibraryIdRequest {
+    pub platform: String,
+    #[serde(deserialize_with = "de_string_or_int")]
+    pub id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServicePlatformRequest {
+    pub platform: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibraryCoverRequest {
+    pub platform: String,
+    #[serde(deserialize_with = "de_string_or_int")]
+    pub id: String,
+    pub jpeg_base64: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibraryPlaybackRequest {
+    pub platform: String,
+    #[serde(deserialize_with = "de_string_or_int")]
+    pub id: String,
+    #[serde(default)]
+    pub duration_secs: u64,
+    #[serde(default)]
+    pub context_uri: Option<String>,
+    #[serde(default)]
+    pub track_index: Option<u64>,
+}
+
+/// Save/unsave a track or album, follow/unfollow an artist or playlist.
+///
+/// The action is data, not a command name: `kind` and `saved` pick which of the
+/// eight combinations to run, and `SavedStateChangedEvent` echoes `kind` back.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibrarySetSavedRequest {
+    pub platform: String,
+    pub kind: crate::services::common::library::SaveKind,
+    /// `true` saves or follows; `false` reverses it.
+    pub saved: bool,
+    pub ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibrarySavedStateRequest {
+    pub platform: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibrarySavedStateRefreshRequest {
+    pub platform: String,
+    pub kinds: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibraryPlaylistCreateRequest {
+    pub platform: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub is_public: bool,
+    #[serde(default)]
+    pub is_collaborative: bool,
+    #[serde(default)]
+    pub initial_track_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibraryPlaylistRenameRequest {
+    pub platform: String,
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub is_public: Option<bool>,
+    #[serde(default)]
+    pub is_collaborative: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibraryPlaylistIdRequest {
+    pub platform: String,
+    pub id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibraryPlaylistMutateTracksRequest {
+    pub platform: String,
+    pub id: String,
+    pub track_ids: Vec<String>,
+    #[serde(default)]
+    pub positions: Option<Vec<u32>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibraryPlaylistReorderRequest {
+    pub platform: String,
+    pub id: String,
+    pub from: u32,
+    pub to: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibraryRadioRequest {
+    pub platform: String,
+    pub seed_kind: String,
+    pub seed_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLibraryRadioContinueRequest {
+    pub platform: String,
+    pub continuation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedStateChangedEvent {
+    pub platform: String,
+    pub kind: String,
+    #[serde(default)]
+    pub added: Vec<String>,
+    #[serde(default)]
+    pub removed: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServicePlaylistChangedEvent {
+    pub platform: String,
+    pub playlist_id: String,
+    pub change: String,
+    #[serde(default)]
+    pub snapshot_id: Option<String>,
 }

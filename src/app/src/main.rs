@@ -49,6 +49,10 @@ impl EventEmitter for TauriEmitter {
     }
     emit_events! {
         emit_download_summary => DownloadSummaryEvent, "download-summary";
+        emit_library_scan_progress => LibraryScanProgressEvent, "library-scan-progress";
+        emit_library_changed => LibraryChangedEvent, "library-changed";
+        emit_saved_state_changed => SavedStateChangedEvent, "saved-state-changed";
+        emit_service_playlist_changed => ServicePlaylistChangedEvent, "service-playlist-changed";
         emit_player_position => PlayerPositionEvent, "player-position";
         emit_player_state => PlayerStateEvent, "player-state";
         emit_player_error => PlayerErrorEvent, "player-error";
@@ -150,9 +154,68 @@ tauri_delegates! {
     infallible start_qobuz_download(ipc_contract::StartQobuzDownloadRequest) -> ipc_contract::StartDownloadResponse;
     infallible start_deezer_download(ipc_contract::StartDeezerDownloadRequest) -> ipc_contract::StartDownloadResponse;
     infallible start_tidal_download(ipc_contract::StartTidalDownloadRequest) -> ipc_contract::StartDownloadResponse;
+    library_scan(ipc_contract::ScanDirectoryRequest) -> ();
+    library_query(ipc_contract::LibraryQueryRequest) -> mediaharbor_core::media::library::LibraryQueryResult;
+    library_album(ipc_contract::LibraryAlbumRequest) -> Option<mediaharbor_core::media::library::LibraryAlbumDetail>;
+    library_set_watch(ipc_contract::LibraryWatchRequest) -> ();
+    infallible library_cover_url(ipc_contract::LibraryCoverUrlRequest) -> Option<String>;
+    library_artist(ipc_contract::LibraryArtistRequest) -> Option<mediaharbor_core::media::library::LibraryArtistDetail>;
+    library_playlist_create(ipc_contract::LibraryPlaylistCreateRequest) -> ipc_contract::LibraryPlaylistCreateResponse;
+    library_playlist_rename(ipc_contract::LibraryPlaylistRenameRequest) -> ();
+    library_playlist_delete(ipc_contract::LibraryPlaylistIdRequest) -> ();
+    library_playlist_get(ipc_contract::LibraryPlaylistIdRequest) -> Option<mediaharbor_core::media::library::LibraryPlaylistDetail>;
+    library_playlist_add_tracks(ipc_contract::LibraryPlaylistAddTracksRequest) -> ();
+    library_playlist_remove_track(ipc_contract::LibraryPlaylistRemoveTrackRequest) -> ();
+    library_playlist_reorder(ipc_contract::LibraryPlaylistReorderRequest) -> ();
+    library_playlist_import_m3u(ipc_contract::LibraryPlaylistImportRequest) -> ipc_contract::LibraryPlaylistCreateResponse;
+    library_playlist_export_m3u(ipc_contract::LibraryPlaylistExportRequest) -> ();
+    library_record_play(ipc_contract::LibraryRecordPlayRequest) -> ();
+    library_write_tags(ipc_contract::LibraryWriteTagsRequest) -> ();
+    library_radio(ipc_contract::LibraryRadioRequest) -> Vec<mediaharbor_core::media::library::LibraryTrackDto>;
+    service_library_capabilities(ipc_contract::ServicePlatformRequest) -> mediaharbor_core::services::common::library::ServiceCapabilities;
+    service_library_query(ipc_contract::ServiceLibraryQueryRequest) -> serde_json::Value;
+    service_library_recommendations(ipc_contract::ServicePlatformRequest) -> mediaharbor_core::services::common::library::RecommendationsPage;
+    service_library_explore(ipc_contract::ServicePlatformRequest) -> mediaharbor_core::services::common::library::RecommendationsPage;
+    service_library_activity_feed(ipc_contract::ServicePlatformRequest) -> serde_json::Value;
+    service_library_album_page(ipc_contract::ServiceLibraryIdRequest) -> serde_json::Value;
+    service_library_artist_page(ipc_contract::ServiceLibraryIdRequest) -> serde_json::Value;
+    service_library_explore_page(ipc_contract::ServiceLibraryIdRequest) -> mediaharbor_core::services::common::library::RecommendationsPage;
+    service_library_episode_bookmarks(ipc_contract::ServicePlatformRequest) -> Vec<mediaharbor_core::media::library::LibraryTrackDto>;
+    service_library_followers(ipc_contract::ServicePlatformRequest) -> Vec<mediaharbor_core::media::library::LibraryArtistDto>;
+    service_library_following(ipc_contract::ServicePlatformRequest) -> Vec<mediaharbor_core::media::library::LibraryArtistDto>;
+    service_library_report_playback(ipc_contract::ServiceLibraryPlaybackRequest) -> ();
+    service_library_canvas(ipc_contract::ServiceLibraryIdRequest) -> Option<String>;
+    service_library_set_cover(ipc_contract::ServiceLibraryCoverRequest) -> ();
+    service_library_transcript(ipc_contract::ServiceLibraryIdRequest) -> serde_json::Value;
+    service_library_follow_user(ipc_contract::ServiceLibraryIdRequest) -> ();
+    service_library_unfollow_user(ipc_contract::ServiceLibraryIdRequest) -> ();
+    service_library_album(ipc_contract::ServiceLibraryIdRequest) -> mediaharbor_core::media::library::LibraryAlbumDetail;
+    service_library_artist(ipc_contract::ServiceLibraryIdRequest) -> mediaharbor_core::media::library::LibraryArtistDetail;
+    service_library_playlist(ipc_contract::ServiceLibraryIdRequest) -> mediaharbor_core::media::library::LibraryPlaylistDetail;
+    service_library_saved_state_for(ipc_contract::ServiceLibrarySavedStateRequest) -> Vec<String>;
+    service_library_saved_state_refresh(ipc_contract::ServiceLibrarySavedStateRefreshRequest) -> ();
+    service_library_set_saved(ipc_contract::ServiceLibrarySetSavedRequest) -> ipc_contract::SavedStateChangedEvent;
+    service_library_playlist_create(ipc_contract::ServiceLibraryPlaylistCreateRequest) -> mediaharbor_core::services::common::library::PlaylistMutateResult;
+    service_library_playlist_rename(ipc_contract::ServiceLibraryPlaylistRenameRequest) -> ();
+    service_library_playlist_delete(ipc_contract::ServiceLibraryPlaylistIdRequest) -> ();
+    service_library_playlist_add_tracks(ipc_contract::ServiceLibraryPlaylistMutateTracksRequest) -> mediaharbor_core::services::common::library::PlaylistMutateResult;
+    service_library_playlist_remove_tracks(ipc_contract::ServiceLibraryPlaylistMutateTracksRequest) -> mediaharbor_core::services::common::library::PlaylistMutateResult;
+    service_library_playlist_reorder(ipc_contract::ServiceLibraryPlaylistReorderRequest) -> mediaharbor_core::services::common::library::PlaylistMutateResult;
+    service_library_radio_for(ipc_contract::ServiceLibraryRadioRequest) -> mediaharbor_core::services::common::library::RadioResult;
+    service_library_radio_continue(ipc_contract::ServiceLibraryRadioContinueRequest) -> mediaharbor_core::services::common::library::RadioResult;
     infallible start_orpheus_download(ipc_contract::StartOrpheusDownloadRequest) -> ipc_contract::StartDownloadResponse;
     infallible send_process_stdin(ipc_contract::SendProcessStdinRequest) -> ipc_contract::SendProcessStdinResponse;
     get_lyrics(ipc_contract::GetLyricsRequest) -> ipc_contract::GetLyricsResponse;
+}
+
+#[tauri::command]
+async fn normalize_cover_image(bytes: Vec<u8>) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        mediaharbor_core::media::image_pipeline::normalize_cover_base64(&bytes)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -240,27 +303,15 @@ async fn tidal_exchange_code(
 }
 
 #[tauri::command]
-async fn get_artist_details(
+async fn service_library_owned_playlists(
     state: State<'_, AppState>,
-    req: ipc_contract::GetArtistDetailsRequest,
-) -> Result<ipc_contract::MediaDetailsResponse, String> {
-    state.0.get_artist_details(req).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn get_album_details(
-    state: State<'_, AppState>,
-    req: ipc_contract::GetAlbumDetailsRequest,
-) -> Result<ipc_contract::MediaDetailsResponse, String> {
-    state.0.get_album_details(req).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn get_playlist_details(
-    state: State<'_, AppState>,
-    req: ipc_contract::GetPlaylistDetailsRequest,
-) -> Result<ipc_contract::MediaDetailsResponse, String> {
-    state.0.get_playlist_details(req).await.map_err(|e| e.to_string())
+    req: ipc_contract::ServicePlatformRequest,
+) -> Result<Vec<mediaharbor_core::services::common::library::OwnedPlaylistRow>, String> {
+    state
+        .0
+        .service_library_owned_playlists(&req.platform)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -306,14 +357,6 @@ async fn probe_apple_wrapper(
 async fn open_external(app: AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_shell::ShellExt;
     app.shell().open(&url, None).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn scan_directory(
-    state: State<'_, AppState>,
-    req: ipc_contract::ScanDirectoryRequest,
-) -> Result<serde_json::Value, String> {
-    state.0.scan_directory(req).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -482,9 +525,6 @@ fn main() {
             clear_spotify_credentials,
             tidal_start_auth,
             tidal_exchange_code,
-            get_artist_details,
-            get_album_details,
-            get_playlist_details,
             start_yt_music_download,
             start_yt_video_download,
             start_spotify_download,
@@ -494,7 +534,57 @@ fn main() {
             start_tidal_download,
             cancel_download,
             show_item_in_folder,
-            scan_directory,
+            library_scan,
+            library_query,
+            library_album,
+            library_set_watch,
+            library_cover_url,
+            library_artist,
+            library_playlist_create,
+            library_playlist_rename,
+            library_playlist_delete,
+            library_playlist_get,
+            library_playlist_add_tracks,
+            library_playlist_remove_track,
+            library_playlist_reorder,
+            library_playlist_import_m3u,
+            library_playlist_export_m3u,
+            library_record_play,
+            library_write_tags,
+            library_radio,
+            service_library_capabilities,
+            service_library_query,
+            service_library_recommendations,
+            service_library_explore,
+            service_library_activity_feed,
+            service_library_album_page,
+            service_library_artist_page,
+            service_library_explore_page,
+            service_library_episode_bookmarks,
+            service_library_followers,
+            service_library_following,
+            service_library_report_playback,
+            service_library_canvas,
+            service_library_set_cover,
+            service_library_transcript,
+            normalize_cover_image,
+            service_library_follow_user,
+            service_library_unfollow_user,
+            service_library_album,
+            service_library_artist,
+            service_library_playlist,
+            service_library_saved_state_for,
+            service_library_saved_state_refresh,
+            service_library_owned_playlists,
+            service_library_set_saved,
+            service_library_playlist_create,
+            service_library_playlist_rename,
+            service_library_playlist_delete,
+            service_library_playlist_add_tracks,
+            service_library_playlist_remove_tracks,
+            service_library_playlist_reorder,
+            service_library_radio_for,
+            service_library_radio_continue,
             resolve_share_link,
             clear_database,
             get_version,

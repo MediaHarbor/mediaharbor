@@ -112,10 +112,23 @@ interface ScanProgressPayload {
   directory: string;
   percent: number;
   status: string;
+  progress?: number;
+  currentFile?: string;
+}
+
+interface LibraryScanProgressPayload {
+  directory: string;
+  done: number;
+  total: number;
+  current_path: string | null;
+  status: string;
 }
 
 interface FilesChangedPayload {
   directory: string;
+  added?: number;
+  updated?: number;
+  removed?: number;
 }
 
 interface AppErrorPayload {
@@ -156,6 +169,100 @@ interface SpotifyProfile {
 export function isSpotifyFree(profile: SpotifyProfile | null | undefined): boolean {
   const plan = profile?.plan?.toLowerCase();
   return plan === 'free' || plan === 'open';
+}
+
+export type SaveKindStr = MediaKind;
+
+export interface MutationCapabilities {
+  save_tracks: boolean;
+  save_albums: boolean;
+  follow_artists: boolean;
+  follow_playlists: boolean;
+  create_playlists: boolean;
+  edit_playlists: boolean;
+  reorder_playlists: boolean;
+  radio: boolean;
+}
+
+export type RecommendationCategory =
+  | 'hero'
+  | 'daily_mix'
+  | 'discovery'
+  | 'recently_played'
+  | 'new_releases'
+  | 'charts'
+  | 'genre'
+  | 'editorial'
+  | 'stations'
+  | 'other';
+
+export interface ServiceCapabilities {
+  albums: boolean;
+  tracks: boolean;
+  artists: boolean;
+  playlists: boolean;
+  videos: boolean;
+  recommendations: boolean;
+  followers: boolean;
+  activity_feed: boolean;
+  episode_bookmarks: boolean;
+  mutations: MutationCapabilities;
+}
+
+export interface AlbumDetail {
+  album: Record<string, unknown>;
+  tracks: Record<string, unknown>[];
+}
+
+export interface ArtistDetail {
+  key: string;
+  display: string;
+  albums: Record<string, unknown>[];
+  tracks: Record<string, unknown>[];
+}
+
+export interface PlaylistDetail {
+  playlist: Record<string, unknown>;
+  tracks: Record<string, unknown>[];
+}
+
+export interface Shelf {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  category: RecommendationCategory;
+  items: Array<Record<string, unknown> & { kind: string }>;
+}
+
+/** Every shelf-returning command answers with this envelope. */
+export interface ShelvesPage {
+  shelves: Shelf[];
+}
+
+export interface OwnedPlaylistRow {
+  platform: string;
+  serviceId: string;
+  name: string;
+  coverId: string | null;
+  trackCount: number;
+  updatedAt: number;
+}
+
+export interface PlaylistMutateResult {
+  playlist_id: string;
+  library_id: string | null;
+  snapshot_id: string | null;
+}
+
+export interface RadioResult {
+  seed_kind: 'track' | 'album' | 'artist' | 'playlist';
+  seed_id: string;
+  title: string;
+  tracks: Record<string, unknown>[];
+  station_id: string | null;
+  video_urls?: Record<string, string>;
+  /// Token for the next page of an endless station; absent when it has run out.
+  continuation?: string | null;
 }
 
 export interface ResolvedLink {
@@ -257,22 +364,70 @@ function summaryWarnings(
 
 const streamReadyHub = makeHub<StreamReadyPayload>();
 const installProgressHub = makeHub<InstallProgressPayload>();
-const scanProgressHub   = makeHub<ScanProgressPayload>();
-const filesChangedHub   = makeHub<FilesChangedPayload>();
+const scanProgressHub = makeHub<ScanProgressPayload>();
+const filesChangedHub = makeHub<FilesChangedPayload>();
 const appErrorHub = makeHub<AppErrorPayload>();
 const backendLogHub = makeHub<BackendLogPayload>();
 const stdinPromptHub = makeHub<{ downloadId: number; promptLines: string[] }>();
+
+export interface SavedStateChangedPayload {
+  platform: string;
+  kind: 'track' | 'album' | 'artist' | 'playlist';
+  added: string[];
+  removed: string[];
+}
+export interface ServicePlaylistChangedPayload {
+  platform: string;
+  playlistId: string;
+  change: 'created' | 'renamed' | 'deleted' | 'tracks_added' | 'tracks_removed' | 'reordered';
+  snapshotId: string | null;
+}
+const savedStateHub = makeHub<SavedStateChangedPayload>();
+const servicePlaylistHub = makeHub<ServicePlaylistChangedPayload>();
 
 function bindHub<T>(event: string, hub: { emit: (data: T) => void }) {
   listen<T>(event, (e) => hub.emit(e.payload));
 }
 
+const lastPercentByDir = new Map<string, number>();
+
 function registerAppEvents() {
   bindHub<StreamReadyPayload>('stream-ready', streamReadyHub);
   bindHub<InstallProgressPayload>('install-progress', installProgressHub);
+  bindHub<ScanProgressPayload>('scan-progress', scanProgressHub);
+  listen<LibraryScanProgressPayload>('library-scan-progress', (e) => {
+    const p = e.payload;
+    let percent: number;
+    if (p.status === 'done') {
+      percent = 100;
+      lastPercentByDir.delete(p.directory);
+    } else if (p.status === 'scanning') {
+      // Emitted before the walk, whose duration is unknown; the bar shows activity
+      // rather than sitting at zero looking hung.
+      percent = 0;
+      lastPercentByDir.delete(p.directory);
+    } else if (p.total > 0) {
+      percent = Math.round((p.done / p.total) * 100);
+      const prev = lastPercentByDir.get(p.directory) ?? 0;
+      if (percent < prev) percent = prev;
+      lastPercentByDir.set(p.directory, percent);
+    } else {
+      return;
+    }
+    scanProgressHub.emit({
+      directory: p.directory,
+      percent,
+      status: p.status,
+      progress: percent,
+      currentFile: p.current_path ?? '',
+    });
+  });
+  bindHub<FilesChangedPayload>('library-changed', filesChangedHub);
   bindHub<AppErrorPayload>('app-error', appErrorHub);
   bindHub<BackendLogPayload>('backend-log', backendLogHub);
   bindHub<{ downloadId: number; promptLines: string[] }>('process-stdin-prompt', stdinPromptHub);
+  bindHub<SavedStateChangedPayload>('saved-state-changed', savedStateHub);
+  bindHub<ServicePlaylistChangedPayload>('service-playlist-changed', servicePlaylistHub);
 }
 
 let bridgeStarted = false;
@@ -303,6 +458,16 @@ function subscribe<P>(event: string, cb: (payload: P) => void) {
     unlistenP.then((u) => u()).catch(() => {});
   };
 }
+
+const setSaved = (platform: string, kind: SaveKindStr, saved: boolean, ids: (string | number)[]) =>
+  invoke<SavedStateChangedPayload>('service_library_set_saved', {
+    req: { platform, kind, saved, ids: ids.map(String) },
+  });
+
+const playlistReq = (
+  req: { platform: string; id: string | number },
+  extra: Record<string, unknown> = {}
+) => ({ platform: req.platform, id: String(req.id), ...extra });
 
 const intQuality = (data: DownloadData) =>
   data.quality != null ? parseInt(String(data.quality), 10) : null;
@@ -416,36 +581,6 @@ export const tauriAPI = {
     resolveShareLink: async (url: string) => {
       return invoke<ResolvedLink>('resolve_share_link', { url });
     },
-    getAlbumDetails: async (platform: string, albumId: string) => {
-      try {
-        const r = await invoke<{ data: Record<string, unknown> }>('get_album_details', {
-          req: { albumId, platform },
-        });
-        return { success: true, data: r.data };
-      } catch (e: unknown) {
-        return { success: false, error: String(e) };
-      }
-    },
-    getPlaylistDetails: async (platform: string, playlistId: string) => {
-      try {
-        const r = await invoke<{ data: Record<string, unknown> }>('get_playlist_details', {
-          req: { playlistId, platform },
-        });
-        return { success: true, data: r.data };
-      } catch (e: unknown) {
-        return { success: false, error: String(e) };
-      }
-    },
-    getArtistDetails: async (platform: string, artistId: string) => {
-      try {
-        const r = await invoke<{ data: Record<string, unknown> }>('get_artist_details', {
-          req: { artistId, platform },
-        });
-        return { success: true, data: r.data };
-      } catch (e: unknown) {
-        return { success: false, error: String(e) };
-      }
-    },
   },
 
   downloads: {
@@ -527,8 +662,46 @@ export const tauriAPI = {
   },
 
   library: {
-    scan: async (directory: string, force = false) => {
-      return invoke<Record<string, unknown>[]>('scan_directory', { req: { directory, force } });
+    scanIncremental: async (directory: string, force = false) => {
+      await invoke('library_scan', { req: { directory, force } });
+    },
+    query: async (req: {
+      kind?: 'albums' | 'videos' | 'tracks' | 'artists' | 'playlists';
+      offset?: number;
+      limit?: number;
+      sort?: string;
+      search?: string;
+    }) => {
+      return invoke<{ items: Record<string, unknown>[]; total: number }>('library_query', { req });
+    },
+    getAlbum: async (album_key: string) => {
+      return invoke<{
+        album: Record<string, unknown>;
+        tracks: Record<string, unknown>[];
+      } | null>('library_album', { req: { album_key } });
+    },
+    getArtist: async (key: string) => {
+      return invoke<{
+        key: string;
+        display: string;
+        albums: Record<string, unknown>[];
+        tracks: Record<string, unknown>[];
+      } | null>('library_artist', { req: { key } });
+    },
+    setWatch: async (roots: string[]) => {
+      await invoke('library_set_watch', { req: { roots } });
+    },
+    coverUrl: async (cover_id: string) => {
+      return invoke<string | null>('library_cover_url', { req: { cover_id } });
+    },
+    writeTags: async (req: Record<string, unknown> & { path: string }) => {
+      await invoke('library_write_tags', { req });
+    },
+    radio: async (path: string) =>
+      invoke<Record<string, unknown>[]>('library_radio', { req: { path } }),
+    duplicates: async () => invoke<Record<string, unknown>[][]>('library_duplicates'),
+    recordPlay: async (path: string) => {
+      await invoke('library_record_play', { req: { path } });
     },
     showItemInFolder: async (filePath: string) => {
       const r = await invoke<{ success: boolean }>('show_item_in_folder', {
@@ -536,8 +709,184 @@ export const tauriAPI = {
       });
       return r.success;
     },
-    onScanProgress:  scanProgressHub.on.bind(scanProgressHub),
-    onFilesChanged:  filesChangedHub.on.bind(filesChangedHub),
+    playlists: {
+      create: async (name: string) => {
+        const r = await invoke<{ id: number }>('library_playlist_create', { req: { name } });
+        return r.id;
+      },
+      rename: async (id: number, name: string) => {
+        await invoke('library_playlist_rename', { req: { id, name } });
+      },
+      delete: async (id: number) => {
+        await invoke('library_playlist_delete', { req: { id } });
+      },
+      get: async (id: number) => {
+        return invoke<{
+          playlist: Record<string, unknown>;
+          tracks: Record<string, unknown>[];
+        } | null>('library_playlist_get', { req: { id } });
+      },
+      addTracks: async (id: number, paths: string[]) => {
+        await invoke('library_playlist_add_tracks', { req: { id, paths } });
+      },
+      removeTrack: async (id: number, position: number) => {
+        await invoke('library_playlist_remove_track', { req: { id, position } });
+      },
+      reorder: async (id: number, from: number, to: number) => {
+        await invoke('library_playlist_reorder', { req: { id, from, to } });
+      },
+      importM3u: async (source: string) => {
+        const r = await invoke<{ id: number }>('library_playlist_import_m3u', { req: { source } });
+        return r.id;
+      },
+      exportM3u: async (id: number, dest: string) => {
+        await invoke('library_playlist_export_m3u', { req: { id, dest } });
+      },
+    },
+    onScanProgress: scanProgressHub.on.bind(scanProgressHub),
+    onFilesChanged: filesChangedHub.on.bind(filesChangedHub),
+  },
+
+  normalizeCoverImage: (bytes: Uint8Array) =>
+    invoke<string>('normalize_cover_image', { bytes: Array.from(bytes) }),
+
+  serviceLibrary: {
+    capabilities: byPlatform<ServiceCapabilities>('service_library_capabilities'),
+    query: async (req: {
+      platform: string;
+      kind: 'albums' | 'tracks' | 'artists' | 'playlists' | 'videos';
+      offset?: number;
+      limit?: number;
+    }) => {
+      return invoke<{
+        items: Record<string, unknown>[];
+        total: number | null;
+        nextCursor?: string | null;
+      }>('service_library_query', { req });
+    },
+    recommendations: byPlatform<ShelvesPage>('service_library_recommendations'),
+    explore: byPlatform<ShelvesPage>('service_library_explore'),
+    explorePage: byPlatformId<ShelvesPage>('service_library_explore_page'),
+    activityFeed: byPlatform<Record<string, unknown>>('service_library_activity_feed'),
+    albumPage: byPlatformId<Record<string, unknown>>('service_library_album_page'),
+    artistPage: byPlatformId<Record<string, unknown>>('service_library_artist_page'),
+    episodeBookmarks: byPlatform<Record<string, unknown>[]>('service_library_episode_bookmarks'),
+    followers: byPlatform<Record<string, unknown>[]>('service_library_followers'),
+    following: byPlatform<Record<string, unknown>[]>('service_library_following'),
+    album: byPlatformId<AlbumDetail>('service_library_album'),
+    artist: byPlatformId<ArtistDetail>('service_library_artist'),
+    playlist: byPlatformId<PlaylistDetail>('service_library_playlist'),
+
+    savedStateFor: (platform: string, kind: SaveKindStr) =>
+      invoke<string[]>('service_library_saved_state_for', { req: { platform, kind } }),
+    refreshSavedState: (platform: string, kinds: SaveKindStr[]) =>
+      invoke<void>('service_library_saved_state_refresh', { req: { platform, kinds } }),
+    ownedPlaylists: (platform: string) =>
+      invoke<OwnedPlaylistRow[]>('service_library_owned_playlists', { req: { platform } }),
+
+    setSaved,
+    reportPlayback: (
+      platform: string,
+      id: string,
+      durationSecs: number,
+      context?: { contextUri: string; trackIndex: number }
+    ) =>
+      invoke<void>('service_library_report_playback', {
+        req: {
+          platform,
+          id,
+          durationSecs: Math.round(durationSecs),
+          contextUri: context?.contextUri ?? null,
+          trackIndex: context?.trackIndex ?? null,
+        },
+      }),
+    canvas: byPlatformId<string | null>('service_library_canvas'),
+    setCover: (platform: string, id: string, jpegBase64: string) =>
+      invoke<void>('service_library_set_cover', { req: { platform, id, jpegBase64 } }),
+    transcript: byPlatformId<{
+      episodeName?: string;
+      showName?: string;
+      language?: string;
+      lines: { startMs: number; speaker?: string | null; text: string }[];
+    } | null>('service_library_transcript'),
+    followUser: byPlatformId<void>('service_library_follow_user'),
+    unfollowUser: byPlatformId<void>('service_library_unfollow_user'),
+
+    playlists: {
+      create: (req: {
+        platform: string;
+        name: string;
+        description?: string;
+        isPublic?: boolean;
+        isCollaborative?: boolean;
+        initialTrackIds?: (string | number)[];
+      }) =>
+        invoke<PlaylistMutateResult>('service_library_playlist_create', {
+          req: {
+            platform: req.platform,
+            name: req.name,
+            description: req.description ?? null,
+            isPublic: req.isPublic ?? false,
+            isCollaborative: req.isCollaborative ?? false,
+            initialTrackIds: (req.initialTrackIds ?? []).map(String),
+          },
+        }),
+      rename: (req: {
+        platform: string;
+        id: string | number;
+        name: string;
+        description?: string;
+        isPublic?: boolean;
+        isCollaborative?: boolean;
+      }) =>
+        invoke<void>('service_library_playlist_rename', {
+          req: playlistReq(req, {
+            name: req.name,
+            description: req.description ?? null,
+            isPublic: req.isPublic ?? null,
+            isCollaborative: req.isCollaborative ?? null,
+          }),
+        }),
+      delete: (req: { platform: string; id: string | number }) =>
+        invoke<void>('service_library_playlist_delete', { req: playlistReq(req) }),
+      addTracks: (req: { platform: string; id: string | number; trackIds: (string | number)[] }) =>
+        invoke<PlaylistMutateResult>('service_library_playlist_add_tracks', {
+          req: playlistReq(req, { trackIds: req.trackIds.map(String), positions: null }),
+        }),
+      removeTracks: (req: {
+        platform: string;
+        id: string | number;
+        trackIds: (string | number)[];
+        positions?: number[];
+      }) =>
+        invoke<PlaylistMutateResult>('service_library_playlist_remove_tracks', {
+          req: playlistReq(req, {
+            trackIds: req.trackIds.map(String),
+            positions: req.positions ?? null,
+          }),
+        }),
+      reorder: (req: { platform: string; id: string | number; from: number; to: number }) =>
+        invoke<PlaylistMutateResult>('service_library_playlist_reorder', {
+          req: playlistReq(req, { from: req.from, to: req.to }),
+        }),
+    },
+
+    radioFor: (req: {
+      platform: string;
+      seedKind: 'track' | 'album' | 'artist' | 'playlist';
+      seedId: string | number;
+    }) =>
+      invoke<RadioResult>('service_library_radio_for', {
+        req: { platform: req.platform, seedKind: req.seedKind, seedId: String(req.seedId) },
+      }),
+
+    radioContinue: (req: { platform: string; continuation: string }) =>
+      invoke<RadioResult>('service_library_radio_continue', {
+        req: { platform: req.platform, continuation: req.continuation },
+      }),
+
+    onSavedStateChanged: savedStateHub.on.bind(savedStateHub),
+    onServicePlaylistChanged: servicePlaylistHub.on.bind(servicePlaylistHub),
   },
 
   player: {

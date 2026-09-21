@@ -1,145 +1,190 @@
 import type { Platform, SearchType, SearchResult } from '@/types';
-import { logInfo, logError } from '@/utils/logger';
+import { errorMessage } from '@/utils/errors';
+import { isBackendAvailable, tauriAPI } from '@/tauri-bridge';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/** One provider result before normalization — arbitrary JSON off the wire. */
+type Raw = Record<string, any>;
+
+/**
+ * Where each provider hides its result array, per search type.
+ * `key` + `items` is the common envelope; `unwrap` peels Tidal's
+ * `{ resource: … }` wrapper; `filter` covers iTunes' single flat array.
+ */
+type ExtractSpec = { key: string; unwrap?: string } | { filter: (item: Raw) => boolean };
+
+const itunes = (wrapperType: string, extra: (i: Raw) => boolean): ExtractSpec => ({
+  filter: (i) => i.wrapperType === wrapperType && extra(i),
+});
+
+const EXTRACT: Partial<Record<Platform, Partial<Record<SearchType, ExtractSpec>>>> = {
+  spotify: {
+    track: { key: 'tracks' },
+    album: { key: 'albums' },
+    artist: { key: 'artists' },
+    playlist: { key: 'playlists' },
+    show: { key: 'shows' },
+    podcast: { key: 'shows' },
+    episode: { key: 'episodes' },
+    audiobook: { key: 'audiobooks' },
+  },
+  qobuz: {
+    track: { key: 'tracks' },
+    album: { key: 'albums' },
+    artist: { key: 'artists' },
+    playlist: { key: 'playlists' },
+  },
+  tidal: {
+    track: { key: 'tracks', unwrap: 'resource' },
+    album: { key: 'albums', unwrap: 'resource' },
+    artist: { key: 'artists', unwrap: 'resource' },
+    playlist: { key: 'playlists', unwrap: 'resource' },
+    video: { key: 'videos', unwrap: 'resource' },
+  },
+  applemusic: {
+    track: itunes('track', (i) => i.kind === 'song'),
+    album: itunes('collection', (i) => i.collectionType === 'Album'),
+    artist: itunes('artist', () => true),
+    playlist: itunes('collection', (i) => i.collectionType === 'Compilation'),
+    musicvideo: itunes('track', (i) => i.kind === 'music-video'),
+  },
+};
 
 class SearchService {
   private mapSearchType(platform: Platform, type: SearchType): string {
-    const typeMap: Record<Platform, Partial<Record<SearchType, string>>> = {
-      youtube: {
-        video: 'video',
-        playlist: 'playlist',
-        channel: 'channel',
-      },
-      youtubemusic: {
-        track: 'song',
-        album: 'album',
-        playlist: 'playlist',
-        artist: 'artist',
-        podcast: 'podcast',
-      },
-      spotify:    { track: 'track', album: 'album', playlist: 'playlist', artist: 'artist', show: 'show', episode: 'episode', audiobook: 'audiobook' },
-      tidal:      { track: 'track', album: 'album', playlist: 'playlist', artist: 'artist', video: 'video' },
-      deezer:     { track: 'track', album: 'album', playlist: 'playlist', artist: 'artist', podcast: 'podcast', episode: 'episode' },
-      qobuz:      { track: 'track', album: 'album', playlist: 'playlist', artist: 'artist' },
-      applemusic: { track: 'track', album: 'album', playlist: 'playlist', artist: 'artist', musicvideo: 'musicvideo' },
-    };
-
-    return typeMap[platform]?.[type] ?? type;
+    if (platform === 'youtubemusic' && type === 'track') return 'song';
+    return type;
   }
 
   async performSearch(params: {
     platform: Platform;
     query: string;
     type: SearchType;
+    offset?: number;
+    limit?: number;
   }): Promise<SearchResult[]> {
-    if (!window.electron) {
-      throw new Error('Electron API not available. Please run in Electron mode, not browser mode.');
+    if (!isBackendAvailable()) {
+      throw new Error(
+        'MediaHarbor backend not available — run the desktop app, not the browser dev server.'
+      );
     }
 
     try {
       const platformType = this.mapSearchType(params.platform, params.type);
 
-      const response = await window.electron.search.perform({
+      const response = await tauriAPI.search.perform({
         platform: params.platform,
         query: params.query,
         type: platformType,
+        offset: params.offset,
+        limit: params.limit,
       });
 
       if (!response?.results) {
         return [];
       }
 
-      const data = response.results;
-      let results = this.normalizeResults(data, params.platform, params.type);
-
-      results = results
-        .filter((item: any) => item != null)
-        .map((item: any) => this.normalizeResultItem(item, params.platform, params.type));
-
-      return results;
+      return this.normalizeResults(response.results, params.platform, params.type)
+        .filter((item) => item != null)
+        .map((item) => this.normalizeResultItem(item, params.platform, params.type));
     } catch (error) {
-      throw new Error(`Search failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Search failed: ${errorMessage(error)}`, {
+        cause: error,
+      });
     }
   }
 
-  async getAlbumDetails(params: {
-    platform: Platform;
-    albumId: string;
-  }): Promise<any> {
-    if (!window.electron) {
-      throw new Error('Electron API not available');
-    }
+  private extractCommonFields(
+    item: Raw,
+    platform: Platform,
+    type: SearchType,
+    ctx?: { attr?: Raw; tidalImg?: (imgArr: unknown, uuidStr?: string) => string | undefined }
+  ): Record<string, any> {
+    const fields: Record<string, any> = {};
 
-    logInfo('search', 'Fetching album details', `${params.platform} album ${params.albumId}`);
-    try {
-      const response = await window.electron.search.getAlbumDetails(params.platform, params.albumId);
+    switch (platform) {
+      case 'spotify':
+        if (type === 'track' || type === 'album') {
+          fields.artist = item.artists?.[0]?.name || 'Unknown Artist';
+          fields.artists = item.artists?.map((a: Raw) => a.name).filter(Boolean);
+          fields.artistId = item.artists?.[0]?.id;
+        }
+        if (type === 'track') {
+          fields.album = item.album?.name;
+          fields.albumId = item.album?.id;
+          fields.thumbnail = item.album?.images?.[0]?.url || item.images?.[0]?.url;
+        } else if (type === 'album') {
+          fields.thumbnail = item.images?.[0]?.url;
+        }
+        break;
 
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to get album details');
+      case 'tidal': {
+        const attr = ctx?.attr ?? item;
+        const tidalImg = ctx?.tidalImg ?? (() => undefined);
+        if (type === 'track') {
+          fields.artist = item.artists?.[0]?.name || item.artist?.name || 'Unknown Artist';
+          fields.artists = item.artists?.map((a: Raw) => a.name).filter(Boolean);
+          fields.artistId = item.artists?.[0]?.id || item.artist?.id;
+          fields.album = item.album?.title ?? attr.album?.title;
+          fields.albumId = item.album?.id ?? attr.album?.id;
+          fields.thumbnail = tidalImg(item.album?.imageCover, item.album?.cover);
+        } else if (type === 'album') {
+          fields.artist = item.artist?.name || item.artists?.[0]?.name || 'Unknown Artist';
+          fields.artists = item.artists?.map((a: Raw) => a.name).filter(Boolean);
+          fields.artistId = item.artist?.id || item.artists?.[0]?.id;
+          fields.thumbnail = tidalImg(attr.imageCover, item.cover);
+        }
+        break;
       }
 
-      const trackCount = response.data?.tracks?.length ?? response.data?.trackCount;
-      logInfo('search', 'Album details loaded', trackCount != null ? `${trackCount} tracks` : params.albumId);
-      return response.data;
-    } catch (error) {
-      logError('search', 'Failed to fetch album details', error instanceof Error ? (error.stack || error.message) : String(error));
-      throw error;
+      case 'qobuz':
+        if (type === 'track') {
+          fields.artist = item.performer?.name || item.artist?.name || 'Unknown Artist';
+          fields.artistId = item.performer?.id ?? item.artist?.id;
+          fields.album = item.album?.title;
+          fields.albumId = item.album?.id;
+          fields.thumbnail = item.album?.image?.large || item.image?.large;
+        } else if (type === 'album') {
+          fields.artist = item.artist?.name || 'Unknown Artist';
+          fields.artistId = item.artist?.id;
+          fields.thumbnail = item.image?.large;
+        }
+        break;
+
+      case 'deezer':
+        if (type === 'track') {
+          fields.artist = item.artist?.name || 'Unknown Artist';
+          fields.artistId = item.artist?.id != null ? String(item.artist.id) : undefined;
+          fields.album = item.album?.title;
+          fields.albumId = item.album?.id != null ? String(item.album.id) : undefined;
+          fields.thumbnail =
+            item.album?.cover_xl || item.album?.cover_big || item.picture_xl || item.picture_big;
+        } else if (type === 'album') {
+          fields.artist = item.artist?.name || 'Unknown Artist';
+          fields.artistId = item.artist?.id != null ? String(item.artist.id) : undefined;
+          fields.thumbnail = item.cover_xl || item.cover_big;
+        }
+        break;
+
+      case 'applemusic':
+        if (type === 'track') {
+          fields.artist = item.artistName || 'Unknown Artist';
+          fields.artistId = item.artistId != null ? String(item.artistId) : undefined;
+          fields.album = item.collectionName;
+          fields.albumId = item.collectionId != null ? String(item.collectionId) : undefined;
+          fields.thumbnail = item.artworkUrl100?.replace('100x100', '640x640');
+        } else if (type === 'album') {
+          fields.artist = item.artistName || 'Unknown Artist';
+          fields.artistId = item.artistId != null ? String(item.artistId) : undefined;
+          fields.thumbnail = item.artworkUrl100?.replace('100x100', '640x640');
+        }
+        break;
     }
+
+    return fields;
   }
 
-  async getPlaylistDetails(params: {
-    platform: Platform;
-    playlistId: string;
-  }): Promise<any> {
-    if (!window.electron) {
-      throw new Error('Electron API not available');
-    }
-
-    logInfo('search', 'Fetching playlist details', `${params.platform} playlist ${params.playlistId}`);
-    try {
-      const response = await window.electron.search.getPlaylistDetails(params.platform, params.playlistId);
-
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to get playlist details');
-      }
-
-      const trackCount = response.data?.tracks?.length ?? response.data?.trackCount;
-      logInfo('search', 'Playlist details loaded', trackCount != null ? `${trackCount} tracks` : params.playlistId);
-      return response.data;
-    } catch (error) {
-      logError('search', 'Failed to fetch playlist details', error instanceof Error ? (error.stack || error.message) : String(error));
-      throw error;
-    }
-  }
-
-  async getArtistDetails(params: {
-    platform: Platform;
-    artistId: string;
-  }): Promise<any> {
-    if (!window.electron) {
-      throw new Error('Electron API not available');
-    }
-
-    logInfo('search', 'Fetching artist details', `${params.platform} artist ${params.artistId}`);
-    try {
-      const response = await window.electron.search.getArtistDetails(params.platform, params.artistId);
-
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to get artist details');
-      }
-
-      const albumCount = response.data?.albums?.length;
-      logInfo('search', 'Artist details loaded', albumCount != null ? `${albumCount} albums` : params.artistId);
-      return response.data;
-    } catch (error) {
-      logError('search', 'Failed to fetch artist details', error instanceof Error ? (error.stack || error.message) : String(error));
-      throw error;
-    }
-  }
-
-  private normalizeResultItem(item: any, platform: Platform, type: SearchType): any {
-    const normalized: any = {
+  private normalizeResultItem(item: Raw, platform: Platform, type: SearchType): SearchResult {
+    const normalized: Raw = {
       ...item,
       platform,
       resultType: type,
@@ -151,31 +196,44 @@ class SearchService {
         normalized.title = item.name || item.title;
         normalized.name = item.name || item.title;
 
+        Object.assign(normalized, this.extractCommonFields(item, platform, type));
         if (type === 'track') {
-          normalized.artist = item.artists?.[0]?.name || 'Unknown Artist';
-          normalized.album = item.album?.name;
-          normalized.thumbnail = item.album?.images?.[0]?.url || item.images?.[0]?.url;
           normalized.duration = item.duration_ms ? Math.floor(item.duration_ms / 1000) : undefined;
           normalized.url = item.external_urls?.spotify || item.uri;
           normalized.explicit = item.explicit ?? false;
           normalized.releaseDate = item.album?.release_date;
           normalized.popularity = item.popularity;
+          normalized.isrc = item.external_ids?.isrc;
+          normalized.discNumber = item.disc_number;
+          normalized.trackNumber = item.track_number;
+          normalized.previewUrl = item.preview_url ?? undefined;
         } else if (type === 'album') {
-          normalized.artist = item.artists?.[0]?.name || 'Unknown Artist';
-          normalized.thumbnail = item.images?.[0]?.url;
           normalized.trackCount = item.total_tracks;
           normalized.url = item.external_urls?.spotify || item.uri;
           normalized.explicit = item.explicit ?? false;
           normalized.releaseDate = item.release_date;
+          normalized.label = item.label;
+          normalized.copyright = item.copyrights?.[0]?.text;
+          normalized.popularity = item.popularity;
+          normalized.genres = item.genres;
+          normalized.upc = item.external_ids?.upc;
+          normalized.isCompilation = item.album_type === 'compilation';
         } else if (type === 'playlist') {
           normalized.owner = item.owner?.display_name || 'Unknown';
+          normalized.ownerId = item.owner?.id;
           normalized.thumbnail = item.images?.[0]?.url;
           normalized.trackCount = item.tracks?.total;
           normalized.url = item.external_urls?.spotify || item.uri;
+          normalized.description = item.description || undefined;
+          normalized.followerCount = item.followers?.total;
+          normalized.isPublic = item.public ?? undefined;
+          normalized.isCollaborative = item.collaborative ?? undefined;
         } else if (type === 'artist') {
           normalized.thumbnail = item.images?.[0]?.url;
           normalized.followerCount = item.followers?.total;
           normalized.genre = item.genres?.[0];
+          normalized.genres = item.genres;
+          normalized.popularity = item.popularity;
           normalized.url = item.external_urls?.spotify || item.uri;
         } else if (type === 'show' || type === 'podcast') {
           normalized.thumbnail = item.images?.[0]?.url;
@@ -205,9 +263,9 @@ class SearchService {
         const tidalTags: string[] =
           attr.mediaMetadata?.tags ?? item.mediaTags ?? item.mediaMetadata?.tags ?? [];
 
-        const tidalImg = (imgArr: any, uuidStr?: string): string | undefined => {
+        const tidalImg = (imgArr: unknown, uuidStr?: string): string | undefined => {
           if (Array.isArray(imgArr)) {
-            const best = imgArr.find((i: any) => i.width >= 640) ?? imgArr[imgArr.length - 1];
+            const best = imgArr.find((i: Raw) => i.width >= 640) ?? imgArr[imgArr.length - 1];
             return best?.href ?? undefined;
           }
           if (typeof uuidStr === 'string' && uuidStr)
@@ -215,34 +273,54 @@ class SearchService {
           return undefined;
         };
 
+        Object.assign(
+          normalized,
+          this.extractCommonFields(item, platform, type, { attr, tidalImg })
+        );
         if (type === 'track') {
-          normalized.artist = item.artists?.[0]?.name || item.artist?.name || 'Unknown Artist';
-          normalized.album = item.album?.title ?? attr.album?.title;
-          normalized.thumbnail = tidalImg(item.album?.imageCover, item.album?.cover);
           normalized.duration = attr.duration ?? item.duration;
           normalized.url = attr.url || item.url || `https://tidal.com/browse/track/${item.id}`;
           normalized.explicit = attr.explicit ?? item.explicit ?? false;
           normalized.mediaTag = tidalTags[0];
           normalized.hires = tidalTags.includes('HIRES_LOSSLESS');
-          normalized.releaseDate = attr.streamStartDate || item.streamStartDate || item.album?.releaseDate;
+          normalized.releaseDate =
+            attr.streamStartDate || item.streamStartDate || item.album?.releaseDate;
+          normalized.isrc = attr.isrc || item.isrc;
+          normalized.trackNumber = attr.trackNumber ?? item.trackNumber;
+          normalized.discNumber = attr.volumeNumber ?? item.volumeNumber;
+          normalized.copyright = attr.copyright ?? item.copyright;
+          normalized.popularity = attr.popularity ?? item.popularity;
         } else if (type === 'album') {
-          normalized.artist = item.artist?.name || item.artists?.[0]?.name || 'Unknown Artist';
-          normalized.thumbnail = tidalImg(attr.imageCover, item.cover);
           normalized.trackCount = attr.numberOfItems ?? attr.numberOfTracks ?? item.numberOfTracks;
           normalized.url = attr.url || item.url || `https://tidal.com/browse/album/${item.id}`;
           normalized.explicit = attr.explicit ?? item.explicit ?? false;
           normalized.mediaTag = tidalTags[0];
           normalized.hires = tidalTags.includes('HIRES_LOSSLESS');
           normalized.releaseDate = attr.releaseDate ?? item.releaseDate;
+          normalized.totalDuration = attr.duration ?? item.duration;
+          normalized.copyright = attr.copyright ?? item.copyright;
+          normalized.upc = attr.upc ?? item.upc;
+          normalized.discCount = attr.numberOfVolumes ?? item.numberOfVolumes;
+          normalized.popularity = attr.popularity ?? item.popularity;
         } else if (type === 'playlist') {
           normalized.owner = attr.creator?.name || item.creator?.name || 'Unknown';
+          normalized.ownerId = attr.creator?.id || item.creator?.id;
           normalized.thumbnail = tidalImg(attr.imageCover || attr.squareImage, item.image);
           normalized.trackCount = attr.numberOfItems ?? attr.numberOfTracks ?? item.numberOfTracks;
-          normalized.url = attr.url || item.url || `https://tidal.com/browse/playlist/${item.uuid || item.id}`;
+          normalized.url =
+            attr.url || item.url || `https://tidal.com/browse/playlist/${item.uuid || item.id}`;
           if (item.uuid) normalized.id = item.uuid;
+          normalized.description = attr.description || item.description || undefined;
+          normalized.totalDuration = attr.duration ?? item.duration;
+          normalized.followerCount =
+            attr.popularity ?? item.popularity ?? attr.numberOfFollowers ?? item.numberOfFollowers;
+          normalized.updatedAt = attr.lastUpdated ?? item.lastUpdated;
+          normalized.createdAt = attr.created ?? item.created;
+          normalized.isPublic = attr.publicPlaylist ?? item.publicPlaylist;
         } else if (type === 'artist') {
           normalized.thumbnail = tidalImg(attr.picture, item.picture);
           normalized.url = attr.url || item.url || `https://tidal.com/browse/artist/${item.id}`;
+          normalized.popularity = attr.popularity ?? item.popularity;
         } else if (type === 'video') {
           normalized.artist = item.artists?.[0]?.name || attr.artist?.name || 'Unknown Artist';
           normalized.thumbnail = tidalImg(attr.imageCover || attr.imageLinks, item.imageId);
@@ -259,23 +337,28 @@ class SearchService {
         normalized.name = item.title || item.name;
         const qGenre = typeof item.genre === 'string' ? item.genre : item.genre?.name;
 
+        Object.assign(normalized, this.extractCommonFields(item, platform, type));
         if (type === 'track') {
-          normalized.artist = item.performer?.name || item.artist?.name || 'Unknown Artist';
-          normalized.album = item.album?.title;
-          normalized.thumbnail = item.album?.image?.large || item.image?.large;
           normalized.duration = item.duration;
           normalized.url = `https://play.qobuz.com/track/${item.id}`;
           normalized.explicit = item.parental_warning ?? false;
           normalized.hires = item.hires_streamable ?? item.album?.hires_streamable ?? false;
           normalized.bitDepth = item.maximum_bit_depth || item.album?.maximum_bit_depth;
           normalized.sampleRate = item.maximum_sampling_rate || item.album?.maximum_sampling_rate;
-          normalized.genre = qGenre || (typeof item.album?.genre === 'string' ? item.album.genre : item.album?.genre?.name);
+          normalized.genre =
+            qGenre ||
+            (typeof item.album?.genre === 'string' ? item.album.genre : item.album?.genre?.name);
           normalized.releaseDate = item.album?.released_at
             ? new Date(item.album.released_at * 1000).toISOString().slice(0, 10)
             : undefined;
+          normalized.isrc = item.isrc;
+          normalized.trackNumber = item.track_number;
+          normalized.discNumber = item.media_number;
+          normalized.copyright = item.copyright ?? item.album?.copyright;
+          normalized.label =
+            item.album?.label?.name ||
+            (typeof item.album?.label === 'string' ? item.album.label : undefined);
         } else if (type === 'album') {
-          normalized.artist = item.artist?.name || 'Unknown Artist';
-          normalized.thumbnail = item.image?.large;
           normalized.trackCount = item.tracks_count;
           normalized.url = `https://play.qobuz.com/album/${item.id}`;
           normalized.explicit = item.parental_warning ?? false;
@@ -286,14 +369,35 @@ class SearchService {
           normalized.releaseDate = item.released_at
             ? new Date(item.released_at * 1000).toISOString().slice(0, 10)
             : item.release_date_original;
+          normalized.label =
+            item.label?.name || (typeof item.label === 'string' ? item.label : undefined);
+          normalized.copyright = item.copyright;
+          normalized.totalDuration = item.duration;
+          normalized.upc = item.upc;
+          normalized.discCount = item.media_count;
+          normalized.description = item.description || undefined;
+          normalized.genres = Array.isArray(item.genres_list) ? item.genres_list : undefined;
         } else if (type === 'playlist') {
           normalized.owner = item.owner?.name || 'Unknown';
+          normalized.ownerId = item.owner?.id;
           normalized.thumbnail = item.images?.[0] || item.image?.large;
           normalized.trackCount = item.tracks_count;
           normalized.url = `https://play.qobuz.com/playlist/${item.id}`;
+          normalized.description = item.description || undefined;
+          normalized.totalDuration = item.duration;
+          normalized.isPublic = item.is_public ?? undefined;
+          normalized.isCollaborative = item.is_collaborative ?? undefined;
+          normalized.createdAt = item.created_at
+            ? new Date(item.created_at * 1000).toISOString()
+            : undefined;
+          normalized.updatedAt = item.updated_at
+            ? new Date(item.updated_at * 1000).toISOString()
+            : undefined;
         } else if (type === 'artist') {
           normalized.thumbnail = item.image?.large;
           normalized.url = `https://play.qobuz.com/artist/${item.id}`;
+          normalized.biography =
+            typeof item.biography === 'string' ? item.biography : item.biography?.content;
         }
         break;
       }
@@ -303,32 +407,57 @@ class SearchService {
         normalized.name = item.title || item.name;
         const dzGenre = typeof item.genre === 'string' ? item.genre : item.genre?.name;
 
+        Object.assign(normalized, this.extractCommonFields(item, platform, type));
         if (type === 'track') {
-          normalized.artist = item.artist?.name || 'Unknown Artist';
-          normalized.album = item.album?.title;
-          normalized.thumbnail = item.album?.cover_xl || item.album?.cover_big || item.picture_xl || item.picture_big;
           normalized.duration = item.duration;
           normalized.url = item.link || `https://www.deezer.com/track/${item.id}`;
           normalized.explicit = item.explicit_lyrics === 1 || item.explicit_content_lyrics === 1;
           normalized.genre = dzGenre;
           normalized.rank = item.rank;
+          normalized.popularity = item.rank;
+          normalized.isrc = item.isrc;
+          normalized.trackNumber = item.track_position;
+          normalized.discNumber = item.disk_number;
+          normalized.previewUrl = item.preview;
+          normalized.releaseDate = item.release_date || item.album?.release_date;
         } else if (type === 'album') {
-          normalized.artist = item.artist?.name || 'Unknown Artist';
-          normalized.thumbnail = item.cover_xl || item.cover_big;
           normalized.trackCount = item.nb_tracks;
           normalized.url = item.link || `https://www.deezer.com/album/${item.id}`;
           normalized.explicit = item.explicit_lyrics === 1;
           normalized.releaseDate = item.release_date;
           normalized.genre = dzGenre;
+          normalized.label = item.label;
+          normalized.totalDuration = item.duration;
+          normalized.upc = item.upc;
+          normalized.popularity = item.fans ?? item.rank;
+          normalized.description = item.description || undefined;
+          normalized.genres = Array.isArray(item.genres?.data)
+            ? item.genres.data.map((g: Raw) => g.name).filter(Boolean)
+            : undefined;
         } else if (type === 'playlist') {
           normalized.owner = item.creator?.name || item.user?.name || 'Unknown';
+          normalized.ownerId =
+            (item.creator?.id ?? item.user?.id) != null
+              ? String(item.creator?.id ?? item.user?.id)
+              : undefined;
+          normalized.ownerThumbnail = item.creator?.picture_medium || item.user?.picture_medium;
           normalized.thumbnail = item.picture_xl || item.picture_big;
           normalized.trackCount = item.nb_tracks;
           normalized.url = item.link || `https://www.deezer.com/playlist/${item.id}`;
+          normalized.description = item.description || undefined;
+          normalized.totalDuration = item.duration;
+          normalized.followerCount = item.fans;
+          normalized.isPublic = item.public ?? undefined;
+          normalized.isCollaborative = item.collaborative ?? undefined;
+          normalized.createdAt = item.creation_date;
+          normalized.updatedAt = item.time_mod
+            ? new Date(item.time_mod * 1000).toISOString()
+            : undefined;
         } else if (type === 'artist') {
           normalized.thumbnail = item.picture_xl || item.picture_big;
           normalized.followerCount = item.nb_fan;
           normalized.url = item.link || `https://www.deezer.com/artist/${item.id}`;
+          normalized.popularity = item.nb_fan;
         } else if (type === 'podcast') {
           normalized.title = item.title || item.name;
           normalized.name = normalized.title;
@@ -349,25 +478,29 @@ class SearchService {
         normalized.title = item.trackName || item.collectionName || item.artistName || item.name;
         normalized.name = normalized.title;
 
+        Object.assign(normalized, this.extractCommonFields(item, platform, type));
         if (type === 'track') {
           normalized.id = String(item.trackId);
-          normalized.artist = item.artistName || 'Unknown Artist';
-          normalized.album = item.collectionName;
-          normalized.thumbnail = item.artworkUrl100?.replace('100x100', '640x640');
-          normalized.duration = item.trackTimeMillis ? Math.floor(item.trackTimeMillis / 1000) : undefined;
+          normalized.duration = item.trackTimeMillis
+            ? Math.floor(item.trackTimeMillis / 1000)
+            : undefined;
           normalized.url = item.trackViewUrl;
           normalized.explicit = item.trackExplicitness === 'explicit';
           normalized.genre = item.primaryGenreName;
           normalized.releaseDate = item.releaseDate;
+          normalized.trackNumber = item.trackNumber;
+          normalized.discNumber = item.discNumber;
+          normalized.previewUrl = item.previewUrl;
+          normalized.copyright = item.copyright;
         } else if (type === 'album') {
           normalized.id = String(item.collectionId);
-          normalized.artist = item.artistName || 'Unknown Artist';
-          normalized.thumbnail = item.artworkUrl100?.replace('100x100', '640x640');
           normalized.trackCount = item.trackCount;
           normalized.url = item.collectionViewUrl;
           normalized.explicit = item.collectionExplicitness === 'explicit';
           normalized.genre = item.primaryGenreName;
           normalized.releaseDate = item.releaseDate;
+          normalized.copyright = item.copyright;
+          normalized.discCount = item.discCount;
         } else if (type === 'artist') {
           normalized.id = String(item.artistId);
           normalized.thumbnail = item.artworkUrl100?.replace('100x100', '640x640');
@@ -377,7 +510,9 @@ class SearchService {
           normalized.id = String(item.trackId);
           normalized.artist = item.artistName || 'Unknown Artist';
           normalized.thumbnail = item.artworkUrl100?.replace('100x100', '640x640');
-          normalized.duration = item.trackTimeMillis ? Math.floor(item.trackTimeMillis / 1000) : undefined;
+          normalized.duration = item.trackTimeMillis
+            ? Math.floor(item.trackTimeMillis / 1000)
+            : undefined;
           normalized.url = item.trackViewUrl;
           normalized.releaseDate = item.releaseDate;
         }
@@ -391,15 +526,16 @@ class SearchService {
         normalized.duration = item.duration;
         break;
       case 'youtubemusic': {
-        normalized.title = item.title || item.channel || item.name;
-        normalized.name = normalized.title;
-        normalized.artist = item.artist || item.channel || item.uploader || 'Unknown';
-        normalized.thumbnail = item.thumbnail_url || item.thumbnail || item.thumbnails?.[0]?.url;
-        normalized.duration = item.duration_secs || item.duration;
-        normalized.explicit = item.isExplicit ?? item.explicit ?? false;
-        normalized.views = item.view_count;
-        const rt = item.result_type;
-        const browseId = item.browse_id || item.id;
+        normalized.title = item.title;
+        normalized.name = item.title;
+        normalized.artist = item.artist ?? undefined;
+        normalized.album = item.album ?? undefined;
+        normalized.thumbnail = item.thumbnailUrl;
+        normalized.duration = item.durationSecs;
+        normalized.artistId = item.artistId ?? undefined;
+        normalized.albumId = item.albumId ?? undefined;
+        const rt = item.resultType;
+        const browseId = item.browseId || item.id;
         if (rt === 'album') {
           normalized.url = `https://music.youtube.com/browse/${browseId}`;
         } else if (rt === 'playlist') {
@@ -410,95 +546,29 @@ class SearchService {
         } else if (rt === 'podcast') {
           normalized.url = `https://music.youtube.com/browse/${item.id}`;
         } else {
-          normalized.url = item.url || item.webpage_url || (item.id ? `https://youtube.com/watch?v=${item.id}` : undefined);
+          normalized.url = item.id ? `https://music.youtube.com/watch?v=${item.id}` : undefined;
         }
         break;
       }
     }
 
-    return normalized;
+    return normalized as unknown as SearchResult;
   }
 
-  private normalizeResults(results: any, platform: Platform, type: SearchType): any[] {
-    switch (platform) {
-      case 'spotify':
-        switch (type) {
-          case 'track':
-            return results.tracks?.items || [];
-          case 'album':
-            return results.albums?.items || [];
-          case 'artist':
-            return results.artists?.items || [];
-          case 'playlist':
-            return results.playlists?.items || [];
-          case 'show':
-          case 'podcast':
-            return results.shows?.items || [];
-          case 'episode':
-            return results.episodes?.items || [];
-          case 'audiobook':
-            return results.audiobooks?.items || [];
-          default:
-            return [];
-        }
+  private normalizeResults(results: unknown, platform: Platform, type: SearchType): Raw[] {
+    const spec = EXTRACT[platform]?.[type];
+    if (!spec) return Array.isArray(results) ? (results as Raw[]) : [];
 
-      case 'qobuz':
-        switch (type) {
-          case 'track':
-            return results.tracks?.items || [];
-          case 'album':
-            return results.albums?.items || [];
-          case 'artist':
-            return results.artists?.items || [];
-          case 'playlist':
-            return results.playlists?.items || [];
-          default:
-            return [];
-        }
-
-      case 'tidal':
-        switch (type) {
-          case 'track':
-            return results.tracks?.map((track: any) => track.resource) || [];
-          case 'album':
-            return results.albums?.map((album: any) => album.resource) || [];
-          case 'artist':
-            return results.artists?.map((artist: any) => artist.resource) || [];
-          case 'playlist':
-            return results.playlists?.map((playlist: any) => playlist.resource) || [];
-          case 'video':
-            return results.videos?.map((v: any) => v.resource) || [];
-          default:
-            return [];
-        }
-
-      case 'deezer':
-        return Array.isArray(results) ? results : (results.data || []);
-
-      case 'applemusic':
-        if (!Array.isArray(results)) return [];
-        switch (type) {
-          case 'track':
-            return results.filter((item: any) => item.wrapperType === 'track' && item.kind === 'song');
-          case 'album':
-            return results.filter((item: any) => item.wrapperType === 'collection' && item.collectionType === 'Album');
-          case 'artist':
-            return results.filter((item: any) => item.wrapperType === 'artist');
-          case 'playlist':
-            return results.filter((item: any) => item.wrapperType === 'collection' && item.collectionType === 'Compilation');
-          case 'musicvideo':
-            return results.filter((item: any) => item.wrapperType === 'track' && item.kind === 'music-video');
-          default:
-            return results;
-        }
-
-      case 'youtube':
-      case 'youtubemusic':
-        return Array.isArray(results) ? results : [];
-
-      default:
-        return Array.isArray(results) ? results : [];
+    if ('filter' in spec) {
+      return Array.isArray(results) ? (results as Raw[]).filter(spec.filter) : [];
     }
+
+    const bucket = (results as Raw | undefined)?.[spec.key] as
+      { items?: Raw[] } | Raw[] | undefined;
+    if (spec.unwrap) {
+      return Array.isArray(bucket) ? bucket.map((r) => r[spec.unwrap!] as Raw) : [];
+    }
+    return (bucket as { items?: Raw[] } | undefined)?.items ?? [];
   }
 }
 

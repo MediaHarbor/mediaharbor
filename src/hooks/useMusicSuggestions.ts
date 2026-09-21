@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { tauriAPI } from '@/tauri-bridge';
 
 interface ITunesResult {
   wrapperType?: string;
@@ -14,7 +15,16 @@ interface Suggestion {
   type: SuggestionType;
 }
 
-export function useMusicSuggestions(query: string) {
+const NATIVE_SUGGEST_PLATFORMS = new Set([
+  'youtubemusic',
+  'ytmusic',
+  'deezer',
+  'spotify',
+  'tidal',
+  'qobuz',
+]);
+
+export function useMusicSuggestions(query: string, platform?: string) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -29,6 +39,16 @@ export function useMusicSuggestions(query: string) {
     const timer = setTimeout(async () => {
       abortRef.current?.abort();
       abortRef.current = new AbortController();
+
+      if (platform && NATIVE_SUGGEST_PLATFORMS.has(platform)) {
+        try {
+          const texts = await tauriAPI.search?.suggestions?.(platform, trimmed);
+          if (texts && texts.length) {
+            setSuggestions(texts.slice(0, 7).map((text) => ({ text, type: 'track' as const })));
+            return;
+          }
+        } catch {}
+      }
 
       try {
         const url =
@@ -70,11 +90,7 @@ export function useMusicSuggestions(query: string) {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [query]);
-
-  useEffect(() => {
-    if (!query.trim()) setSuggestions([]);
-  }, [query]);
+  }, [query, platform]);
 
   return suggestions;
 }
