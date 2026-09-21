@@ -1,29 +1,18 @@
-import { defineConfig } from 'vite';
+import { defineConfig, configDefaults } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import path from 'path';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-      '@components': path.resolve(__dirname, './src/components'),
-      '@features': path.resolve(__dirname, './src/features'),
-      '@pages': path.resolve(__dirname, './src/pages'),
-      '@services': path.resolve(__dirname, './src/services'),
-      '@stores': path.resolve(__dirname, './src/stores'),
-      '@hooks': path.resolve(__dirname, './src/hooks'),
-      '@types': path.resolve(__dirname, './src/types'),
-      '@utils': path.resolve(__dirname, './src/utils'),
-    },
+    tsconfigPaths: true,
   },
   base: './',
   build: {
     outDir: 'dist-react',
     emptyOutDir: true,
     chunkSizeWarningLimit: 600,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         manualChunks(id) {
           if (id.includes('node_modules/framer-motion') || id.includes('node_modules/@radix-ui')) {
@@ -51,7 +40,36 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     host: 'localhost',
+    watch: {
+      ignored: [
+        '**/.flatpak/**',
+        '**/target/**',
+        '**/dist-react/**',
+        '**/_build/**',
+        '**/gamdl/**',
+        '**/votify/**',
+        '**/src-tauri/target/**',
+      ],
+      followSymlinks: false,
+    },
+    fs: {
+      strict: false,
+    },
   },
   clearScreen: false,
   envPrefix: ['VITE_', 'TAURI_'],
+  test: {
+    include: ['src/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
+    exclude: [
+      ...configDefaults.exclude,
+      '**/.flatpak/**',
+      '**/target/**',
+      '**/dist-react/**',
+      '**/_build/**',
+      '**/gamdl/**',
+      '**/votify/**',
+      '**/src-tauri/target/**',
+    ],
+    passWithNoTests: true,
+  },
 });
