@@ -11,12 +11,22 @@ depends=(
   'gtk3'
   'libappindicator-gtk3'
   'glib2'
+  'alsa-lib'
+  'libpipewire'
+  'ffmpeg'
+  'yt-dlp'
+  'python'
+)
+
+optdepends=(
+  'python-pipx: install gamdl/votify (pipx install gamdl; pipx install "votify[librespot]")'
 )
 
 makedepends=(
   'rust'
   'nodejs'
   'npm'
+  'clang'
 )
 
 options=('!lto')
@@ -42,8 +52,9 @@ package() {
   install -Dm755 target/release/mediaharbor \
     "${pkgdir}/usr/bin/mediaharbor"
 
+  # Capitalised like the Tauri bundles: PipeWire resolves the app id as a desktop-entry id.
   install -Dm644 /dev/stdin \
-    "${pkgdir}/usr/share/applications/mediaharbor.desktop" << 'EOF'
+    "${pkgdir}/usr/share/applications/MediaHarbor.desktop" << 'EOF'
 [Desktop Entry]
 Name=MediaHarbor
 Exec=mediaharbor
