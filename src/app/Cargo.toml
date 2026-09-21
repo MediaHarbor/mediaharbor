@@ -1,6 +1,6 @@
 [package]
 name = "mediaharbor"
-version = "2.0.4"
+version.workspace = true
 edition = "2021"
 description = "MediaHarbor desktop application"
 default-run = "mediaharbor"
@@ -8,6 +8,10 @@ default-run = "mediaharbor"
 [[bin]]
 name = "mediaharbor"
 path = "src/main.rs"
+
+[features]
+# Keeps the console attached in release builds; never enabled for shipped bundles.
+console = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -19,7 +23,34 @@ tauri = { version = "2", features = ["protocol-asset", "custom-protocol"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-updater = "2"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
+souvlaki = "0.8.3"
+raw-window-handle = "0.6"
+
+# macOS Now Playing, published directly (see `media_controls::now_playing`).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSData",
+    "NSDictionary",
+    "NSGeometry",
+    "NSObject",
+    "NSString",
+    "NSValue",
+    "objc2-core-foundation",
+] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage"] }
+objc2-media-player = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-app-kit",
+    "objc2-core-foundation",
+    "MPMediaItem",
+    "MPNowPlayingInfoCenter",
+] }

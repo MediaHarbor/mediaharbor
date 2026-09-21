@@ -1,5 +1,8 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
+#![recursion_limit = "512"]
+#![cfg_attr(
+    all(not(debug_assertions), not(feature = "console")),
+    windows_subsystem = "windows"
+)]
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use mediaharbor_core::{
@@ -9,6 +12,16 @@ use mediaharbor_core::{
 };
 
 struct TauriEmitter(AppHandle);
+
+macro_rules! emit_events {
+    ($($name:ident => $ty:ident, $topic:literal;)*) => {
+        $(
+            fn $name(&self, event: &ipc_contract::$ty) {
+                let _ = self.0.emit($topic, event);
+            }
+        )*
+    };
+}
 
 impl EventEmitter for TauriEmitter {
     fn emit_log(&self, entry: &ipc_contract::BackendLogEvent) {
@@ -32,23 +45,103 @@ impl EventEmitter for TauriEmitter {
     fn emit_stdin_prompt(&self, event: &ipc_contract::ProcessStdinPromptEvent) {
         let _ = self.0.emit("process-stdin-prompt", event);
     }
+    emit_events! {
+        emit_download_summary => DownloadSummaryEvent, "download-summary";
+    }
 }
 
-struct AppState(Arc<BackendState>);
+pub(crate) struct AppState(pub(crate) Arc<BackendState>);
 
-#[tauri::command]
-async fn get_settings(
-    state: State<'_, AppState>,
-) -> Result<ipc_contract::GetSettingsResponse, String> {
-    Ok(state.0.get_settings().await)
+/// Generates the `#[tauri::command]` shim for a `BackendState` method of the
+/// same name. `infallible` is for methods that return the response type
+/// directly instead of an `MhResult`.
+///
+/// The inner call is boxed because Tauri only boxes command futures in dev
+/// builds (`respond_async_serialized`, gated on `debug_assertions`); a release
+/// build hands the future to `async_runtime::spawn` by value, so its entire
+/// size lands on the IPC thread's stack. `play_media`'s future is ~650 KB,
+/// which overflows the 1 MB stack Windows reserves for the main thread and
+/// kills the process with no panic and no log line. Boxing keeps the frame
+/// pointer-sized.
+macro_rules! tauri_delegate {
+    ($name:ident, $req:ty, $ret:ty) => {
+        #[tauri::command]
+        async fn $name(state: State<'_, AppState>, req: $req) -> Result<$ret, String> {
+            Box::pin(state.0.$name(req))
+                .await
+                .map_err(|e| e.to_string())
+        }
+    };
+    ($name:ident, $ret:ty) => {
+        #[tauri::command]
+        async fn $name(state: State<'_, AppState>) -> Result<$ret, String> {
+            Box::pin(state.0.$name()).await.map_err(|e| e.to_string())
+        }
+    };
+    (infallible $name:ident, $req:ty, $ret:ty) => {
+        #[tauri::command]
+        async fn $name(state: State<'_, AppState>, req: $req) -> Result<$ret, String> {
+            Ok(Box::pin(state.0.$name(req)).await)
+        }
+    };
+    (infallible $name:ident, $ret:ty) => {
+        #[tauri::command]
+        async fn $name(state: State<'_, AppState>) -> Result<$ret, String> {
+            Ok(Box::pin(state.0.$name()).await)
+        }
+    };
 }
 
+/// One `tauri_delegate!` per line. `name(Req) -> Ret;` takes a request,
+/// `name -> Ret;` does not, and either may be prefixed with `infallible`.
+/// Matched one row at a time — a single repetition would make the optional
+/// leading `infallible` ambiguous against `$name:ident`.
+macro_rules! tauri_delegates {
+    () => {};
+    (infallible $name:ident($req:ty) -> $ret:ty; $($rest:tt)*) => {
+        tauri_delegate!(infallible $name, $req, $ret);
+        tauri_delegates!($($rest)*);
+    };
+    (infallible $name:ident -> $ret:ty; $($rest:tt)*) => {
+        tauri_delegate!(infallible $name, $ret);
+        tauri_delegates!($($rest)*);
+    };
+    ($name:ident($req:ty) -> $ret:ty; $($rest:tt)*) => {
+        tauri_delegate!($name, $req, $ret);
+        tauri_delegates!($($rest)*);
+    };
+    ($name:ident -> $ret:ty; $($rest:tt)*) => {
+        tauri_delegate!($name, $ret);
+        tauri_delegates!($($rest)*);
+    };
+}
+
+tauri_delegates! {
+    infallible get_settings -> ipc_contract::GetSettingsResponse;
+    infallible set_settings(ipc_contract::SetSettingsRequest) -> ipc_contract::SetSettingsResponse;
+    play_media(ipc_contract::PlayMediaRequest) -> ipc_contract::PlayMediaResponse;
+    spotify_oauth_login -> ipc_contract::SpotifyOAuthLoginResponse;
+    infallible spotify_oauth_logout -> ipc_contract::SpotifyOAuthLogoutResponse;
+    infallible spotify_oauth_status -> ipc_contract::SpotifyOAuthStatusResponse;
+    infallible spotify_get_token -> ipc_contract::SpotifyGetTokenResponse;
+    clear_spotify_credentials -> ();
+    infallible start_yt_music_download(ipc_contract::StartYtMusicDownloadRequest) -> ipc_contract::StartDownloadResponse;
+    infallible start_yt_video_download(ipc_contract::StartYtVideoDownloadRequest) -> ipc_contract::StartDownloadResponse;
+    infallible start_spotify_download(ipc_contract::StartSpotifyDownloadRequest) -> ipc_contract::StartDownloadResponse;
+    infallible start_apple_download(ipc_contract::StartAppleDownloadRequest) -> ipc_contract::StartDownloadResponse;
+    infallible start_qobuz_download(ipc_contract::StartQobuzDownloadRequest) -> ipc_contract::StartDownloadResponse;
+    infallible start_deezer_download(ipc_contract::StartDeezerDownloadRequest) -> ipc_contract::StartDownloadResponse;
+    infallible start_tidal_download(ipc_contract::StartTidalDownloadRequest) -> ipc_contract::StartDownloadResponse;
+
 #[tauri::command]
-async fn set_settings(
+async fn pause_media(
     state: State<'_, AppState>,
-    req: ipc_contract::SetSettingsRequest,
-) -> Result<ipc_contract::SetSettingsResponse, String> {
-    Ok(state.0.set_settings(req).await)
+) -> Result<ipc_contract::PauseMediaResponse, String> {
+    Ok(state.0.pause_media().await)
+}
+    infallible start_orpheus_download(ipc_contract::StartOrpheusDownloadRequest) -> ipc_contract::StartDownloadResponse;
+    infallible send_process_stdin(ipc_contract::SendProcessStdinRequest) -> ipc_contract::SendProcessStdinResponse;
+    get_lyrics(ipc_contract::GetLyricsRequest) -> ipc_contract::GetLyricsResponse;
 }
 
 #[tauri::command]
@@ -66,9 +159,7 @@ async fn dialog_open_folder(
 }
 
 #[tauri::command]
-async fn dialog_open_file(
-    app: AppHandle,
-) -> Result<ipc_contract::DialogOpenFileResponse, String> {
+async fn dialog_open_file(app: AppHandle) -> Result<ipc_contract::DialogOpenFileResponse, String> {
     use tauri_plugin_dialog::DialogExt;
     let app2 = app.clone();
     let path = tokio::task::spawn_blocking(move || app2.dialog().file().blocking_pick_file())
@@ -84,59 +175,42 @@ async fn perform_search(
     state: State<'_, AppState>,
     req: ipc_contract::PerformSearchRequest,
 ) -> Result<ipc_contract::PerformSearchResponse, String> {
-    let platform = req.platform.clone();
-    let results = state.0.perform_search(req).await.map_err(|e| e.to_string())?;
+    let platform = req.platform;
+    let results = state
+        .0
+        .perform_search(req)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(ipc_contract::PerformSearchResponse { results, platform })
 }
 
 #[tauri::command]
-async fn play_media(
+async fn search_suggestions(
     state: State<'_, AppState>,
-    req: ipc_contract::PlayMediaRequest,
-) -> Result<ipc_contract::PlayMediaResponse, String> {
-    state.0.play_media(req).await.map_err(|e| e.to_string())
+    req: ipc_contract::SearchSuggestionsRequest,
+) -> Result<Vec<String>, String> {
+    state
+        .0
+        .search_suggestions(req)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn pause_media(
+async fn cancel_download(
     state: State<'_, AppState>,
-) -> Result<ipc_contract::PauseMediaResponse, String> {
-    Ok(state.0.pause_media().await)
+    req: ipc_contract::CancelDownloadRequest,
+) -> Result<ipc_contract::CancelDownloadResponse, String> {
+    let success = state.0.cancel_download(req.download_id).await;
+    Ok(ipc_contract::CancelDownloadResponse { success })
 }
 
 #[tauri::command]
-async fn spotify_oauth_login(
+async fn show_item_in_folder(
     state: State<'_, AppState>,
-) -> Result<ipc_contract::SpotifyOAuthLoginResponse, String> {
-    state.0.spotify_oauth_login().await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn spotify_oauth_logout(
-    state: State<'_, AppState>,
-) -> Result<ipc_contract::SpotifyOAuthLogoutResponse, String> {
-    Ok(state.0.spotify_oauth_logout().await)
-}
-
-#[tauri::command]
-async fn spotify_oauth_status(
-    state: State<'_, AppState>,
-) -> Result<ipc_contract::SpotifyOAuthStatusResponse, String> {
-    Ok(state.0.spotify_oauth_status().await)
-}
-
-#[tauri::command]
-async fn spotify_get_token(
-    state: State<'_, AppState>,
-) -> Result<ipc_contract::SpotifyGetTokenResponse, String> {
-    Ok(state.0.spotify_get_token().await)
-}
-
-#[tauri::command]
-async fn clear_spotify_credentials(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    state.0.clear_spotify_credentials().await.map_err(|e| e.to_string())
+    req: ipc_contract::ShowItemInFolderRequest,
+) -> Result<ipc_contract::ShowItemInFolderResponse, String> {
+    Ok(state.0.show_item_in_folder(req))
 }
 
 #[tauri::command]
@@ -179,76 +253,48 @@ async fn get_playlist_details(
 }
 
 #[tauri::command]
-async fn start_yt_music_download(
-    state: State<'_, AppState>,
-    req: ipc_contract::StartYtMusicDownloadRequest,
-) -> Result<ipc_contract::StartDownloadResponse, String> {
-    Ok(state.0.start_yt_music_download(req).await)
+async fn resolve_share_link(
+    url: String,
+) -> Result<mediaharbor_core::services::common::share_links::ResolvedLink, String> {
+    mediaharbor_core::services::common::share_links::resolve_share_url(&url)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn start_yt_video_download(
+async fn clear_database(
     state: State<'_, AppState>,
-    req: ipc_contract::StartYtVideoDownloadRequest,
-) -> Result<ipc_contract::StartDownloadResponse, String> {
-    Ok(state.0.start_yt_video_download(req).await)
+) -> Result<ipc_contract::ClearDatabaseResponse, String> {
+    Ok(state.0.clear_database(false, false))
 }
 
 #[tauri::command]
-async fn start_spotify_download(
-    state: State<'_, AppState>,
-    req: ipc_contract::StartSpotifyDownloadRequest,
-) -> Result<ipc_contract::StartDownloadResponse, String> {
-    Ok(state.0.start_spotify_download(req).await)
+async fn read_orpheus_settings() -> Result<String, String> {
+    mediaharbor_core::orpheus::read_settings_json()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn start_apple_download(
-    state: State<'_, AppState>,
-    req: ipc_contract::StartAppleDownloadRequest,
-) -> Result<ipc_contract::StartDownloadResponse, String> {
-    Ok(state.0.start_apple_download(req).await)
+async fn write_orpheus_settings(content: String) -> Result<(), String> {
+    mediaharbor_core::orpheus::write_raw_settings_json(&content)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn start_qobuz_download(
-    state: State<'_, AppState>,
-    req: ipc_contract::StartQobuzDownloadRequest,
-) -> Result<ipc_contract::StartDownloadResponse, String> {
-    Ok(state.0.start_qobuz_download(req).await)
+async fn probe_apple_wrapper(
+    state: tauri::State<'_, AppState>,
+    req: ipc_contract::WrapperProbeRequest,
+) -> Result<ipc_contract::WrapperProbeResponse, String> {
+    Ok(state.0.probe_apple_wrapper(req).await)
 }
 
+#[allow(deprecated)]
 #[tauri::command]
-async fn start_deezer_download(
-    state: State<'_, AppState>,
-    req: ipc_contract::StartDeezerDownloadRequest,
-) -> Result<ipc_contract::StartDownloadResponse, String> {
-    Ok(state.0.start_deezer_download(req).await)
-}
-
-#[tauri::command]
-async fn start_tidal_download(
-    state: State<'_, AppState>,
-    req: ipc_contract::StartTidalDownloadRequest,
-) -> Result<ipc_contract::StartDownloadResponse, String> {
-    Ok(state.0.start_tidal_download(req).await)
-}
-
-#[tauri::command]
-async fn cancel_download(
-    state: State<'_, AppState>,
-    req: ipc_contract::CancelDownloadRequest,
-) -> Result<ipc_contract::CancelDownloadResponse, String> {
-    let success = state.0.cancel_download(req.download_id).await;
-    Ok(ipc_contract::CancelDownloadResponse { success })
-}
-
-#[tauri::command]
-async fn show_item_in_folder(
-    state: State<'_, AppState>,
-    req: ipc_contract::ShowItemInFolderRequest,
-) -> Result<ipc_contract::ShowItemInFolderResponse, String> {
-    Ok(state.0.show_item_in_folder(req))
+async fn open_external(app: AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_shell::ShellExt;
+    app.shell().open(&url, None).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -257,13 +303,6 @@ async fn scan_directory(
     req: ipc_contract::ScanDirectoryRequest,
 ) -> Result<serde_json::Value, String> {
     state.0.scan_directory(req).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn clear_database(
-    state: State<'_, AppState>,
-) -> Result<ipc_contract::ClearDatabaseResponse, String> {
-    Ok(state.0.clear_database(false, false))
 }
 
 #[tauri::command]
@@ -308,14 +347,6 @@ async fn get_dependency_versions(
 }
 
 #[tauri::command]
-async fn start_orpheus_download(
-    state: State<'_, AppState>,
-    req: ipc_contract::StartOrpheusDownloadRequest,
-) -> Result<ipc_contract::StartDownloadResponse, String> {
-    Ok(state.0.start_orpheus_download(req).await)
-}
-
-#[tauri::command]
 async fn check_orpheus_deps(
     state: State<'_, AppState>,
 ) -> Result<ipc_contract::CheckOrpheusDepsResponse, String> {
@@ -330,43 +361,16 @@ async fn install_orpheus_module(
     Ok(state.0.install_orpheus_module(req).await)
 }
 
-#[tauri::command]
-async fn read_orpheus_settings() -> Result<String, String> {
-    mediaharbor_core::orpheus::read_settings_json().await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn write_orpheus_settings(content: String) -> Result<(), String> {
-    mediaharbor_core::orpheus::write_raw_settings_json(&content).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn send_process_stdin(
-    state: State<'_, AppState>,
-    req: ipc_contract::SendProcessStdinRequest,
-) -> Result<ipc_contract::SendProcessStdinResponse, String> {
-    Ok(state.0.send_process_stdin(req).await)
-}
-
-#[allow(deprecated)]
-#[tauri::command]
-async fn open_external(
-    app: AppHandle,
-    url: String,
-) -> Result<(), String> {
-    use tauri_plugin_shell::ShellExt;
-    app.shell().open(&url, None).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn get_lyrics(
-    state: State<'_, AppState>,
-    req: ipc_contract::GetLyricsRequest,
-) -> Result<ipc_contract::GetLyricsResponse, String> {
-    state.0.get_lyrics(req).await.map_err(|e| e.to_string())
-}
-
 fn main() {
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime");
+    tauri::async_runtime::set(rt.handle().clone());
+    let _rt = rt;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -375,13 +379,17 @@ fn main() {
             let app_handle = app.handle().clone();
             let emitter: Arc<dyn EventEmitter> = Arc::new(TauriEmitter(app_handle));
 
-            let user_data = app.path().app_data_dir()
+            let user_data = app
+                .path()
+                .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("mediaharbor"));
 
             let state = tauri::async_runtime::block_on(async {
-                BackendState::init(user_data, emitter).await
+                BackendState::init(user_data, emitter)
+                    .await
                     .expect("Failed to initialize MediaHarbor backend")
             });
+
 
             app.manage(AppState(Arc::new(state)));
             Ok(())
@@ -392,6 +400,7 @@ fn main() {
             dialog_open_folder,
             dialog_open_file,
             perform_search,
+            search_suggestions,
             play_media,
             pause_media,
             spotify_oauth_login,
@@ -414,6 +423,7 @@ fn main() {
             cancel_download,
             show_item_in_folder,
             scan_directory,
+            resolve_share_link,
             clear_database,
             get_version,
             check_updates,
@@ -426,6 +436,7 @@ fn main() {
             read_orpheus_settings,
             write_orpheus_settings,
             send_process_stdin,
+            probe_apple_wrapper,
             open_external,
             get_lyrics,
         ])

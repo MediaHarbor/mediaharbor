@@ -1,8 +1,7 @@
-
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { Settings } from '@/types/settings';
-import type { SearchResult } from '@/types';
+import type { MediaKind, SearchResult, SearchType } from '@/types';
 
 interface DownloadInfoPayload {
   order: number;
@@ -22,6 +21,12 @@ interface DownloadProgressPayload {
   thumbnail?: string | null;
   artist?: string;
   album?: string;
+  speed?: string | null;
+  eta?: string | null;
+  itemIndex?: number | null;
+  itemTotal?: number | null;
+  currentTrack?: string | null;
+  quality?: string | null;
 }
 
 interface DownloadCompletePayload {
@@ -37,6 +42,34 @@ interface DownloadErrorPayload {
   error: string;
   fullLog: string;
   title?: string;
+}
+
+interface DownloadFailure {
+  id: string;
+  label: string;
+  reason: string;
+}
+
+interface DownloadSummaryPayload {
+  download_id: number;
+  succeeded: number;
+  skipped: number;
+  failed: number;
+  total: number;
+  failures: DownloadFailure[];
+  dest_dir: string | null;
+}
+
+export interface WrapperProbeResult {
+  reachable: boolean;
+  authenticated: boolean;
+  needsTwoFactor: boolean;
+  state: string;
+  playbackReady: boolean;
+  version: string;
+  runtime: string;
+  appleId: string | null;
+  error: string | null;
 }
 
 interface StreamReadyPayload {
@@ -88,11 +121,26 @@ interface DownloadData {
   album?: string | null;
   thumbnail?: string | null;
   platform?: string;
+  forceRedownload?: boolean;
 }
 
 interface SpotifyProfile {
   name?: string;
+  plan?: string;
+  email?: string;
+  id?: string;
   [key: string]: unknown;
+}
+
+export function isSpotifyFree(profile: SpotifyProfile | null | undefined): boolean {
+  const plan = profile?.plan?.toLowerCase();
+  return plan === 'free' || plan === 'open';
+}
+
+export interface ResolvedLink {
+  platform: string;
+  kind: SearchType;
+  id: string;
 }
 
 function makeHub<T>() {
@@ -108,61 +156,116 @@ function makeHub<T>() {
   };
 }
 
-const infoHub     = makeHub<DownloadInfoPayload>();
+const infoHub = makeHub<DownloadInfoPayload>();
 const progressHub = makeHub<DownloadProgressPayload>();
 const completeHub = makeHub<DownloadCompletePayload>();
-const errorHub    = makeHub<DownloadErrorPayload>();
+const errorHub = makeHub<DownloadErrorPayload>();
 
-listen<{
-  download_id: number;
-  title?: string;
-  artist?: string;
-  album?: string;
-  thumbnail?: string | null;
-  platform?: string;
-  quality?: string;
-}>('download-info', (event) => {
-  const { download_id, ...meta } = event.payload;
-  infoHub.emit({ order: download_id, ...meta });
-});
+const summaries = new Map<number, DownloadSummaryPayload>();
 
-listen<{
-  download_id: number;
-  percent: number;
-  speed: string | null;
-  eta: string | null;
-  status: string;
-  item_index: number | null;
-  item_total: number | null;
-}>('download-progress', (event) => {
-  const { download_id, percent, status } = event.payload;
-  const order = download_id;
+function registerDownloadEvents() {
+  listen<{
+    download_id: number;
+    title?: string;
+    artist?: string;
+    album?: string;
+    thumbnail?: string | null;
+    platform?: string;
+    quality?: string;
+  }>('download-info', (event) => {
+    const { download_id, ...meta } = event.payload;
+    infoHub.emit({ order: download_id, ...meta });
+  });
 
-  if (status === 'completed') {
-    completeHub.emit({ order });
-  } else if (status.startsWith('error:')) {
-    const msg = status.slice(6).trim();
-    errorHub.emit({ order, error: msg, fullLog: msg });
-  } else {
-    progressHub.emit({ order, progress: Math.round(percent) });
-  }
-});
+  listen<DownloadSummaryPayload>('download-summary', (event) => {
+    summaries.set(event.payload.download_id, event.payload);
+  });
 
-const streamReadyHub    = makeHub<StreamReadyPayload>();
+  listen<{
+    download_id: number;
+    percent: number;
+    speed: string | null;
+    eta: string | null;
+    status: string;
+    item_index: number | null;
+    item_total: number | null;
+    quality?: string | null;
+  }>('download-progress', (event) => {
+    const { download_id, percent, status } = event.payload;
+    const order = download_id;
+
+    if (status === 'completed') {
+      const summary = summaries.get(order);
+      summaries.delete(order);
+      completeHub.emit({
+        order,
+        location: summary?.dest_dir ?? undefined,
+        ...summaryWarnings(summary),
+      });
+    } else if (status.startsWith('error:')) {
+      summaries.delete(order);
+      const msg = status.slice(6).trim();
+      errorHub.emit({ order, error: msg, fullLog: msg });
+    } else {
+      const { speed, eta, item_index, item_total, quality } = event.payload;
+      const currentTrack = status && status !== 'downloading' ? status : null;
+      progressHub.emit({
+        order,
+        progress: Math.round(percent),
+        speed,
+        eta,
+        itemIndex: item_index,
+        itemTotal: item_total,
+        currentTrack,
+        quality,
+      });
+    }
+  });
+}
+
+function summaryWarnings(
+  summary: DownloadSummaryPayload | undefined
+): Pick<DownloadCompletePayload, 'warnings' | 'fullLog'> {
+  if (!summary || summary.failed === 0) return {};
+  const headline = `${summary.succeeded} of ${summary.total} tracks downloaded — ${summary.failed} failed`;
+  return {
+    warnings: headline,
+    fullLog: [headline, ...summary.failures.map((f) => `✗ ${f.label}: ${f.reason}`)].join('\n'),
+  };
+}
+
+const streamReadyHub = makeHub<StreamReadyPayload>();
 const installProgressHub = makeHub<InstallProgressPayload>();
 const scanProgressHub   = makeHub<ScanProgressPayload>();
 const filesChangedHub   = makeHub<FilesChangedPayload>();
-const appErrorHub       = makeHub<AppErrorPayload>();
-const backendLogHub     = makeHub<BackendLogPayload>();
-const stdinPromptHub    = makeHub<{ downloadId: number; promptLines: string[] }>();
+const appErrorHub = makeHub<AppErrorPayload>();
+const backendLogHub = makeHub<BackendLogPayload>();
+const stdinPromptHub = makeHub<{ downloadId: number; promptLines: string[] }>();
 
-listen<StreamReadyPayload>('stream-ready',        (e) => streamReadyHub.emit(e.payload));
-listen<InstallProgressPayload>('install-progress',    (e) => installProgressHub.emit(e.payload));
-listen<ScanProgressPayload>('scan-progress',       (e) => scanProgressHub.emit(e.payload));
-listen<FilesChangedPayload>('library-changed',     (e) => filesChangedHub.emit(e.payload));
-listen<AppErrorPayload>('app-error',           (e) => appErrorHub.emit(e.payload));
-listen<BackendLogPayload>('backend-log',         (e) => backendLogHub.emit(e.payload));
-listen<{ downloadId: number; promptLines: string[] }>('process-stdin-prompt',(e) => stdinPromptHub.emit(e.payload));
+function bindHub<T>(event: string, hub: { emit: (data: T) => void }) {
+  listen<T>(event, (e) => hub.emit(e.payload));
+}
+
+function registerAppEvents() {
+  bindHub<StreamReadyPayload>('stream-ready', streamReadyHub);
+  bindHub<InstallProgressPayload>('install-progress', installProgressHub);
+  bindHub<AppErrorPayload>('app-error', appErrorHub);
+  bindHub<BackendLogPayload>('backend-log', backendLogHub);
+  bindHub<{ downloadId: number; promptLines: string[] }>('process-stdin-prompt', stdinPromptHub);
+}
+
+let bridgeStarted = false;
+
+/// Subscribes the hubs above to their backend events. Called once from
+/// `main.tsx`, never at module scope: registering there made merely *importing*
+/// this file call `listen()`, which touches `window`, so every Node-side
+/// importer threw — the Vitest suite reaches it through `features/library/api.ts`.
+export function initTauriEventBridge(): void {
+  if (bridgeStarted) return;
+  bridgeStarted = true;
+  registerDownloadEvents();
+  registerAppEvents();
+}
 
 async function getOutputDir(): Promise<string> {
   try {
@@ -173,8 +276,51 @@ async function getOutputDir(): Promise<string> {
   }
 }
 
-const tauriAPI = {
+function subscribe<P>(event: string, cb: (payload: P) => void) {
+  const unlistenP = listen<P>(event, (e) => cb(e.payload));
+  return () => {
+    unlistenP.then((u) => u()).catch(() => {});
+  };
+}
 
+const intQuality = (data: DownloadData) =>
+  data.quality != null ? parseInt(String(data.quality), 10) : null;
+const strQuality = (data: DownloadData) => (data.quality != null ? String(data.quality) : null);
+
+/** `cmd(platform)` — the shape of every per-service read that needs no other args. */
+const byPlatform =
+  <Res>(cmd: string) =>
+  (platform: string) =>
+    invoke<Res>(cmd, { req: { platform } });
+
+/**
+ * `cmd(platform, id)` — the same, plus one id. `idKey` covers the commands whose
+ * Rust request names that field something other than `id`.
+ */
+const byPlatformId =
+  <Res>(cmd: string, idKey = 'id') =>
+  (platform: string, id: string) =>
+    invoke<Res>(cmd, { req: { platform, [idKey]: id } });
+
+const makeDownloadInvoker =
+  (cmd: string, build: (data: DownloadData) => Record<string, unknown>) =>
+  async (data: DownloadData) => {
+    const outputDir = data.outputDir || (await getOutputDir());
+    invoke(cmd, {
+      req: {
+        url: data.url,
+        outputDir,
+        title: data.title ?? null,
+        artist: data.artist ?? null,
+        album: data.album ?? null,
+        thumbnail: data.thumbnail ?? null,
+        forceRedownload: data.forceRedownload ?? false,
+        ...build(data),
+      },
+    }).catch(() => {});
+  };
+
+export const tauriAPI = {
   updates: {
     getVersion: async () => {
       const r = await invoke<{ version: string }>('get_version');
@@ -234,8 +380,20 @@ const tauriAPI = {
   },
 
   search: {
-    perform: async (params: { platform: string; query: string; type: string }) => {
-      return invoke<{ results: SearchResult[]; platform: string }>('perform_search', { req: params });
+    perform: async (params: {
+      platform: string;
+      query: string;
+      type: string;
+      offset?: number;
+      limit?: number;
+    }) => {
+      return invoke<{ results: SearchResult[]; platform: string }>('perform_search', {
+        req: params,
+      });
+    },
+    suggestions: byPlatformId<string[]>('search_suggestions', 'query'),
+    resolveShareLink: async (url: string) => {
+      return invoke<ResolvedLink>('resolve_share_link', { url });
     },
     getAlbumDetails: async (platform: string, albumId: string) => {
       try {
@@ -270,128 +428,47 @@ const tauriAPI = {
   },
 
   downloads: {
-    startYouTubeMusic: async (data: DownloadData) => {
-      const outputDir = data.outputDir || await getOutputDir();
-      invoke('start_yt_music_download', {
-        req: {
-          url: data.url, outputDir, quality: data.quality ?? null,
-          title: data.title ?? null,
-          artist: data.artist ?? data.uploader ?? null,
-          album: data.album ?? null,
-          thumbnail: data.thumbnail ?? null,
-          platform: 'youtubemusic',
-        },
-      }).catch(() => {});
-    },
-    startYouTubeVideo: async (data: DownloadData) => {
-      const outputDir = data.outputDir || await getOutputDir();
-      invoke('start_yt_video_download', {
-        req: {
-          url: data.url, outputDir, resolution: data.quality ?? null, format: null,
-          title: data.title ?? null,
-          artist: data.artist ?? data.uploader ?? null,
-          album: data.album ?? null,
-          thumbnail: data.thumbnail ?? null,
-          platform: 'youtube',
-        },
-      }).catch(() => {});
-    },
-    startGenericVideo: async (data: DownloadData) => {
-      const outputDir = data.outputDir || await getOutputDir();
-      invoke('start_yt_video_download', {
-        req: {
-          url: data.url, outputDir, resolution: data.quality ?? null, format: null,
-          title: data.title ?? null,
-          artist: data.artist ?? data.uploader ?? null,
-          album: data.album ?? null,
-          thumbnail: data.thumbnail ?? null,
-          platform: data.platform ?? 'youtube',
-        },
-      }).catch(() => {});
-    },
-    startSpotify: async (data: DownloadData) => {
-      const outputDir = data.outputDir || await getOutputDir();
-      invoke('start_spotify_download', {
-        req: {
-          url: data.url, outputDir,
-          quality: data.quality != null ? String(data.quality) : null,
-          title: data.title ?? null,
-          artist: data.artist ?? null,
-          album: data.album ?? null,
-          thumbnail: data.thumbnail ?? null,
-          platform: 'spotify',
-        },
-      }).catch(() => {});
-    },
-    startAppleMusic: async (data: DownloadData) => {
-      const outputDir = data.outputDir || await getOutputDir();
-      invoke('start_apple_download', {
-        req: {
-          url: data.url, outputDir,
-          quality: data.quality != null ? String(data.quality) : null,
-          title: data.title ?? null,
-          artist: data.artist ?? null,
-          album: data.album ?? null,
-          thumbnail: data.thumbnail ?? null,
-          platform: 'applemusic',
-        },
-      }).catch(() => {});
-    },
-    startQobuz: async (data: DownloadData) => {
-      const outputDir = data.outputDir || await getOutputDir();
-      const quality = data.quality != null ? parseInt(String(data.quality), 10) : null;
-      invoke('start_qobuz_download', {
-        req: {
-          url: data.url, outputDir, quality,
-          title: data.title ?? null,
-          artist: data.artist ?? null,
-          album: data.album ?? null,
-          thumbnail: data.thumbnail ?? null,
-          platform: 'qobuz',
-        },
-      }).catch(() => {});
-    },
-    startDeezer: async (data: DownloadData) => {
-      const outputDir = data.outputDir || await getOutputDir();
-      const quality = data.quality != null ? parseInt(String(data.quality), 10) : null;
-      invoke('start_deezer_download', {
-        req: {
-          url: data.url, outputDir, quality,
-          title: data.title ?? null,
-          artist: data.artist ?? null,
-          album: data.album ?? null,
-          thumbnail: data.thumbnail ?? null,
-          platform: 'deezer',
-        },
-      }).catch(() => {});
-    },
-    startTidal: async (data: DownloadData) => {
-      const outputDir = data.outputDir || await getOutputDir();
-      invoke('start_tidal_download', {
-        req: {
-          url: data.url, outputDir,
-          title: data.title ?? null,
-          artist: data.artist ?? null,
-          album: data.album ?? null,
-          thumbnail: data.thumbnail ?? null,
-          platform: 'tidal',
-        },
-      }).catch(() => {});
-    },
-    startOrpheus: async (data: DownloadData) => {
-      const outputDir = data.outputDir || await getOutputDir();
-      invoke('start_orpheus_download', {
-        req: {
-          url: data.url,
-          outputDir,
-          moduleId: data.platform,
-          title: data.title ?? null,
-          artist: data.artist ?? null,
-          album: data.album ?? null,
-          thumbnail: data.thumbnail ?? null,
-        },
-      }).catch(() => {});
-    },
+    startYouTubeMusic: makeDownloadInvoker('start_yt_music_download', (d) => ({
+      quality: d.quality ?? null,
+      artist: d.artist ?? d.uploader ?? null,
+      platform: 'youtubemusic',
+    })),
+    startYouTubeVideo: makeDownloadInvoker('start_yt_video_download', (d) => ({
+      resolution: d.quality ?? null,
+      format: null,
+      artist: d.artist ?? d.uploader ?? null,
+      platform: 'youtube',
+    })),
+    startGenericVideo: makeDownloadInvoker('start_yt_video_download', (d) => ({
+      resolution: d.quality ?? null,
+      format: null,
+      isGeneric: true,
+      artist: d.artist ?? d.uploader ?? null,
+      platform: d.platform ?? 'generic',
+    })),
+    startSpotify: makeDownloadInvoker('start_spotify_download', (d) => ({
+      quality: strQuality(d),
+      platform: 'spotify',
+    })),
+    startAppleMusic: makeDownloadInvoker('start_apple_download', (d) => ({
+      quality: strQuality(d),
+      platform: 'applemusic',
+    })),
+    startQobuz: makeDownloadInvoker('start_qobuz_download', (d) => ({
+      quality: intQuality(d),
+      platform: 'qobuz',
+    })),
+    startDeezer: makeDownloadInvoker('start_deezer_download', (d) => ({
+      quality: intQuality(d),
+      platform: 'deezer',
+    })),
+    startTidal: makeDownloadInvoker('start_tidal_download', (d) => ({
+      quality: intQuality(d),
+      platform: 'tidal',
+    })),
+    startOrpheus: makeDownloadInvoker('start_orpheus_download', (d) => ({
+      moduleId: d.platform,
+    })),
     cancel: (order: number) => {
       invoke('cancel_download', { req: { downloadId: order } }).catch(() => {});
     },
@@ -402,9 +479,9 @@ const tauriAPI = {
       return r.success;
     },
     onProgress: progressHub.on.bind(progressHub),
-    onInfo:     infoHub.on.bind(infoHub),
+    onInfo: infoHub.on.bind(infoHub),
     onComplete: completeHub.on.bind(completeHub),
-    onError:    errorHub.on.bind(errorHub),
+    onError: errorHub.on.bind(errorHub),
   },
 
   settings: {
@@ -450,6 +527,7 @@ const tauriAPI = {
         duration_sec: number | null;
         media_type: string | null;
         is_live: boolean;
+        audio_stream_url: string | null;
       }>('play_media', { req: params });
       const result = {
         streamUrl: r.stream_url,
@@ -457,6 +535,7 @@ const tauriAPI = {
         durationSec: r.duration_sec ?? undefined,
         mediaType: (r.media_type ?? 'audio') as 'audio' | 'video',
         isLive: r.is_live ?? false,
+        audioStreamUrl: r.audio_stream_url ?? undefined,
       };
       streamReadyHub.emit(result);
       return result;
@@ -468,6 +547,7 @@ const tauriAPI = {
         duration_sec: number | null;
         media_type: string | null;
         is_live: boolean;
+        audio_stream_url: string | null;
       }>('play_media', { req: params });
       return {
         streamUrl: r.stream_url,
@@ -475,6 +555,7 @@ const tauriAPI = {
         durationSec: r.duration_sec ?? undefined,
         mediaType: (r.media_type ?? 'audio') as 'audio' | 'video',
         isLive: r.is_live ?? false,
+        audioStreamUrl: r.audio_stream_url ?? undefined,
       };
     },
     pause: async () => {
@@ -484,10 +565,15 @@ const tauriAPI = {
   },
 
   spotifyAccount: {
-    login: () => invoke('spotify_oauth_login'),
+    login: async () => {
+      const r = await invoke<{ profile: SpotifyProfile }>('spotify_oauth_login');
+      return r.profile;
+    },
     logout: () => invoke('spotify_oauth_logout'),
     getStatus: async () => {
-      const r = await invoke<{ logged_in: boolean; profile: SpotifyProfile | null }>('spotify_oauth_status');
+      const r = await invoke<{ logged_in: boolean; profile: SpotifyProfile | null }>(
+        'spotify_oauth_status'
+      );
       return { loggedIn: r.logged_in, profile: r.profile };
     },
     getToken: async () => {
@@ -523,12 +609,26 @@ const tauriAPI = {
   },
 
   app: {
-    onError:         appErrorHub.on.bind(appErrorHub),
-    onBackendLog:    backendLogHub.on.bind(backendLogHub),
-    onStdinPrompt:   stdinPromptHub.on.bind(stdinPromptHub),
+    /**
+     * Opens a URL in the system browser.
+     *
+     * `window.open` is inert inside the Tauri WebView — it is why every
+     * "open website" in the app silently did nothing — so this goes through the
+     * shell plugin instead.
+     */
+    openExternal: async (url: string) => {
+      await invoke('open_external', { url });
+    },
+    onError: appErrorHub.on.bind(appErrorHub),
+    onBackendLog: backendLogHub.on.bind(backendLogHub),
+    onStdinPrompt: stdinPromptHub.on.bind(stdinPromptHub),
     sendProcessStdin: async (downloadId: number, input: string) => {
       await invoke('send_process_stdin', { req: { downloadId, input } });
     },
+    probeAppleWrapper: (signIn: boolean, code?: string, signOut = false) =>
+      invoke<WrapperProbeResult>('probe_apple_wrapper', {
+        req: { signIn, signOut, code: code ?? null },
+      }),
   },
 
   orpheus: {
@@ -555,9 +655,20 @@ const tauriAPI = {
       artist: string;
       duration?: number;
     }) => {
-      return invoke<{ synced: string | null; plain: string | null; wordSynced: string | null }>('get_lyrics', { req });
+      return invoke<{ synced: string | null; plain: string | null; wordSynced: string | null }>(
+        'get_lyrics',
+        { req }
+      );
     },
   },
 };
+
+/// Whether the Tauri backend is actually reachable. `tauriAPI` always exists as
+/// an object, so calling into it is what fails outside the desktop shell — this
+/// is the only honest way to ask, and the reason the old `window.electron`
+/// truthiness checks never fired.
+export function isBackendAvailable(): boolean {
+  return isTauri();
+}
 
 (window as unknown as { electron: typeof tauriAPI }).electron = tauriAPI;

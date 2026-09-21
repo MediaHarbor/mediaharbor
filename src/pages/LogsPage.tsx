@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useLogStore, type LogEntry, type LogSource } from '@/stores/useLogStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,49 +8,66 @@ import { cn } from '@/utils/cn';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const LEVEL_CONFIG = {
-  info:    { icon: Info,           color: 'text-blue-500',   bg: 'bg-blue-500/10',  border: 'border-blue-500/30' },
-  warning: { icon: TriangleAlert,  color: 'text-yellow-500', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30' },
-  error:   { icon: CircleX,        color: 'text-destructive',bg: 'bg-destructive/10',border: 'border-destructive/30' },
+  info: { icon: Info, color: 'text-blue-500', bg: 'bg-blue-500/10', border: 'border-blue-500/30' },
+  warning: {
+    icon: TriangleAlert,
+    color: 'text-yellow-500',
+    bg: 'bg-yellow-500/10',
+    border: 'border-yellow-500/30',
+  },
+  error: {
+    icon: CircleX,
+    color: 'text-destructive',
+    bg: 'bg-destructive/10',
+    border: 'border-destructive/30',
+  },
 };
 
 const SOURCE_CONFIG: Record<LogSource, { label: string; color: string }> = {
   download: { label: 'Download', color: 'text-emerald-500' },
   playback: { label: 'Playback', color: 'text-purple-500' },
-  search:   { label: 'Search',   color: 'text-sky-500' },
+  search: { label: 'Search', color: 'text-sky-500' },
   settings: { label: 'Settings', color: 'text-orange-500' },
-  system:   { label: 'System',   color: 'text-slate-500' },
-  install:  { label: 'Install',  color: 'text-amber-500' },
-  app:          { label: 'App',          color: 'text-rose-500'   },
+  system: { label: 'System', color: 'text-slate-500' },
+  install: { label: 'Install', color: 'text-amber-500' },
+  app: { label: 'App', color: 'text-rose-500' },
   mediascanner: { label: 'Media Scanner', color: 'text-violet-500' },
-  filewatcher:  { label: 'File Watcher',  color: 'text-cyan-500'   },
-  qobuz:        { label: 'Qobuz',         color: 'text-indigo-500' },
-  deezer:       { label: 'Deezer',        color: 'text-pink-500'   },
-  tidal:        { label: 'Tidal',         color: 'text-sky-400'    },
-  gam:          { label: 'Streaming',     color: 'text-green-400'  },
+  filewatcher: { label: 'File Watcher', color: 'text-cyan-500' },
+  qobuz: { label: 'Qobuz', color: 'text-indigo-500' },
+  deezer: { label: 'Deezer', color: 'text-pink-500' },
+  tidal: { label: 'Tidal', color: 'text-sky-400' },
+  gam: { label: 'Streaming', color: 'text-green-400' },
 };
 
 const SOURCE_FILTERS: ('all' | LogSource)[] = [
-  'all', 'download', 'playback', 'search', 'install', 'settings', 'system', 'app',
-  'mediascanner', 'filewatcher', 'qobuz', 'deezer', 'tidal', 'gam',
+  'all',
+  'download',
+  'playback',
+  'search',
+  'install',
+  'settings',
+  'system',
+  'app',
+  'mediascanner',
+  'filewatcher',
+  'qobuz',
+  'deezer',
+  'tidal',
+  'gam',
 ];
 
 function LogEntryCard({ entry, isHighlighted }: { entry: LogEntry; isHighlighted: boolean }) {
   const [expanded, setExpanded] = useState(isHighlighted);
-  const ref = useRef<HTMLDivElement>(null);
   const cfg = LEVEL_CONFIG[entry.level];
   const srcCfg = SOURCE_CONFIG[entry.source] || SOURCE_CONFIG.app;
   const Icon = cfg.icon;
 
   useEffect(() => {
-    if (isHighlighted) {
-      setExpanded(true);
-      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+    if (isHighlighted) setExpanded(true);
   }, [isHighlighted]);
 
   return (
     <div
-      ref={ref}
       className={cn(
         'rounded-lg border p-3 transition-all duration-500',
         cfg.border,
@@ -64,22 +82,33 @@ function LogEntryCard({ entry, isHighlighted }: { entry: LogEntry; isHighlighted
         <div className="flex-1 min-w-0">
           <span className="font-medium text-sm">{entry.title}</span>
           <span className="text-xs text-muted-foreground ml-2">
-            {entry.order !== undefined ? `#${entry.order} · ` : ''}{new Date(entry.timestamp).toLocaleTimeString()}
+            {entry.order !== undefined ? `#${entry.order} · ` : ''}
+            {new Date(entry.timestamp).toLocaleTimeString()}
           </span>
         </div>
-        <span className={cn(
-          'text-[10px] font-medium px-1.5 py-0.5 rounded-full',
-          'bg-muted', srcCfg.color
-        )}>
+        <span
+          className={cn(
+            'text-[10px] font-medium px-1.5 py-0.5 rounded-full',
+            'bg-muted',
+            srcCfg.color
+          )}
+        >
           {srcCfg.label}
         </span>
-        <span className={cn(
-          'text-xs font-medium uppercase px-2 py-0.5 rounded-full',
-          cfg.bg, cfg.color
-        )}>
+        <span
+          className={cn(
+            'text-xs font-medium uppercase px-2 py-0.5 rounded-full',
+            cfg.bg,
+            cfg.color
+          )}
+        >
           {entry.level}
         </span>
-        {expanded ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+        )}
       </button>
 
       <AnimatePresence>
@@ -106,6 +135,7 @@ export default function LogsPage() {
   const [filter, setFilter] = useState('');
   const [levelFilter, setLevelFilter] = useState<'all' | 'info' | 'warning' | 'error'>('all');
   const [sourceFilter, setSourceFilter] = useState<'all' | LogSource>('all');
+  const parentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (highlightId) {
@@ -114,12 +144,43 @@ export default function LogsPage() {
     }
   }, [highlightId, setHighlight]);
 
-  const filtered = entries.filter((e) => {
-    if (levelFilter !== 'all' && e.level !== levelFilter) return false;
-    if (sourceFilter !== 'all' && e.source !== sourceFilter) return false;
-    if (filter && !e.title.toLowerCase().includes(filter.toLowerCase()) && !e.fullLog.toLowerCase().includes(filter.toLowerCase())) return false;
-    return true;
+  const filtered = useMemo(
+    () =>
+      entries.filter((e) => {
+        if (levelFilter !== 'all' && e.level !== levelFilter) return false;
+        if (sourceFilter !== 'all' && e.source !== sourceFilter) return false;
+        if (
+          filter &&
+          !e.title.toLowerCase().includes(filter.toLowerCase()) &&
+          !e.fullLog.toLowerCase().includes(filter.toLowerCase())
+        )
+          return false;
+        return true;
+      }),
+    [entries, levelFilter, sourceFilter, filter]
+  );
+
+  const v = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 64,
+    overscan: 8,
   });
+  const virtualItems = v.getVirtualItems();
+
+  const scrolledHighlightRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!highlightId) {
+      scrolledHighlightRef.current = null;
+      return;
+    }
+    if (scrolledHighlightRef.current === highlightId) return;
+    const idx = filtered.findIndex((e) => e.id === highlightId);
+    if (idx >= 0) {
+      scrolledHighlightRef.current = highlightId;
+      v.scrollToIndex(idx, { align: 'center' });
+    }
+  }, [highlightId, filtered, v]);
 
   return (
     <div className="p-6 space-y-4 h-full flex flex-col">
@@ -164,19 +225,37 @@ export default function LogsPage() {
         ))}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
+      <div ref={parentRef} className="flex-1 min-h-0 overflow-y-auto">
         {filtered.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-            {entries.length === 0 ? 'No logs yet. Logs appear as you use the app.' : 'No logs match the filter.'}
+            {entries.length === 0
+              ? 'No logs yet. Logs appear as you use the app.'
+              : 'No logs match the filter.'}
           </div>
         ) : (
-          filtered.map((entry) => (
-            <LogEntryCard
-              key={entry.id}
-              entry={entry}
-              isHighlighted={entry.id === highlightId}
-            />
-          ))
+          <div style={{ height: v.getTotalSize(), position: 'relative' }}>
+            {virtualItems.map((vi) => {
+              const entry = filtered[vi.index];
+              if (!entry) return null;
+              return (
+                <div
+                  key={entry.id}
+                  ref={v.measureElement}
+                  data-index={vi.index}
+                  className="pb-2"
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${vi.start}px)`,
+                  }}
+                >
+                  <LogEntryCard entry={entry} isHighlighted={entry.id === highlightId} />
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>

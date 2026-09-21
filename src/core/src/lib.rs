@@ -1,36 +1,37 @@
-
-
 pub mod defaults;
-pub mod sandbox;
 pub mod errors;
-pub mod orpheus;
 pub mod http_client;
 pub mod ipc_contract;
 pub mod logger;
+pub mod orpheus;
+pub mod sandbox;
 pub mod settings;
 pub mod streaming_server;
 pub mod subprocess;
 pub mod update_checker;
 pub mod venv_manager;
 
-pub mod crypto;
-pub mod installers;
-pub mod streamrip;
-pub mod apis;
-pub mod meta;
-pub mod media;
 pub mod downloads;
+pub mod drm;
+pub mod installers;
+pub mod media;
+pub mod services;
 
 pub use defaults::Settings;
 pub use errors::{MhError, MhResult};
-pub use logger::{Logger, LogEmitter, NoopEmitter};
+pub use logger::{LogEmitter, Logger, NoopEmitter};
 
 use std::sync::Arc;
+
+use crate::services::common::lyrics::{embedded_lyrics, found_to_response, sidecar_lyrics};
 
 pub trait EventEmitter: Send + Sync {
     fn emit_log(&self, entry: &ipc_contract::BackendLogEvent);
     fn emit_download_info(&self, event: &ipc_contract::DownloadInfoEvent);
     fn emit_progress(&self, event: &ipc_contract::DownloadProgressEvent);
+    fn emit_download_summary(&self, event: &ipc_contract::DownloadSummaryEvent) {
+        let _ = event;
+    }
     fn emit_stream_ready(&self, event: &ipc_contract::StreamReadyEvent);
     fn emit_install_progress(&self, event: &ipc_contract::InstallationProgressEvent);
     fn emit_app_error(&self, event: &ipc_contract::AppErrorEvent);
@@ -61,14 +62,16 @@ pub struct BackendState {
     pub active_downloads: Arc<DashMap<u64, Arc<AtomicBool>>>,
     pub stdin_senders: Arc<DashMap<u64, tokio::sync::mpsc::Sender<String>>>,
     pub streaming_server: Option<streaming_server::StreamingServer>,
-    pub librespot: Arc<RwLock<apis::librespot_service::LibrespotService>>,
-    pub apple_music: Arc<RwLock<apis::apple_music_service::AppleMusicService>>,
+    pub librespot: Arc<RwLock<crate::services::spotify::session::LibrespotService>>,
+    pub license_limiter: std::sync::Arc<crate::services::spotify::rate_limit::LicenseRateLimiter>,
+    pub apple_music: Arc<RwLock<crate::services::apple_music::playback::AppleMusicService>>,
     pub credentials: apis::credentials::ApiCredentials,
     pub user_data: PathBuf,
     pub logger: Logger,
     pub emitter: Arc<dyn EventEmitter>,
-    pub yt_stream_cache: Arc<apis::yt_audio_stream::YtAudioStreamCache>,
-    pub qobuz_client_cache: Arc<RwLock<Option<streamrip::qobuz_client::QobuzClient>>>,
+    pub yt_stream_cache: Arc<crate::services::youtube::stream::YtAudioStreamCache>,
+    pub qobuz_client_cache: Arc<RwLock<Option<crate::services::qobuz::client::QobuzClient>>>,
+    pub spotify_stream_memo: Arc<crate::services::spotify::session::SpotifyStreamMemo>,
 }
 
 impl BackendState {
@@ -82,17 +85,42 @@ impl BackendState {
         let log_emitter = Arc::new(LogEventBridge(emitter.clone()));
         let logger = Logger::new(&user_data, log_emitter);
 
-        let loaded = settings::load_settings(&user_data).await;
+        let (loaded, streaming_server) = tokio::join!(
+            settings::load_settings(&user_data),
+            streaming_server::StreamingServer::start(),
+        );
+
         logger.info("system", "Settings loaded");
 
-        let streaming_server = streaming_server::StreamingServer::start().await.ok();
+        let streaming_server = streaming_server.ok();
         if let Some(ref srv) = streaming_server {
             logger.info("system", &format!("Streaming server on port {}", srv.port));
         }
 
-        let mut librespot = apis::librespot_service::LibrespotService::new();
 
-        let apple_music = apis::apple_music_service::AppleMusicService::from_settings(&loaded);
+        let license_limiter =
+            std::sync::Arc::new(crate::services::spotify::rate_limit::LicenseRateLimiter::new());
+        {
+            let em = emitter.clone();
+            license_limiter.set_notifier(Box::new(move |ev| {
+                em.emit_log(&ipc_contract::BackendLogEvent::info(
+                    "spotify",
+                    "Spotify",
+                    format!(
+                        "Pacing to avoid Spotify rate limit (~{:.0}s)",
+                        ev.waiting_secs
+                    ),
+                ));
+            }));
+        }
+
+        let mut librespot = crate::services::spotify::session::LibrespotService::new();
+        librespot.set_license_limiter(license_limiter.clone());
+        librespot.set_emitter(emitter.clone());
+        librespot.set_key_cache_path(user_data.join("spotify_widevine_keys.json"));
+
+        let apple_music =
+            crate::services::apple_music::playback::AppleMusicService::from_settings(&loaded);
 
         let credentials = apis::credentials::bundled();
 
@@ -103,29 +131,45 @@ impl BackendState {
             let path = PathBuf::from(&loaded.spotify_cookies_path);
             let _ = librespot.login_from_cookies(&path).await;
         }
-
         let state = BackendState {
             settings: Arc::new(RwLock::new(loaded)),
             active_downloads: Arc::new(DashMap::new()),
             stdin_senders: Arc::new(DashMap::new()),
             streaming_server,
             librespot: Arc::new(RwLock::new(librespot)),
+            license_limiter: license_limiter.clone(),
             apple_music: Arc::new(RwLock::new(apple_music)),
             credentials,
             user_data,
-            logger,
+            logger: logger.clone(),
             emitter,
-            yt_stream_cache: Arc::new(apis::yt_audio_stream::YtAudioStreamCache::new()),
+            yt_stream_cache: Arc::new(crate::services::youtube::stream::YtAudioStreamCache::new()),
             qobuz_client_cache: Arc::new(RwLock::new(None)),
+            spotify_stream_memo: Arc::new(Default::default()),
         };
 
-        tokio::spawn(async {
-            if let Err(e) = venv_manager::ensure_venv(|_, _| {}).await {
-                eprintln!("[mediaharbor] venv init failed: {e}");
-            }
-        });
+        {
+            let em = state.emitter.clone();
+            tokio::spawn(async move {
+                if let Err(e) = venv_manager::ensure_venv(|_, _| {}).await {
+                    em.emit_log(&ipc_contract::BackendLogEvent::error(
+                        "mediaharbor",
+                        "MediaHarbor",
+                        format!("venv init failed: {e}"),
+                    ));
+                }
+            });
+        }
 
         Ok(state)
+    }
+
+    /// The local streaming server, or an error if it never came up. Every
+    /// `play_media` arm needs it, so the message lives in one place.
+    pub(crate) fn streaming_server(&self) -> MhResult<&streaming_server::StreamingServer> {
+        self.streaming_server
+            .as_ref()
+            .ok_or_else(|| MhError::Other("Streaming server not running".into()))
     }
 
     pub async fn shutdown(&mut self) {
@@ -135,14 +179,42 @@ impl BackendState {
         self.logger.info("system", "Backend shutdown complete");
     }
 
-    async fn cached_qobuz_client(&self, settings: &Settings) -> MhResult<streamrip::qobuz_client::QobuzClient> {
+    async fn cached_qobuz_client(
+        &self,
+        settings: &Settings,
+    ) -> MhResult<crate::services::qobuz::client::QobuzClient> {
         {
             let lock = self.qobuz_client_cache.read().await;
             if let Some(ref c) = *lock {
                 return Ok(c.clone());
             }
         }
-        let client = streamrip::qobuz_client::QobuzClient::authenticate(settings).await?;
+        let (outcome, trail) =
+            crate::services::qobuz::client::QobuzClient::authenticate_verbose(settings).await;
+        for step in &trail {
+            self.logger.info("qobuz", step);
+        }
+        let client = outcome?;
+
+        let needs_persist = settings.qobuz_app_id != client.app_id
+            || !settings
+                .qobuz_secrets
+                .split(',')
+                .any(|s| s.trim() == client.secret);
+        if needs_persist {
+            let mut new_settings = self.settings.read().await.clone();
+            new_settings.qobuz_app_id = client.app_id.clone();
+            new_settings.qobuz_secrets = client.secret.clone();
+            if let Err(e) = settings::save_settings(&new_settings, &self.user_data).await {
+                self.logger.warn(
+                    "qobuz",
+                    &format!("Failed to persist discovered Qobuz credentials: {}", e),
+                );
+            } else {
+                *self.settings.write().await = new_settings;
+            }
+        }
+
         *self.qobuz_client_cache.write().await = Some(client.clone());
         Ok(client)
     }
@@ -153,151 +225,30 @@ impl BackendState {
         &self,
         req: ipc_contract::PerformSearchRequest,
     ) -> MhResult<serde_json::Value> {
-        use ipc_contract::{SearchPlatform, SearchType};
-
-        let settings = self.settings.read().await.clone();
-
-        match req.platform {
-            SearchPlatform::Spotify => {
-                let mut librespot = self.librespot.write().await;
-                if librespot.is_logged_in()
-                    && !matches!(
-                        req.search_type,
-                        SearchType::Audiobook | SearchType::Episode
-                    )
-                {
-                    return librespot
-                        .search(&req.query, search_type_to_str(&req.search_type), 20)
-                        .await;
-                }
-                drop(librespot);
-                let client_id = if settings.spotify_client_id.is_empty() {
-                    self.credentials.spotify_client_id.clone()
-                } else {
-                    settings.spotify_client_id.clone()
-                };
-                let client_secret = if settings.spotify_client_secret.is_empty() {
-                    self.credentials.spotify_client_secret.clone()
-                } else {
-                    settings.spotify_client_secret.clone()
-                };
-                let client = apis::spotify_api::SpotifyApiClient::new(client_id, client_secret)?;
-                client
-                    .search(&req.query, map_spotify_type(&req.search_type), 20)
-                    .await
-            }
-
-            SearchPlatform::Tidal => {
-                let client_id = if settings.tidal_client_id.is_empty() {
-                    self.credentials.tidal_client_id.clone()
-                } else {
-                    settings.tidal_client_id.clone()
-                };
-                let client_secret = if settings.tidal_client_secret.is_empty() {
-                    self.credentials.tidal_client_secret.clone()
-                } else {
-                    settings.tidal_client_secret.clone()
-                };
-                let client = apis::tidal_api::TidalApiClient::new(client_id, client_secret)?;
-                if !settings.tidal_access_token.is_empty() {
-                    match client
-                        .search_v1(
-                            &req.query,
-                            map_tidal_type(&req.search_type),
-                            &settings.tidal_country_code,
-                            &settings.tidal_access_token,
-                        )
-                        .await
-                    {
-                        Ok(r) => Ok(r),
-                        Err(e) if e.to_string().contains("401") || e.to_string().contains("Unauthorized") => {
-                            if !settings.tidal_refresh_token.is_empty() {
-                                if let Ok(tidal_client) = self.authenticate_tidal(&settings).await {
-                                    if let Ok(r) = client
-                                        .search_v1(
-                                            &req.query,
-                                            map_tidal_type(&req.search_type),
-                                            &settings.tidal_country_code,
-                                            &tidal_client.access_token,
-                                        )
-                                        .await
-                                    {
-                                        return Ok(r);
-                                    }
-                                }
-                            }
-                            self.emitter.emit_app_error(&ipc_contract::AppErrorEvent {
-                                message: "Tidal session expired — please sign in again.".into(),
-                                context: Some("tidal_search".into()),
-                                needs_auth: Some("tidal".into()),
-                            });
-                            client
-                                .search_v2(&req.query, map_tidal_type(&req.search_type), &settings.tidal_country_code)
-                                .await
-                        }
-                        Err(e) => Err(e),
-                    }
-                } else {
-                    client
-                        .search_v2(&req.query, map_tidal_type(&req.search_type), &settings.tidal_country_code)
-                        .await
-                }
-            }
-
-            SearchPlatform::Deezer => {
-                let client = apis::deezer_api::DeezerApiClient::new()?;
-                client
-                    .search(&req.query, map_deezer_type(&req.search_type), 20)
-                    .await
-            }
-
-            SearchPlatform::Qobuz => {
-                let client = if settings.qobuz_app_id.is_empty() {
-                    apis::qobuz_api::QobuzApiClient::with_bundled_credentials()?
-                } else {
-                    apis::qobuz_api::QobuzApiClient::new(
-                        settings.qobuz_app_id.clone(),
-                        settings.qobuz_password_or_token.clone(),
-                        settings.qobuz_app_secret.clone(),
-                    )?
-                };
-                client
-                    .search(&req.query, search_type_to_str(&req.search_type), 20)
-                    .await
-            }
-
-            SearchPlatform::AppleMusic => {
-                let client = apis::apple_music_api::AppleMusicApiClient::new(None)?;
-                client
-                    .search(&req.query, map_apple_entity(&req.search_type), 20)
-                    .await
-            }
-
-            SearchPlatform::YoutubeMusic => {
-                let client = apis::ytmusic_search_api::YtMusicClient::init().await?;
-                let filter = map_ytmusic_filter(&req.search_type);
-                let results =
-                    apis::ytmusic_search_api::search(&client, &req.query, filter).await?;
-                Ok(serde_json::to_value(results)?)
-            }
-
-            SearchPlatform::Youtube => {
-                let yt_key = if settings.youtube_api_key.is_empty() {
-                    self.credentials.youtube_api_key.clone()
-                } else {
-                    settings.youtube_api_key.clone()
-                };
-                let client = apis::yt_search_api::YtSearchClient::new(yt_key)?;
-                match req.search_type {
-                    SearchType::Playlist => client.search_playlists(&req.query, 20).await,
-                    SearchType::Channel | SearchType::Artist => {
-                        client.search_channels(&req.query, 20).await
-                    }
-                    _ => client.search_videos(&req.query, 20).await,
-                }
-            }
-        }
+        let provider = crate::services::search_provider(req.platform)
+            .ok_or_else(|| MhError::Unsupported("unknown search platform".into()))?;
+        let ctx = crate::services::common::search::SearchContext::from_state(self);
+        provider.search(&req, &ctx).await
     }
+
+    pub async fn search_suggestions(
+        &self,
+        req: ipc_contract::SearchSuggestionsRequest,
+    ) -> MhResult<Vec<String>> {
+        let query = req.query.trim();
+        if query.len() < 2 {
+            return Ok(Vec::new());
+        }
+        let Some(provider) = crate::services::search_provider(req.platform) else {
+            return Ok(Vec::new());
+        };
+        let ctx = crate::services::common::search::SearchContext::from_state(self);
+        provider.suggestions(query, &ctx).await
+    }
+}
+
+pub(crate) fn is_progressive_only_apple(e: &MhError) -> bool {
+    e.to_string().contains("byterange")
 }
 
 impl BackendState {
@@ -308,420 +259,120 @@ impl BackendState {
         let settings = self.settings.read().await.clone();
         let platform = req.platform.as_str();
 
-        match platform {
-            "youtube" => {
-                use std::process::Stdio;
+        if let Some(target) =
+            crate::services::common::playback::PlaybackTarget::from_platform(platform)
+        {
+            return crate::services::playback_provider(target)
+                .play(&req, &settings, self)
+                .await;
+        }
 
-                let info = apis::yt_audio_stream::get_video_stream_info(&req.url, None).await?;
+        if req.url.is_empty() || req.url == "null" {
+            return Err(MhError::NotFound(format!(
+                "No stream found for {}",
+                platform
+            )));
+        }
 
-                let server = self
-                    .streaming_server
-                    .as_ref()
-                    .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
-                let id = uuid::Uuid::new_v4().to_string();
+        let path = std::path::Path::new(&req.url);
+        if path.is_absolute() && path.exists() {
+            let server = self.streaming_server()?;
 
-                if info.is_live {
-                    let hls_url = info.video.url.clone();
-                    let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, String>>(32);
-                    tokio::spawn(async move {
-                        use tokio::io::AsyncReadExt;
-                        let ffmpeg_bin = venv_manager::resolve_ffmpeg();
-                        let mut ffmpeg_cmd = tokio::process::Command::new(&ffmpeg_bin);
-                        ffmpeg_cmd
-                            .args([
-                                "-loglevel", "error",
-                                "-i", &hls_url,
-                                "-c", "copy",
-                                "-f", "mpegts",
-                                "pipe:1",
-                            ])
-                            .stdout(Stdio::piped())
-                            .stderr(Stdio::null());
-                        crate::subprocess::apply_no_window(&mut ffmpeg_cmd);
-                        let mut child = match ffmpeg_cmd.spawn() {
-                            Ok(c) => c,
-                            Err(e) => { let _ = tx.send(Err(format!("ffmpeg: {}", e))).await; return; }
-                        };
-                        if let Some(mut stdout) = child.stdout.take() {
-                            let mut buf = vec![0u8; 65_536];
-                            loop {
-                                match stdout.read(&mut buf).await {
-                                    Ok(0) => break,
-                                    Ok(n) => {
-                                        if tx.send(Ok(bytes::Bytes::copy_from_slice(&buf[..n]))).await.is_err() { break; }
-                                    }
-                                    Err(e) => { let _ = tx.send(Err(e.to_string())).await; break; }
-                                }
-                            }
-                        }
-                        let _ = child.wait().await;
-                    });
-                    let stream_url = server.register_stream_progressive(&id, rx, "video/mp2t");
-                    return Ok(ipc_contract::PlayMediaResponse {
-                        stream_url,
-                        platform: platform.to_string(),
-                        duration_sec: None,
-                        media_type: Some("video".to_string()),
-                        is_live: true,
-                    });
-                }
-
-                let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, String>>(16);
-
-                if info.video.url == info.audio.url {
-                    let url = info.video.url.clone();
-                    tokio::spawn(async move {
-                        use futures_util::StreamExt;
-                        let client = reqwest::Client::builder()
-                            .timeout(std::time::Duration::from_secs(300))
-                            .gzip(false)
-                            .build()
-                            .unwrap();
-                        match client
-                            .get(&url)
-                            .header("Referer", "https://www.youtube.com/")
-                            .header("Range", "bytes=0-")
-                            .send()
-                            .await
-                        {
-                            Ok(resp) => {
-                                let mut stream = resp.bytes_stream();
-                                while let Some(chunk) = stream.next().await {
-                                    match chunk {
-                                        Ok(b) => { if tx.send(Ok(b)).await.is_err() { break; } }
-                                        Err(e) => { let _ = tx.send(Err(e.to_string())).await; break; }
-                                    }
-                                }
-                            }
-                            Err(e) => { let _ = tx.send(Err(e.to_string())).await; }
-                        }
-                    });
-                } else {
-                    let video_url = info.video.url.clone();
-                    let audio_url = info.audio.url.clone();
-                    tokio::spawn(async move {
-                        use tokio::io::AsyncReadExt;
-                        let ffmpeg_bin = venv_manager::resolve_ffmpeg();
-                        let mut ffmpeg_cmd = tokio::process::Command::new(&ffmpeg_bin);
-                        ffmpeg_cmd
-                            .args([
-                                "-loglevel", "error",
-                                "-i", &video_url,
-                                "-i", &audio_url,
-                                "-c", "copy",
-                                "-f", "mp4",
-                                "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-                                "pipe:1",
-                            ])
-                            .stdout(Stdio::piped())
-                            .stderr(Stdio::null());
-                        crate::subprocess::apply_no_window(&mut ffmpeg_cmd);
-                        let mut child = match ffmpeg_cmd.spawn() {
-                            Ok(c) => c,
-                            Err(e) => {
-                                let _ = tx.send(Err(format!("ffmpeg not found: {}", e))).await;
-                                return;
-                            }
-                        };
-                        if let Some(mut stdout) = child.stdout.take() {
-                            let mut buf = vec![0u8; 65_536];
-                            loop {
-                                match stdout.read(&mut buf).await {
-                                    Ok(0) => break,
-                                    Ok(n) => {
-                                        if tx.send(Ok(bytes::Bytes::copy_from_slice(&buf[..n]))).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let _ = tx.send(Err(e.to_string())).await;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        let _ = child.wait().await;
-                    });
-                }
-
-                let stream_url = server.register_stream_progressive(&id, rx, "video/mp4");
-
-                Ok(ipc_contract::PlayMediaResponse {
-                    stream_url,
-                    platform: platform.to_string(),
-                    duration_sec: None,
-                    media_type: Some("video".to_string()),
-                    is_live: false,
-                })
-            }
-
-            "youtubeMusic" | "youtubemusic" => {
-                let stream_info =
-                    apis::yt_audio_stream::get_audio_stream_url(&req.url, &self.yt_stream_cache, None).await?;
-
-                let client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(300))
-                    .connect_timeout(std::time::Duration::from_secs(10))
-                    .redirect(reqwest::redirect::Policy::limited(10))
-                    .gzip(false)
-                    .build()
-                    .map_err(MhError::Network)?;
-                let resp = client
-                    .get(&stream_info.url)
-                    .header("Referer", "https://www.youtube.com/")
-                    .header("Origin", "https://www.youtube.com")
-                    .header("Range", "bytes=0-")
-                    .send()
-                    .await
-                    .map_err(MhError::Network)?;
-                if resp.status().as_u16() >= 400 {
-                    return Err(MhError::Network(resp.error_for_status().unwrap_err()));
-                }
-                let data = resp.bytes().await.map_err(MhError::Network)?;
-                let content_type = stream_info.mime_type.clone();
-
-                let server = self
-                    .streaming_server
-                    .as_ref()
-                    .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
-                let id = uuid::Uuid::new_v4().to_string();
-                let stream_url = server.register_stream(&id, data, &content_type);
-
-                Ok(ipc_contract::PlayMediaResponse {
-                    stream_url,
-                    platform: platform.to_string(),
-                    duration_sec: None,
-                    media_type: Some("audio".to_string()),
-                    is_live: false,
-                })
-            }
-
-            "spotify" => {
-                let mut librespot = self.librespot.write().await;
-                if !librespot.is_logged_in() {
-                    return Err(MhError::Auth(
-                        "Spotify streaming requires login. Configure cookies in Settings.".into(),
-                    ));
-                }
-                let track_id = extract_spotify_id(&req.url).unwrap_or_else(|| req.url.clone());
-                let venv_py = if venv_manager::is_venv_ready() {
-                    Some(venv_manager::get_venv_python())
-                } else {
-                    None
-                };
-                let (data, content_type) = librespot
-                    .get_track_stream(&track_id, venv_py.as_deref())
-                    .await?;
-                drop(librespot);
-
-                let server = self
-                    .streaming_server
-                    .as_ref()
-                    .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
-                let id = uuid::Uuid::new_v4().to_string();
-                let stream_url = server.register_stream(&id, data, &content_type);
-
-                Ok(ipc_contract::PlayMediaResponse {
-                    stream_url,
-                    platform: "spotify".to_string(),
-                    duration_sec: None,
-                    media_type: Some("audio".to_string()),
-                    is_live: false,
-                })
-            }
-
-            "tidal" => {
-                let client = self.authenticate_tidal(&settings).await?;
-                let track_id = extract_tidal_track_id(&req.url)
-                    .ok_or_else(|| MhError::Parse("Could not extract Tidal track ID".into()))?;
-
-                let server = self
-                    .streaming_server
-                    .as_ref()
-                    .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
-                let id = uuid::Uuid::new_v4().to_string();
-
-                let (tx, rx) = tokio::sync::mpsc::channel(32);
-                let mime = client.fetch_audio_progressive(&track_id, tx).await?;
-                let stream_url = server.register_stream_progressive(&id, rx, mime);
-
-                Ok(ipc_contract::PlayMediaResponse {
-                    stream_url,
-                    platform: "tidal".to_string(),
-                    duration_sec: None,
-                    media_type: Some("audio".to_string()),
-                    is_live: false,
-                })
-            }
-
-            "deezer" => {
-                if settings.deezer_arl.is_empty() {
-                    return Err(MhError::Auth(
-                        "Deezer ARL not configured. Add it in Settings → Deezer → ARL Token.".into(),
-                    ));
-                }
-                let client =
-                    streamrip::deezer_client::DeezerClient::new(&settings.deezer_arl)?;
-                client.authenticate().await?;
-                let track_id = streamrip::orchestrator::extract_platform_id(
-                    &req.url,
-                    streamrip::orchestrator::Platform::Deezer,
-                    streamrip::orchestrator::ContentType::Track,
-                ).ok_or_else(|| MhError::Parse("Could not extract Deezer track ID".into()))?;
-                let (url_str, ext, filesize) = client.get_stream_url(&track_id, 3).await?;
-                let mime_type: &'static str = if ext == "flac" { "audio/flac" } else { "audio/mpeg" };
-
-                let server = self
-                    .streaming_server
-                    .as_ref()
-                    .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
-                let id = uuid::Uuid::new_v4().to_string();
-
-                let stream_url = server.register_stream_deezer(&id, url_str, track_id.clone(), filesize, mime_type);
-
-                Ok(ipc_contract::PlayMediaResponse {
-                    stream_url,
-                    platform: "deezer".to_string(),
-                    duration_sec: None,
-                    media_type: Some("audio".to_string()),
-                    is_live: false,
-                })
-            }
-
-            "qobuz" => {
-                let track_id = streamrip::orchestrator::extract_platform_id(
-                    &req.url,
-                    streamrip::orchestrator::Platform::Qobuz,
-                    streamrip::orchestrator::ContentType::Track,
-                ).ok_or_else(|| MhError::Parse("Could not extract Qobuz track ID".into()))?;
-
-                let mut client = self.cached_qobuz_client(&settings).await?;
-                let cdn_url = match client.get_file_url(&track_id, 27).await {
-                    Ok(u) => u,
-                    Err(MhError::Auth(_)) => {
-                        *self.qobuz_client_cache.write().await = None;
-                        client = streamrip::qobuz_client::QobuzClient::authenticate(&settings).await?;
-                        *self.qobuz_client_cache.write().await = Some(client.clone());
-                        client.get_file_url(&track_id, 27).await?
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let is_video = crate::media::file_discovery::VIDEO_FORMATS.contains(&ext.as_str());
+            let mime_type: &str = match ext.as_str() {
+                "mp3" => "audio/mpeg",
+                "flac" => "audio/flac",
+                "m4a" | "aac" => "audio/mp4",
+                "opus" => "audio/ogg",
+                "wav" => "audio/wav",
+                "ogg" => "audio/ogg",
+                "mp4" | "m4v" => "video/mp4",
+                "mkv" => "video/x-matroska",
+                "webm" => "video/webm",
+                "mov" => "video/quicktime",
+                "avi" => "video/x-msvideo",
+                "flv" => "video/x-flv",
+                _ => {
+                    if is_video {
+                        "video/mp4"
+                    } else {
+                        "audio/mpeg"
                     }
-                    Err(e) => return Err(e),
-                };
-                let auth_headers = client.api_headers()?;
-
-                let server = self
-                    .streaming_server
-                    .as_ref()
-                    .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
-                let id = uuid::Uuid::new_v4().to_string();
-                let stream_url = server.register_stream_proxied(&id, cdn_url, auth_headers, "audio/flac");
-
-                Ok(ipc_contract::PlayMediaResponse {
-                    stream_url,
-                    platform: "qobuz".to_string(),
-                    duration_sec: None,
-                    media_type: Some("audio".to_string()),
-                    is_live: false,
-                })
-            }
-
-            "applemusic" => {
-                let apple = self.apple_music.read().await;
-                if !apple.is_configured() {
-                    return Err(MhError::Auth(
-                        "Apple Music requires cookies. Configure in Settings → Apple.".into(),
-                    ));
                 }
-                let track = apple.get_track_stream(&req.url, None).await?;
-                drop(apple);
+            };
 
-                let server = self
-                    .streaming_server
-                    .as_ref()
-                    .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
-                let id = uuid::Uuid::new_v4().to_string();
-                let stream_url = server.register_stream(&id, track.data, &track.content_type);
+            let id = uuid::Uuid::new_v4().to_string();
+            let stream_url = server.register(
+                &id,
+                streaming_server::StreamContent::Local {
+                    path: path.to_path_buf(),
+                },
+                mime_type,
+            );
+            return Ok(ipc_contract::PlayMediaResponse::new(
+                stream_url,
+                "local",
+                if is_video { "video" } else { "audio" },
+                false,
+            ));
+        }
 
-                Ok(ipc_contract::PlayMediaResponse {
-                    stream_url,
-                    platform: "applemusic".to_string(),
-                    duration_sec: None,
-                    media_type: Some("audio".to_string()),
-                    is_live: false,
-                })
+        Ok(ipc_contract::PlayMediaResponse {
+            stream_url: req.url,
+            platform: platform.to_string(),
+            duration_sec: None,
+            media_type: None,
+            is_live: false,
+            audio_stream_url: None,
+        })
+    }
+}
+
+pub(crate) fn emit_terminal(
+    emitter: &Arc<dyn EventEmitter>,
+    download_id: u64,
+    result: &MhResult<()>,
+) {
+    if let Err(e) = result {
+        emitter.emit_progress(&ipc_contract::DownloadProgressEvent::error(download_id, e));
+    } else {
+        emitter.emit_progress(&ipc_contract::DownloadProgressEvent::completed(download_id));
+    }
+}
+
+/// Terminal event for a multi-track download. Always emits the per-item summary
+/// first so a partial run reaches the UI as a warning rather than a clean success.
+pub(crate) fn emit_batch_terminal(
+    emitter: &Arc<dyn EventEmitter>,
+    download_id: u64,
+    service: &str,
+    result: &MhResult<crate::services::common::download::BatchOutcome>,
+) {
+    match result {
+        Ok(outcome) => {
+            emitter.emit_download_summary(&outcome.to_event(download_id));
+            if !outcome.failures.is_empty() {
+                emitter.emit_log(&ipc_contract::BackendLogEvent::new(
+                    "warning",
+                    "download",
+                    service,
+                    outcome.failure_report(service),
+                ));
             }
-
-            _ => {
-                if req.url.is_empty() || req.url == "null" {
-                    return Err(MhError::NotFound(format!(
-                        "No stream found for {}",
-                        platform
-                    )));
-                }
-
-                let path = std::path::Path::new(&req.url);
-                if path.is_absolute() && path.exists() {
-                    let server = self.streaming_server.as_ref()
-                        .ok_or_else(|| MhError::Other("Streaming server not running".into()))?;
-
-                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                    let is_video = matches!(ext.as_str(), "mp4" | "mkv" | "avi" | "mov" | "webm" | "flv" | "m4v");
-                    let mime_type: &str = match ext.as_str() {
-                        "mp3"         => "audio/mpeg",
-                        "flac"        => "audio/flac",
-                        "m4a" | "aac" => "audio/mp4",
-                        "opus"        => "audio/ogg",
-                        "wav"         => "audio/wav",
-                        "ogg"         => "audio/ogg",
-                        "mp4" | "m4v" => "video/mp4",
-                        "mkv"         => "video/x-matroska",
-                        "webm"        => "video/webm",
-                        "mov"         => "video/quicktime",
-                        "avi"         => "video/x-msvideo",
-                        "flv"         => "video/x-flv",
-                        _             => if is_video { "video/mp4" } else { "audio/mpeg" },
-                    };
-
-                    let data = tokio::fs::read(path).await
-                        .map_err(|e| MhError::Other(format!("Failed to read local file: {}", e)))?;
-
-                    let id = uuid::Uuid::new_v4().to_string();
-                    let stream_url = server.register_stream(&id, bytes::Bytes::from(data), mime_type);
-                    return Ok(ipc_contract::PlayMediaResponse {
-                        stream_url,
-                        platform: "local".to_string(),
-                        duration_sec: None,
-                        media_type: Some(if is_video { "video" } else { "audio" }.to_string()),
-                        is_live: false,
-                    });
-                }
-
-                Ok(ipc_contract::PlayMediaResponse {
-                    stream_url: req.url,
-                    platform: platform.to_string(),
-                    duration_sec: None,
-                    media_type: None,
-                    is_live: false,
-                })
-            }
+            emit_terminal(emitter, download_id, &Ok(()));
+        }
+        Err(e) => {
+            emitter.emit_progress(&ipc_contract::DownloadProgressEvent::error(download_id, e))
         }
     }
 }
 
 impl BackendState {
-    fn emit_no_download_location(&self, download_id: u64) -> ipc_contract::StartDownloadResponse {
-        const MSG: &str = "No download location configured. Please select a download folder in Settings.";
-        self.emitter.emit_app_error(&ipc_contract::AppErrorEvent {
-            message: MSG.to_string(),
-            context: Some("download".to_string()),
-            needs_auth: None,
-        });
-        ipc_contract::StartDownloadResponse {
-            download_id,
-            success: false,
-            error: Some(MSG.to_string()),
-        }
-    }
-
     pub async fn start_orpheus_download(
         &self,
         req: ipc_contract::StartOrpheusDownloadRequest,
@@ -729,10 +380,12 @@ impl BackendState {
         let download_id = self.next_download_id();
         let settings = self.settings.read().await.clone();
         if settings.download_location.is_empty() {
-            return self.emit_no_download_location(download_id);
+            return crate::services::common::download::DownloadContext::from_state(self)
+                .emit_no_download_location(download_id);
         }
         let cancel_flag = Arc::new(AtomicBool::new(false));
-        self.active_downloads.insert(download_id, cancel_flag.clone());
+        self.active_downloads
+            .insert(download_id, cancel_flag.clone());
 
         let meta = ipc_contract::DownloadMetadata {
             title: req.title.clone(),
@@ -742,26 +395,50 @@ impl BackendState {
             platform: Some(req.module_id.clone()),
             quality: None,
         };
-        self.emitter.emit_download_info(&ipc_contract::DownloadInfoEvent { download_id, meta });
+        self.emitter
+            .emit_download_info(&ipc_contract::DownloadInfoEvent { download_id, meta });
 
         if !orpheus::is_orpheus_installed() {
             self.active_downloads.remove(&download_id);
-            self.emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                download_id, percent: 0.0, speed: None, eta: None,
-                status: "error: OrpheusDL is not installed. Go to Updates → OrpheusDL and install it.".into(),
-                item_index: None, item_total: None,
+            self.emitter
+                .emit_progress(&ipc_contract::DownloadProgressEvent {
+                download_id,
+                percent: 0.0,
+                speed: None,
+                eta: None,
+                status:
+                    "error: OrpheusDL is not installed. Go to Updates → OrpheusDL and install it."
+                        .into(),
+                item_index: None,
+                item_total: None,
+                quality: None,
             });
-            return ipc_contract::StartDownloadResponse { download_id, success: false, error: Some("OrpheusDL not installed".into()) };
+            return ipc_contract::StartDownloadResponse::failed(
+                download_id,
+                "OrpheusDL not installed",
+            );
         }
 
         if !orpheus::is_module_installed(&req.module_id) {
             self.active_downloads.remove(&download_id);
-            self.emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                download_id, percent: 0.0, speed: None, eta: None,
-                status: format!("error: OrpheusDL module '{}' is not installed. Go to Updates → Modules.", req.module_id),
-                item_index: None, item_total: None,
-            });
-            return ipc_contract::StartDownloadResponse { download_id, success: false, error: Some(format!("Module {} not installed", req.module_id)) };
+            self.emitter
+                .emit_progress(&ipc_contract::DownloadProgressEvent {
+                    download_id,
+                    percent: 0.0,
+                    speed: None,
+                    eta: None,
+                    status: format!(
+                        "error: OrpheusDL module '{}' is not installed. Go to Updates → Modules.",
+                        req.module_id
+                    ),
+                    item_index: None,
+                    item_total: None,
+                    quality: None,
+                });
+            return ipc_contract::StartDownloadResponse::failed(
+                download_id,
+                format!("Module {} not installed", req.module_id),
+            );
         }
 
         let emitter = self.emitter.clone();
@@ -775,17 +452,133 @@ impl BackendState {
         stdin_senders.insert(download_id, stdin_tx);
 
         tokio::spawn(async move {
-            let _ = orpheus::run_orpheus_download(&url, &output_dir, &module_id, download_id, &settings, cancel_flag, emitter, stdin_rx).await;
+            let _ = orpheus::run_orpheus_download(
+                &url,
+                &output_dir,
+                &module_id,
+                download_id,
+                &settings,
+                cancel_flag,
+                emitter,
+                stdin_rx,
+            )
+            .await;
             active.remove(&download_id);
             stdin_senders.remove(&download_id);
         });
 
-        ipc_contract::StartDownloadResponse { download_id, success: true, error: None }
+        ipc_contract::StartDownloadResponse::ok(download_id)
     }
 }
 
 impl BackendState {
-    pub async fn send_process_stdin(&self, req: ipc_contract::SendProcessStdinRequest) -> ipc_contract::SendProcessStdinResponse {
+    /// Probes a configured wrapper daemon, optionally signing in. Lets the settings
+    /// screen validate the daemon and credentials without starting a download.
+    pub async fn probe_apple_wrapper(
+        &self,
+        req: ipc_contract::WrapperProbeRequest,
+    ) -> ipc_contract::WrapperProbeResponse {
+        use crate::services::apple_music::wrapper::{LoginOutcome, WrapperClient, WrapperConfig};
+
+        let mut out = ipc_contract::WrapperProbeResponse {
+            reachable: false,
+            authenticated: false,
+            needs_two_factor: false,
+            state: String::new(),
+            playback_ready: false,
+            version: String::new(),
+            runtime: String::new(),
+            apple_id: None,
+            error: None,
+        };
+
+        let settings = self.settings.read().await.clone();
+        let Some(cfg) = WrapperConfig::from_settings(&settings) else {
+            out.error = Some("Turn the Wrapper section on first.".into());
+            return out;
+        };
+        let client = match WrapperClient::new(cfg) {
+            Ok(c) => c,
+            Err(e) => {
+                out.error = Some(e.to_string());
+                return out;
+            }
+        };
+
+        match client.status().await {
+            Ok(status) => {
+                out.reachable = true;
+                out.authenticated = status.authenticated;
+                out.state = status.state;
+                out.playback_ready = status.playback_ready;
+                out.version = status.version;
+                out.runtime = status.runtime;
+                out.apple_id = status.apple_id;
+            }
+            Err(e) => {
+                out.error = Some(e.to_string());
+                return out;
+            }
+        }
+
+        if req.sign_out {
+            match client.logout().await {
+                Ok(()) => match client.status().await {
+                    Ok(status) => {
+                        out.authenticated = status.authenticated;
+                        out.state = status.state;
+                        out.playback_ready = status.playback_ready;
+                        out.apple_id = status.apple_id;
+                    }
+                    Err(e) => out.error = Some(e.to_string()),
+                },
+                Err(e) => out.error = Some(e.to_string()),
+            }
+            return out;
+        }
+
+        if !req.sign_in || out.authenticated {
+            return out;
+        }
+
+        let outcome = match req.code.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+            Some(code) => client.submit_2fa(code).await,
+            None => {
+                if settings.apple_wrapper_email.trim().is_empty()
+                    || settings.apple_wrapper_password.is_empty()
+                {
+                    out.error = Some("Enter an Apple ID and password first.".into());
+                    return out;
+                }
+                client
+                    .login(
+                        &settings.apple_wrapper_email,
+                        &settings.apple_wrapper_password,
+                    )
+                    .await
+            }
+        };
+
+        match outcome {
+            Ok(LoginOutcome::Authenticated) => out.authenticated = true,
+            Ok(LoginOutcome::Needs2fa) => out.needs_two_factor = true,
+            Ok(LoginOutcome::Failed(reason)) => out.error = Some(reason),
+            Err(e) => out.error = Some(e.to_string()),
+        }
+
+        if let Ok(status) = client.status().await {
+            out.authenticated = status.authenticated;
+            out.state = status.state;
+            out.playback_ready = status.playback_ready;
+            out.apple_id = status.apple_id;
+        }
+        out
+    }
+
+    pub async fn send_process_stdin(
+        &self,
+        req: ipc_contract::SendProcessStdinRequest,
+    ) -> ipc_contract::SendProcessStdinResponse {
         if let Some(tx) = self.stdin_senders.get(&req.download_id) {
             let success = tx.send(req.input).await.is_ok();
             ipc_contract::SendProcessStdinResponse { success }
@@ -794,16 +587,16 @@ impl BackendState {
         }
     }
 
-    async fn authenticate_tidal(&self, settings: &Settings) -> MhResult<streamrip::tidal_client::TidalClient> {
-        let old_token = settings.tidal_access_token.clone();
-        let client = streamrip::tidal_client::TidalClient::authenticate(settings).await?;
-        if client.access_token != old_token {
-            let mut s = self.settings.write().await;
-            s.tidal_access_token = client.access_token.clone();
-            s.tidal_token_expiry = client.token_expiry.to_string();
-            settings::save_settings(&s, &self.user_data).await.ok();
-        }
-        Ok(client)
+    async fn authenticate_tidal(
+        &self,
+        settings: &Settings,
+    ) -> MhResult<crate::services::tidal::client::TidalClient> {
+        crate::services::tidal::client::TidalClient::authenticate_and_persist(
+            settings,
+            &self.settings,
+            &self.user_data,
+        )
+        .await
     }
 
     pub async fn get_lyrics(
@@ -811,329 +604,78 @@ impl BackendState {
         req: ipc_contract::GetLyricsRequest,
     ) -> MhResult<ipc_contract::GetLyricsResponse> {
         let settings = self.settings.read().await.clone();
-        let platform = req.platform.as_str();
 
         let empty = || ipc_contract::GetLyricsResponse {
-            synced: None, plain: None, word_synced: None,
+            synced: None,
+            plain: None,
+            word_synced: None,
         };
 
-        let native_result = match platform {
-            "tidal" => {
-                match self.authenticate_tidal(&settings).await {
-                    Err(_) => empty(),
-                    Ok(client) => {
-                        match extract_tidal_track_id(&req.url) {
-                            None => empty(),
-                            Some(track_id) => {
-                                if let Some(lyr) = client.fetch_lyrics(&track_id).await {
-                                    let plain = lyr["lyrics"].as_str().map(|s| s.to_string());
-                                    let synced = lyr["subtitles"].as_str().map(|s| s.to_string());
-                                    ipc_contract::GetLyricsResponse { synced, plain, word_synced: None }
-                                } else {
-                                    empty()
-                                }
-                            }
-                        }
-                    }
+        for source in crate::services::common::lyrics::SOURCE_ORDER {
+            let found = match *source {
+                "sidecar" => sidecar_lyrics(std::path::Path::new(&req.url))
+                    .await
+                    .map(found_to_response),
+                "tags" => embedded_lyrics(std::path::Path::new(&req.url))
+                    .await
+                    .map(found_to_response),
+                "service" => {
+                    let r = self.service_lyrics(&req, &settings).await;
+                    (!response_is_empty(&r)).then_some(r)
+                }
+                "community" => crate::services::common::lyrics::fetch_fallback_lyrics(
+                    &req.title,
+                    &req.artist,
+                    req.duration,
+                    &settings.deezer_arl,
+                    crate::services::common::lyrics::FallbackSources::from_settings(&settings),
+                )
+                .await
+                .map(found_to_response),
+                _ => None,
+            };
+            if let Some(found) = found {
+                if !response_is_empty(&found) {
+                    return Ok(found);
                 }
             }
-
-            "deezer" => {
-                if settings.deezer_arl.is_empty() {
-                    empty()
-                } else {
-                    match streamrip::deezer_client::DeezerClient::new(&settings.deezer_arl) {
-                        Err(_) => empty(),
-                        Ok(client) => {
-                            if client.authenticate().await.is_err() {
-                                empty()
-                            } else {
-                                let track_id = streamrip::orchestrator::extract_platform_id(
-                                    &req.url,
-                                    streamrip::orchestrator::Platform::Deezer,
-                                    streamrip::orchestrator::ContentType::Track,
-                                );
-                                match track_id {
-                                    None => empty(),
-                                    Some(track_id) => {
-                                        let word_synced = client.get_word_lyrics(&track_id).await;
-                                        match client.get_lyrics(&track_id).await {
-                                            Ok(lyr) => {
-                                                let ldata = &lyr["results"];
-                                                let has_error = lyr["error"].as_array().map(|a| !a.is_empty()).unwrap_or(false);
-                                                if !has_error {
-                                                    let plain = ldata["LYRICS_TEXT"].as_str().map(|s| s.to_string());
-                                                    let synced = ldata["LYRICS_SYNC_JSON"].as_array().and_then(|arr| {
-                                                        if arr.is_empty() { return None; }
-                                                        let lines: Vec<String> = arr.iter()
-                                                            .filter_map(deezer_sync_line_to_lrc)
-                                                            .collect();
-                                                        if lines.is_empty() { None } else { Some(lines.join("\n")) }
-                                                    });
-                                                    ipc_contract::GetLyricsResponse { synced, plain, word_synced }
-                                                } else {
-                                                    ipc_contract::GetLyricsResponse { synced: None, plain: None, word_synced }
-                                                }
-                                            }
-                                            Err(_) => ipc_contract::GetLyricsResponse { synced: None, plain: None, word_synced },
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            "spotify" => {
-                let track_id = extract_spotify_id(&req.url).unwrap_or_default();
-                if track_id.is_empty() {
-                    empty()
-                } else {
-                    let token_opt = {
-                        let librespot = self.librespot.read().await;
-                        librespot.cached_access_token()
-                    };
-                    match token_opt {
-                    None => empty(),
-                    Some(token) => {
-                    let http = http_client::build_client()?;
-                    let resp = http
-                        .get(&format!("https://spclient.wg.spotify.com/color-lyrics/v2/track/{}", track_id))
-                        .header("Authorization", format!("Bearer {}", token))
-                        .header("App-Platform", "WebPlayer")
-                        .header("Accept", "application/json")
-                        .send()
-                        .await;
-                    let mut result = empty();
-                    if let Ok(r) = resp {
-                        if r.status().is_success() {
-                            if let Ok(body) = r.json::<serde_json::Value>().await {
-                                let lyrics_obj = &body["lyrics"];
-                                let synced_lines = lyrics_obj["lines"].as_array();
-                                if let Some(lines) = synced_lines {
-                                    let lrc: Vec<String> = lines.iter().filter_map(|l| {
-                                        let ms: u64 = l["startTimeMs"].as_str()
-                                            .and_then(|s| s.parse().ok())
-                                            .or_else(|| l["startTimeMs"].as_u64())
-                                            .or_else(|| l["startTimeMs"].as_f64().map(|f| f as u64))?;
-                                        let text = l["words"].as_str().unwrap_or("");
-                                        Some(ms_to_lrc_stamp(ms, text))
-                                    }).collect();
-                                    let plain: Vec<String> = lines.iter().filter_map(|l| {
-                                        l["words"].as_str().map(|s| s.to_string())
-                                    }).collect();
-
-                                    let word_synced = {
-                                        let mut wlines: Vec<serde_json::Value> = Vec::new();
-                                        for l in lines {
-                                            if let Some(syls) = l["syllables"].as_array() {
-                                                if syls.is_empty() { continue; }
-                                                let start_ms: f64 = l["startTimeMs"].as_str()
-                                                    .and_then(|s| s.parse().ok())
-                                                    .or_else(|| l["startTimeMs"].as_f64())
-                                                    .unwrap_or(0.0);
-                                                let end_ms: f64 = l["endTimeMs"].as_str()
-                                                    .and_then(|s| s.parse().ok())
-                                                    .or_else(|| l["endTimeMs"].as_f64())
-                                                    .unwrap_or(0.0);
-                                                let text = l["words"].as_str().unwrap_or("");
-                                                let words: Vec<serde_json::Value> = syls.iter().filter_map(|s| {
-                                                    let st = s["startTimeMs"].as_str()
-                                                        .and_then(|v| v.parse::<f64>().ok())
-                                                        .or_else(|| s["startTimeMs"].as_f64())
-                                                        .unwrap_or(0.0);
-                                                    let en = s["endTimeMs"].as_str()
-                                                        .and_then(|v| v.parse::<f64>().ok())
-                                                        .or_else(|| s["endTimeMs"].as_f64())
-                                                        .unwrap_or(st);
-                                                    let w = s["chars"].as_str()
-                                                        .or_else(|| s["text"].as_str())
-                                                        .or_else(|| s["words"].as_str())
-                                                        .unwrap_or("");
-                                                    if w.is_empty() { return None; }
-                                                    Some(serde_json::json!({
-                                                        "start": st / 1000.0,
-                                                        "end": en / 1000.0,
-                                                        "text": w
-                                                    }))
-                                                }).collect();
-                                                if !words.is_empty() {
-                                                    wlines.push(serde_json::json!({
-                                                        "startTime": start_ms / 1000.0,
-                                                        "endTime": if end_ms > 0.0 { end_ms / 1000.0 } else {
-                                                            words.last().and_then(|w| w["end"].as_f64()).unwrap_or(start_ms / 1000.0)
-                                                        },
-                                                        "text": text,
-                                                        "words": words
-                                                    }));
-                                                }
-                                            }
-                                        }
-                                        if wlines.is_empty() { None }
-                                        else { serde_json::to_string(&wlines).ok() }
-                                    };
-
-                                    result = ipc_contract::GetLyricsResponse {
-                                        synced: if lrc.is_empty() { None } else { Some(lrc.join("\n")) },
-                                        plain: if plain.is_empty() { None } else { Some(plain.join("\n")) },
-                                        word_synced,
-                                    };
-                                }
-                            }
-                        }
-                    }
-                    result
-                    }
-                    }
-                }
-            }
-
-            "applemusic" => {
-                let apple = self.apple_music.read().await;
-                if !apple.is_configured() {
-                    empty()
-                } else {
-                    match apple.fetch_lyrics(&req.url).await {
-                        Some((synced, plain, word_synced)) => ipc_contract::GetLyricsResponse { synced, plain, word_synced },
-                        None => empty(),
-                    }
-                }
-            }
-
-            "youtubeMusic" | "youtubemusic" | "ytmusic" => {
-                let video_id = extract_yt_video_id(&req.url).unwrap_or_default();
-                if video_id.is_empty() {
-                    empty()
-                } else {
-                    match apis::ytmusic_search_api::YtMusicClient::init().await {
-                        Ok(client) => {
-                            let plain = client.fetch_lyrics(&video_id).await;
-                            ipc_contract::GetLyricsResponse { synced: None, plain, word_synced: None }
-                        }
-                        Err(_) => empty(),
-                    }
-                }
-            }
-
-            _ => {
-                empty()
-            }
-        };
-
-        if native_result.synced.is_some() || native_result.plain.is_some() || native_result.word_synced.is_some() {
-            return Ok(native_result);
         }
 
-        if let Some(deezer_wbw) = fetch_deezer_word_lyrics(&req.title, &req.artist, &settings).await {
-            return Ok(deezer_wbw);
-        }
+        Ok(empty())
+    }
 
-        if let Some(lrclib_result) = fetch_lrclib_lyrics(&req.title, &req.artist, req.duration).await {
-            return Ok(lrclib_result);
+    /// The lyrics the service the track came from publishes for it.
+    async fn service_lyrics(
+        &self,
+        req: &ipc_contract::GetLyricsRequest,
+        settings: &defaults::Settings,
+    ) -> ipc_contract::GetLyricsResponse {
+        use crate::services::common::lyrics::empty_response;
+        match services::common::playback::PlaybackTarget::from_platform(&req.platform)
+            .and_then(services::lyrics_provider)
+        {
+            Some(provider) => provider.fetch(req, settings, self).await,
+            None => empty_response(),
         }
-
-        Ok(native_result)
     }
 }
 
-async fn fetch_lrclib_lyrics(
-    title: &str,
-    artist: &str,
-    duration: Option<f64>,
-) -> Option<ipc_contract::GetLyricsResponse> {
-    if title.is_empty() {
-        return None;
-    }
-    let http = http_client::build_client().ok()?;
-    let mut url = format!(
-        "https://lrclib.net/api/get?track_name={}&artist_name={}",
-        url::form_urlencoded::byte_serialize(title.as_bytes()).collect::<String>(),
-        url::form_urlencoded::byte_serialize(artist.as_bytes()).collect::<String>(),
-    );
-    if let Some(dur) = duration {
-        url.push_str(&format!("&duration={}", dur.round() as u64));
-    }
-    let resp = http
-        .get(&url)
-        .header("User-Agent", "MediaHarbor/1.0")
-        .send()
-        .await
-        .ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let body: serde_json::Value = resp.json().await.ok()?;
-    let synced = body["syncedLyrics"].as_str().map(|s| s.to_string());
-    let plain = body["plainLyrics"].as_str().map(|s| s.to_string());
-    if synced.is_none() && plain.is_none() {
-        return None;
-    }
-    Some(ipc_contract::GetLyricsResponse { synced, plain, word_synced: None })
+fn response_is_empty(r: &ipc_contract::GetLyricsResponse) -> bool {
+    r.synced.is_none() && r.plain.is_none() && r.word_synced.is_none()
 }
 
-async fn fetch_deezer_word_lyrics(
-    title: &str,
-    artist: &str,
-    settings: &defaults::Settings,
-) -> Option<ipc_contract::GetLyricsResponse> {
-    if title.is_empty() { return None; }
-
-    let http = http_client::build_client().ok()?;
-    let query = format!("{} {}", title, artist);
-    let search_url = format!(
-        "https://api.deezer.com/search?q={}&limit=5",
-        url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>(),
-    );
-    let search_resp = http.get(&search_url)
-        .header("User-Agent", http_client::UA_MOZILLA)
-        .send().await.ok()?;
-    let search_body: serde_json::Value = search_resp.json().await.ok()?;
-    let track_id = search_body["data"].as_array()
-        .and_then(|arr| arr.first())
-        .and_then(|t| t["id"].as_u64())
-        .map(|id| id.to_string())?;
-
-    let arl = &settings.deezer_arl;
-    if !arl.is_empty() {
-        let client = streamrip::deezer_client::DeezerClient::new(arl).ok()?;
-        client.authenticate().await.ok()?;
-        let word_synced = client.get_word_lyrics(&track_id).await;
-
-        let gw_result = client.get_lyrics(&track_id).await.ok();
-        let (synced, plain) = if let Some(ref lyr) = gw_result {
-            let ldata = &lyr["results"];
-            let p = ldata["LYRICS_TEXT"].as_str().map(|s| s.to_string());
-            let s = ldata["LYRICS_SYNC_JSON"].as_array().and_then(|arr| {
-                if arr.is_empty() { return None; }
-                let lines: Vec<String> = arr.iter()
-                    .filter_map(deezer_sync_line_to_lrc)
-                    .collect();
-                if lines.is_empty() { None } else { Some(lines.join("\n")) }
-            });
-            (s, p)
-        } else {
-            (None, None)
-        };
-
-        if word_synced.is_some() || synced.is_some() || plain.is_some() {
-            return Some(ipc_contract::GetLyricsResponse { synced, plain, word_synced });
-        }
-        return None;
-    }
-
-    let word_synced = fetch_public_word_lyrics(&track_id).await;
-    if word_synced.is_some() {
-        return Some(ipc_contract::GetLyricsResponse { synced: None, plain: None, word_synced });
-    }
-
-    None
-}
-
-fn make_log_buffer() -> (std::sync::Arc<std::sync::Mutex<Vec<String>>>, impl Fn(String) + Clone + Send + 'static) {
-    let buf: std::sync::Arc<std::sync::Mutex<Vec<String>>> = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+pub(crate) fn make_log_buffer() -> (
+    std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    impl Fn(String) + Clone + Send + Sync + 'static,
+) {
+    let buf: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let buf_c = buf.clone();
-    let on_log = move |msg: String| { if let Ok(mut v) = buf_c.lock() { v.push(msg); } };
+    let on_log = move |msg: String| {
+        if let Ok(mut v) = buf_c.lock() {
+            v.push(msg);
+        }
+    };
     (buf, on_log)
 }
 
@@ -1245,141 +787,33 @@ impl BackendState {
     }
 }
 
-fn search_type_to_str(t: &ipc_contract::SearchType) -> &'static str {
-    use ipc_contract::SearchType::*;
-    match t {
-        Track | Song => "track",
-        Album => "album",
-        Artist => "artist",
-        Playlist => "playlist",
-        Episode => "episode",
-        Podcast | Show => "podcast",
-        Audiobook => "audiobook",
-        Video | MusicVideo => "video",
-        Channel => "channel",
-    }
-}
+use std::sync::LazyLock;
 
-fn map_spotify_type(t: &ipc_contract::SearchType) -> apis::spotify_api::SpotifySearchType {
-    use ipc_contract::SearchType::*;
-    match t {
-        Album => apis::spotify_api::SpotifySearchType::Album,
-        Artist => apis::spotify_api::SpotifySearchType::Artist,
-        Playlist => apis::spotify_api::SpotifySearchType::Playlist,
-        Episode => apis::spotify_api::SpotifySearchType::Episode,
-        Podcast | Show => apis::spotify_api::SpotifySearchType::Show,
-        Audiobook => apis::spotify_api::SpotifySearchType::Audiobook,
-        _ => apis::spotify_api::SpotifySearchType::Track,
-    }
-}
-
-fn map_tidal_type(t: &ipc_contract::SearchType) -> apis::tidal_api::TidalSearchType {
-    use ipc_contract::SearchType::*;
-    match t {
-        Album => apis::tidal_api::TidalSearchType::Albums,
-        Artist => apis::tidal_api::TidalSearchType::Artists,
-        Playlist => apis::tidal_api::TidalSearchType::Playlists,
-        Video => apis::tidal_api::TidalSearchType::Videos,
-        _ => apis::tidal_api::TidalSearchType::Tracks,
-    }
-}
-
-fn map_deezer_type(t: &ipc_contract::SearchType) -> apis::deezer_api::DeezerSearchType {
-    use ipc_contract::SearchType::*;
-    match t {
-        Album => apis::deezer_api::DeezerSearchType::Album,
-        Artist => apis::deezer_api::DeezerSearchType::Artist,
-        Playlist => apis::deezer_api::DeezerSearchType::Playlist,
-        Podcast => apis::deezer_api::DeezerSearchType::Podcast,
-        Episode => apis::deezer_api::DeezerSearchType::Episode,
-        _ => apis::deezer_api::DeezerSearchType::Track,
-    }
-}
-
-fn map_apple_entity(t: &ipc_contract::SearchType) -> apis::apple_music_api::AppleMusicMediaType {
-    use ipc_contract::SearchType::*;
-    match t {
-        Album => apis::apple_music_api::AppleMusicMediaType::Album,
-        Artist => apis::apple_music_api::AppleMusicMediaType::Artist,
-        Playlist => apis::apple_music_api::AppleMusicMediaType::Playlist,
-        Video | MusicVideo => apis::apple_music_api::AppleMusicMediaType::MusicVideo,
-        _ => apis::apple_music_api::AppleMusicMediaType::Song,
-    }
-}
-
-fn map_ytmusic_filter(t: &ipc_contract::SearchType) -> apis::ytmusic_search_api::YtMusicFilter {
-    use ipc_contract::SearchType::*;
-    match t {
-        Album => apis::ytmusic_search_api::YtMusicFilter::Album,
-        Playlist => apis::ytmusic_search_api::YtMusicFilter::Playlist,
-        Artist => apis::ytmusic_search_api::YtMusicFilter::Artist,
-        Podcast => apis::ytmusic_search_api::YtMusicFilter::Podcast,
-        Video => apis::ytmusic_search_api::YtMusicFilter::Video,
-        _ => apis::ytmusic_search_api::YtMusicFilter::Song,
-    }
-}
-
-use once_cell::sync::Lazy;
-
-static SPOTIFY_ID_RE: Lazy<regex::Regex> = Lazy::new(|| {
-    regex::Regex::new(r"spotify\.com/(?:track|episode|album|artist|playlist)/([a-zA-Z0-9]+)").unwrap()
+static SPOTIFY_ID_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r"(?:spotify\.com/(?:track|episode|album|artist|playlist)/|spotify:(?:track|episode|album|artist|playlist):)([a-zA-Z0-9]+)",
+    )
+    .unwrap()
 });
-static TIDAL_TRACK_ID_RE: Lazy<regex::Regex> = Lazy::new(|| {
+static TIDAL_TRACK_ID_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"tidal\.com/(?:browse/)?(?:track|album|video)/(\d+)").unwrap()
 });
-static YT_VIDEO_ID_RE: Lazy<regex::Regex> = Lazy::new(|| {
-    regex::Regex::new(r"[?&]v=([a-zA-Z0-9_-]{11})").unwrap()
-});
-
-fn extract_spotify_id(url: &str) -> Option<String> {
-    SPOTIFY_ID_RE.captures(url)?.get(1).map(|m| m.as_str().to_string())
+pub(crate) fn extract_spotify_id(url: &str) -> Option<String> {
+    SPOTIFY_ID_RE
+        .captures(url)?
+        .get(1)
+        .map(|m| m.as_str().to_string())
 }
 
-fn extract_tidal_track_id(url: &str) -> Option<String> {
-    TIDAL_TRACK_ID_RE.captures(url)?.get(1).map(|m| m.as_str().to_string())
-}
-
-fn extract_yt_video_id(url: &str) -> Option<String> {
-    if let Some(caps) = YT_VIDEO_ID_RE.captures(url) {
-        return caps.get(1).map(|m| m.as_str().to_string());
-    }
-    if url.len() == 11 && url.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
-        return Some(url.to_string());
-    }
-    None
-}
-
-fn ms_to_lrc_stamp(ms: u64, line: &str) -> String {
-    let m = ms / 60000;
-    let s = (ms % 60000) / 1000;
-    let cs = (ms % 1000) / 10;
-    format!("[{:02}:{:02}.{:02}]{}", m, s, cs, line)
-}
-
-fn deezer_sync_line_to_lrc(l: &serde_json::Value) -> Option<String> {
-    let line = l["line"].as_str().unwrap_or("");
-    if let Some(ts) = l["lrc_timestamp"].as_str() {
-        if !ts.is_empty() {
-            return Some(format!("{}{}", ts, line));
-        }
-    }
-    let ms = l["milliseconds"].as_str()
-        .and_then(|s| s.parse::<u64>().ok())
-        .or_else(|| l["milliseconds"].as_u64())
-        .or_else(|| l["milliseconds"].as_f64().map(|f| f as u64))
-        .or_else(|| l["lrc_timestamp"].as_u64())
-        .or_else(|| l["lrc_timestamp"].as_f64().map(|f| f as u64))?;
-    Some(ms_to_lrc_stamp(ms, line))
-}
-
-async fn fetch_public_word_lyrics(track_id: &str) -> Option<String> {
-    let client = streamrip::deezer_client::DeezerClient::new("").ok()?;
-    client.get_word_lyrics(track_id).await
+pub(crate) fn extract_tidal_track_id(url: &str) -> Option<String> {
+    TIDAL_TRACK_ID_RE
+        .captures(url)?
+        .get(1)
+        .map(|m| m.as_str().to_string())
 }
 
 fn getrandom_bytes(buf: &mut [u8]) -> MhResult<()> {
-    getrandom::fill(buf)
-        .map_err(|e| MhError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))
+    getrandom::fill(buf).map_err(|e| MhError::Io(std::io::Error::other(e)))
 }
 
 fn url_encode(s: &str) -> String {
@@ -1435,7 +869,9 @@ impl BackendState {
 
         {
             let mut am = self.apple_music.write().await;
-            *am = apis::apple_music_service::AppleMusicService::from_settings(&req.settings);
+            *am = crate::services::apple_music::playback::AppleMusicService::from_settings(
+                &req.settings,
+            );
         }
 
         {
@@ -1451,7 +887,11 @@ impl BackendState {
             }
         }
 
-        ipc_contract::SetSettingsResponse { success: true, error: None }
+
+        ipc_contract::SetSettingsResponse {
+            success: true,
+            error: None,
+        }
     }
 }
 
@@ -1870,6 +1310,57 @@ impl BackendState {
         Ok(ipc_contract::MediaDetailsResponse { data })
     }
 }
+/// `start_download` pass-throughs. The `+ quality` arm backfills `meta.quality` from the
+/// request's own tier when the download dialog left it empty.
+macro_rules! start_downloads {
+    ($( $name:ident($req:ident) => $target:ident $(+ $quality:ident)? ; )*) => {
+        impl BackendState {
+            $( start_downloads!(@one $name, $req, $target $(, $quality)?); )*
+        }
+    };
+    (@one $name:ident, $req:ident, $target:ident) => {
+        pub async fn $name(
+            &self,
+            req: ipc_contract::$req,
+        ) -> ipc_contract::StartDownloadResponse {
+            self.start_download(
+                crate::services::DownloadTarget::$target,
+                &req,
+                &req.url,
+                &req.meta,
+            )
+            .await
+        }
+    };
+    (@one $name:ident, $req:ident, $target:ident, $quality:ident) => {
+        pub async fn $name(
+            &self,
+            req: ipc_contract::$req,
+        ) -> ipc_contract::StartDownloadResponse {
+            let mut meta = req.meta.clone();
+            if meta.quality.as_deref().unwrap_or("").is_empty() {
+                meta.quality = req.$quality.map(|q| q.to_string());
+            }
+            self.start_download(
+                crate::services::DownloadTarget::$target,
+                &req,
+                &req.url,
+                &meta,
+            )
+            .await
+        }
+    };
+}
+
+start_downloads! {
+    start_yt_music_download(StartYtMusicDownloadRequest) => YtMusic;
+    start_yt_video_download(StartYtVideoDownloadRequest) => YtVideo;
+    start_spotify_download(StartSpotifyDownloadRequest) => Spotify;
+    start_apple_download(StartAppleDownloadRequest) => AppleMusic;
+    start_qobuz_download(StartQobuzDownloadRequest) => Qobuz + quality;
+    start_deezer_download(StartDeezerDownloadRequest) => Deezer + quality;
+    start_tidal_download(StartTidalDownloadRequest) => Tidal + quality;
+}
 
 impl BackendState {
     fn next_download_id(&self) -> u64 {
@@ -1878,86 +1369,239 @@ impl BackendState {
         COUNTER.fetch_add(1, Ordering::Relaxed)
     }
 
-    async fn try_prefetch_streamrip_meta(
+    /// Fills the download card before authentication or the first byte. Albums,
+    /// playlists and artists used to bail out here, which is why a collection link
+    /// showed a bare "Downloading…" with no cover for the whole run.
+    async fn try_prefetch_pipeline_meta(
         &self,
         url: &str,
         settings: &Settings,
     ) -> Option<ipc_contract::DownloadMetadata> {
-        use streamrip::orchestrator::{detect_platform_and_type, extract_platform_id};
-        use streamrip::orchestrator::Platform as SrPlatform;
-        use streamrip::orchestrator::ContentType;
+        use crate::services::common::pipeline::orchestrator::Platform as SrPlatform;
+        use crate::services::common::pipeline::orchestrator::{
+            detect_or_resolve, extract_platform_id,
+        };
 
-        let (platform, content_type) = detect_platform_and_type(url)?;
-        if !matches!(content_type, ContentType::Track) {
-            return None;
-        }
-        let id = extract_platform_id(url, platform, content_type)?;
+        let (url, platform, content_type) = detect_or_resolve(url).await.ok()?;
+        let id = extract_platform_id(&url, platform, content_type)?;
 
         match platform {
-            SrPlatform::Deezer => {
-                let client = apis::deezer_api::DeezerApiClient::new().ok()?;
-                let data = client.get_track(&id).await.ok()?;
-                Some(ipc_contract::DownloadMetadata {
-                    title:     data["title"].as_str().map(String::from),
-                    artist:    data["artist"]["name"].as_str().map(String::from),
-                    album:     data["album"]["title"].as_str().map(String::from),
-                    thumbnail: data["album"]["cover_xl"].as_str()
-                                   .or_else(|| data["album"]["cover_big"].as_str())
-                                   .map(String::from),
-                    platform:  Some("deezer".into()),
-                    quality:   Some(format!("{} {}", streamrip::deezer_format(&settings.deezer_quality), streamrip::deezer_quality_label(&settings.deezer_quality))),
-                })
+            SrPlatform::Deezer => self.prefetch_deezer_meta(&id, content_type).await,
+            SrPlatform::Qobuz => self.prefetch_qobuz_meta(&id, content_type, settings).await,
+            SrPlatform::Tidal => self.prefetch_tidal_meta(&id, content_type, settings).await,
+        }
+    }
+
+    async fn prefetch_deezer_meta(
+        &self,
+        id: &str,
+        content_type: crate::services::common::pipeline::orchestrator::ContentType,
+    ) -> Option<ipc_contract::DownloadMetadata> {
+        use crate::services::common::pipeline::orchestrator::ContentType;
+        let client = crate::services::deezer::api::DeezerApiClient::new().ok()?;
+        let cover = |v: &serde_json::Value, keys: &[&str]| -> Option<String> {
+            keys.iter()
+                .find_map(|k| v[*k].as_str().filter(|s| !s.is_empty()))
+                .map(String::from)
+        };
+
+        let (title, artist, album, thumbnail) = match content_type {
+            ContentType::Track => {
+                let d = client.get_track(id).await.ok()?;
+                (
+                    d["title"].as_str().map(String::from),
+                    d["artist"]["name"].as_str().map(String::from),
+                    d["album"]["title"].as_str().map(String::from),
+                    cover(&d["album"], &["cover_xl", "cover_big", "cover_medium"]),
+                )
             }
-            SrPlatform::Qobuz => {
-                let client = if settings.qobuz_app_id.is_empty() {
-                    apis::qobuz_api::QobuzApiClient::with_bundled_credentials().ok()?
-                } else {
-                    apis::qobuz_api::QobuzApiClient::new(
-                        settings.qobuz_app_id.clone(),
-                        settings.qobuz_password_or_token.clone(),
-                        settings.qobuz_app_secret.clone(),
-                    ).ok()?
-                };
-                let data = client.get_track(&id).await.ok()?;
-                Some(ipc_contract::DownloadMetadata {
-                    title:     data["title"].as_str().map(String::from),
-                    artist:    data["performer"]["name"].as_str()
-                                   .or_else(|| data["album"]["artist"]["name"].as_str())
-                                   .map(String::from),
-                    album:     data["album"]["title"].as_str().map(String::from),
-                    thumbnail: data["album"]["image"]["large"].as_str().map(String::from),
-                    platform:  Some("qobuz".into()),
-                    quality:   Some(format!("{} {}", if settings.qobuz_quality == 5 { "MP3" } else { "FLAC" }, streamrip::qobuz_quality_label(settings.qobuz_quality as u32))),
-                })
+            ContentType::Album => {
+                let d = client.get_album(id).await.ok()?;
+                (
+                    d["title"].as_str().map(String::from),
+                    d["artist"]["name"].as_str().map(String::from),
+                    d["title"].as_str().map(String::from),
+                    cover(&d, &["cover_xl", "cover_big", "cover_medium"]),
+                )
             }
-            SrPlatform::Tidal => {
-                if settings.tidal_access_token.is_empty() {
-                    return None;
-                }
-                let country = if settings.tidal_country_code.is_empty() { "US" } else { &settings.tidal_country_code };
-                let http = http_client::build_client().ok()?;
-                let resp = http
-                    .get(format!("https://api.tidal.com/v1/tracks/{}", id))
-                    .header("Authorization", format!("Bearer {}", settings.tidal_access_token))
-                    .query(&[("countryCode", country)])
+            ContentType::Playlist => {
+                let d = client.get_playlist(id).await.ok()?;
+                (
+                    d["title"].as_str().map(String::from),
+                    d["creator"]["name"].as_str().map(String::from),
+                    None,
+                    cover(&d, &["picture_xl", "picture_big", "picture_medium"]),
+                )
+            }
+            _ => return None,
+        };
+
+        Some(ipc_contract::DownloadMetadata {
+            title,
+            artist,
+            album,
+            thumbnail,
+            platform: Some("deezer".into()),
+            quality: None,
+        })
+    }
+
+    async fn prefetch_qobuz_meta(
+        &self,
+        id: &str,
+        content_type: crate::services::common::pipeline::orchestrator::ContentType,
+        settings: &Settings,
+    ) -> Option<ipc_contract::DownloadMetadata> {
+        use crate::services::common::pipeline::orchestrator::ContentType;
+        let client = match crate::services::qobuz::app_credentials::configured_pair(settings) {
+            Some(pair) => crate::services::qobuz::api::QobuzApiClient::new(
+                pair.app_id,
+                settings.qobuz_password_or_token.clone(),
+                pair.secret,
+            )
+            .ok()?,
+            None => crate::services::qobuz::api::QobuzApiClient::with_bundled_credentials().ok()?,
+        };
+
+        let (title, artist, album, thumbnail) = match content_type {
+            ContentType::Track => {
+                let d = client.get_track(id).await.ok()?;
+                (
+                    d["title"].as_str().map(String::from),
+                    d["performer"]["name"]
+                        .as_str()
+                        .or_else(|| d["album"]["artist"]["name"].as_str())
+                        .map(String::from),
+                    d["album"]["title"].as_str().map(String::from),
+                    d["album"]["image"]["large"].as_str().map(String::from),
+                )
+            }
+            ContentType::Album => {
+                let d = client.get_album(id).await.ok()?;
+                (
+                    d["title"].as_str().map(String::from),
+                    d["artist"]["name"].as_str().map(String::from),
+                    d["title"].as_str().map(String::from),
+                    d["image"]["large"].as_str().map(String::from),
+                )
+            }
+            ContentType::Playlist => {
+                let d = client.get_playlist(id).await.ok()?;
+                (
+                    d["name"].as_str().map(String::from),
+                    d["owner"]["name"].as_str().map(String::from),
+                    None,
+                    d["images300"][0]
+                        .as_str()
+                        .or_else(|| d["image_rectangle"][0].as_str())
+                        .map(String::from),
+                )
+            }
+            _ => return None,
+        };
+
+        Some(ipc_contract::DownloadMetadata {
+            title,
+            artist,
+            album,
+            thumbnail,
+            platform: Some("qobuz".into()),
+            quality: None,
+        })
+    }
+
+    async fn prefetch_tidal_meta(
+        &self,
+        id: &str,
+        content_type: crate::services::common::pipeline::orchestrator::ContentType,
+        settings: &Settings,
+    ) -> Option<ipc_contract::DownloadMetadata> {
+        use crate::services::common::pipeline::orchestrator::ContentType;
+        if settings.tidal_access_token.is_empty() {
+            return None;
+        }
+        let country = if settings.tidal_country_code.is_empty() {
+            "US"
+        } else {
+            &settings.tidal_country_code
+        };
+        let http = http_client::build_client().ok()?;
+        let path = match content_type {
+            ContentType::Track => format!("tracks/{}", id),
+            ContentType::Album => format!("albums/{}", id),
+            ContentType::Playlist => format!("playlists/{}", id),
+            _ => return None,
+        };
+        let fetch = |token: String| {
+            let http = http.clone();
+            let path = path.clone();
+            let country = country.to_string();
+            async move {
+                http.get(format!("https://api.tidal.com/v1/{}", path))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .query(&[("countryCode", country.as_str())])
                     .send()
                     .await
-                    .ok()?;
-                if !resp.status().is_success() { return None; }
-                let data: serde_json::Value = resp.json().await.ok()?;
-                let cover_id = data["album"]["cover"].as_str().unwrap_or("").replace('-', "/");
-                Some(ipc_contract::DownloadMetadata {
-                    title:     data["title"].as_str().map(String::from),
-                    artist:    data["artist"]["name"].as_str().map(String::from),
-                    album:     data["album"]["title"].as_str().map(String::from),
-                    thumbnail: if cover_id.is_empty() { None } else {
-                        Some(format!("https://resources.tidal.com/images/{}/640x640.jpg", cover_id))
-                    },
-                    platform:  Some("tidal".into()),
-                    quality:   Some(format!("{} {}", streamrip::tidal_format(settings.tidal_quality), streamrip::tidal_quality_label(settings.tidal_quality))),
-                })
+                    .ok()
             }
+        };
+
+        let mut resp = fetch(settings.tidal_access_token.clone()).await?;
+        if resp.status() == 401 {
+            let client = crate::services::tidal::client::TidalClient::authenticate_and_persist(
+                settings,
+                &self.settings,
+                &self.user_data,
+            )
+            .await
+            .ok()?;
+            resp = fetch(client.access_token.clone()).await?;
         }
+        if !resp.status().is_success() {
+            return None;
+        }
+        let d: serde_json::Value = resp.json().await.ok()?;
+
+        let art = |uuid: Option<&str>, size: &str| -> Option<String> {
+            let uuid = uuid.filter(|s| !s.is_empty())?;
+            Some(format!(
+                "https://resources.tidal.com/images/{}/{}.jpg",
+                uuid.replace('-', "/"),
+                size
+            ))
+        };
+
+        let (title, artist, album, thumbnail) = match content_type {
+            ContentType::Track => (
+                d["title"].as_str().map(String::from),
+                d["artist"]["name"].as_str().map(String::from),
+                d["album"]["title"].as_str().map(String::from),
+                art(d["album"]["cover"].as_str(), "640x640"),
+            ),
+            ContentType::Album => (
+                d["title"].as_str().map(String::from),
+                d["artist"]["name"].as_str().map(String::from),
+                d["title"].as_str().map(String::from),
+                art(d["cover"].as_str(), "640x640"),
+            ),
+            ContentType::Playlist => (
+                d["title"].as_str().map(String::from),
+                d["creator"]["name"].as_str().map(String::from),
+                None,
+                art(d["squareImage"].as_str(), "640x640")
+                    .or_else(|| art(d["image"].as_str(), "640x428")),
+            ),
+            _ => return None,
+        };
+
+        Some(ipc_contract::DownloadMetadata {
+            title,
+            artist,
+            album,
+            thumbnail,
+            platform: Some("tidal".into()),
+            quality: None,
+        })
     }
 
     async fn try_prefetch_spotify_meta(
@@ -1968,8 +1612,8 @@ impl BackendState {
         if !url.contains("/track/") && !url.starts_with("spotify:track:") {
             return None;
         }
-        let track_id = if url.starts_with("spotify:track:") {
-            url["spotify:track:".len()..].to_string()
+        let track_id = if let Some(rest) = url.strip_prefix("spotify:track:") {
+            rest.to_string()
         } else {
             url.trim_end_matches('/')
                 .rsplit('/')
@@ -1978,32 +1622,28 @@ impl BackendState {
                 .next()?
                 .to_string()
         };
-        let client_id = if settings.spotify_client_id.is_empty() {
-            self.credentials.spotify_client_id.clone()
-        } else {
-            settings.spotify_client_id.clone()
-        };
-        let client_secret = if settings.spotify_client_secret.is_empty() {
-            self.credentials.spotify_client_secret.clone()
-        } else {
-            settings.spotify_client_secret.clone()
-        };
-        let client = apis::spotify_api::SpotifyApiClient::new(client_id, client_secret).ok()?;
+        let client_id = crate::auth::credentials::preferred(
+            &settings.spotify_client_id,
+            &self.credentials.spotify_client_id,
+        );
+        let client_secret = crate::auth::credentials::preferred(
+            &settings.spotify_client_secret,
+            &self.credentials.spotify_client_secret,
+        );
+        let client =
+            crate::services::spotify::api::SpotifyApiClient::new(client_id, client_secret).ok()?;
         let data = client.get_track(&track_id).await.ok()?;
         Some(ipc_contract::DownloadMetadata {
-            title:     data["name"].as_str().map(String::from),
-            artist:    data["artists"][0]["name"].as_str().map(String::from),
-            album:     data["album"]["name"].as_str().map(String::from),
+            title: data["name"].as_str().map(String::from),
+            artist: data["artists"][0]["name"].as_str().map(String::from),
+            album: data["album"]["name"].as_str().map(String::from),
             thumbnail: data["album"]["images"][0]["url"].as_str().map(String::from),
-            platform:  Some("spotify".into()),
-            quality:   None,
+            platform: Some("spotify".into()),
+            quality: None,
         })
     }
 
-    async fn try_prefetch_apple_meta(
-        &self,
-        url: &str,
-    ) -> Option<ipc_contract::DownloadMetadata> {
+    async fn try_prefetch_apple_meta(&self, url: &str) -> Option<ipc_contract::DownloadMetadata> {
         let lookup_id = if let Some(pos) = url.find("?i=") {
             url[pos + 3..].split('&').next()?.to_string()
         } else if url.contains("/album/") {
@@ -2016,7 +1656,8 @@ impl BackendState {
         } else {
             return None;
         };
-        let client = apis::apple_music_api::AppleMusicApiClient::unauthenticated().ok()?;
+        let client =
+            crate::services::apple_music::api::AppleMusicApiClient::unauthenticated().ok()?;
         let data = client.lookup_by_id(&lookup_id).await.ok()?;
         if data.is_null() {
             return None;
@@ -2025,926 +1666,126 @@ impl BackendState {
             .as_str()
             .map(|s| s.replace("100x100", "640x640"));
         Some(ipc_contract::DownloadMetadata {
-            title:     data["trackName"].as_str()
-                           .or_else(|| data["collectionName"].as_str())
-                           .map(String::from),
-            artist:    data["artistName"].as_str().map(String::from),
-            album:     data["collectionName"].as_str().map(String::from),
+            title: data["trackName"]
+                .as_str()
+                .or_else(|| data["collectionName"].as_str())
+                .map(String::from),
+            artist: data["artistName"].as_str().map(String::from),
+            album: data["collectionName"].as_str().map(String::from),
             thumbnail,
-            platform:  Some("applemusic".into()),
-            quality:   None,
+            platform: Some("applemusic".into()),
+            quality: None,
         })
     }
 
-    pub async fn start_yt_music_download(
+    async fn try_prefetch_ytdlp_meta(
         &self,
-        req: ipc_contract::StartYtMusicDownloadRequest,
-    ) -> ipc_contract::StartDownloadResponse {
-        let download_id = self.next_download_id();
-        let settings = self.settings.read().await.clone();
-        if settings.download_location.is_empty() {
-            return self.emit_no_download_location(download_id);
-        }
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        self.active_downloads.insert(download_id, cancel_flag.clone());
-
-        let meta = if req.meta.title.is_none() || req.meta.title.as_deref() == Some("") {
-            let yt_dlp_cmd = downloads::yt_dlp::find_yt_dlp_command(None);
-            if let Ok(fetched) = downloads::yt_dlp::prefetch_metadata(&req.url, &yt_dlp_cmd).await {
-                ipc_contract::DownloadMetadata {
-                    title: if fetched.title.is_empty() { req.meta.title.clone() } else { Some(fetched.title) },
-                    artist: if fetched.uploader.is_empty() { req.meta.artist.clone() } else { Some(fetched.uploader) },
-                    album: req.meta.album.clone(),
-                    thumbnail: if fetched.thumbnail.is_empty() { req.meta.thumbnail.clone() } else { Some(fetched.thumbnail) },
-                    platform: req.meta.platform.clone(),
-                    quality: req.meta.quality.clone(),
-                }
+        url: &str,
+        fallback: &ipc_contract::DownloadMetadata,
+    ) -> Option<ipc_contract::DownloadMetadata> {
+        let yt_dlp_cmd = downloads::yt_dlp::find_yt_dlp_command();
+        let fetched = downloads::yt_dlp::prefetch_metadata(url, &yt_dlp_cmd)
+            .await
+            .ok()?;
+        Some(ipc_contract::DownloadMetadata {
+            title: if fetched.title.is_empty() {
+                fallback.title.clone()
             } else {
-                req.meta.clone()
-            }
-        } else {
-            req.meta.clone()
-        };
-
-        self.emitter.emit_download_info(&ipc_contract::DownloadInfoEvent {
-            download_id,
-            meta: meta.clone(),
-        });
-
-        let emitter = self.emitter.clone();
-        let active = self.active_downloads.clone();
-
-        tokio::spawn(async move {
-            use downloads::yt_dlp::{download_music, music_args_from_settings};
-            let yt_dlp_cmd = downloads::yt_dlp::find_yt_dlp_command(None);
-            let quality = req.quality.as_deref().unwrap_or("best").to_string();
-            let mut args = music_args_from_settings(&req.url, &quality, &settings, false);
-            let effective_output_dir = if settings.create_platform_subfolders {
-                std::path::Path::new(&req.output_dir)
-                    .join("YouTube Music")
-                    .to_string_lossy()
-                    .to_string()
+                Some(fetched.title)
+            },
+            artist: if fetched.uploader.is_empty() {
+                fallback.artist.clone()
             } else {
-                req.output_dir.clone()
-            };
-            args.download_path = effective_output_dir.clone();
-            tokio::fs::create_dir_all(&effective_output_dir).await.ok();
-
-            let emitter_p = emitter.clone();
-            let emitter_log = emitter.clone();
-            let result = download_music(args, &yt_dlp_cmd, move |p| {
-                let spd = if p.speed.is_empty() { None } else { Some(p.speed.clone()) };
-                let eta = if p.eta.is_empty() { None } else { Some(p.eta.clone()) };
-                emitter_p.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: p.percent,
-                    speed: spd,
-                    eta,
-                    status: "downloading".into(),
-                    item_index: p.item_index,
-                    item_total: p.item_total,
-                });
-            }, move |line| {
-                emitter_log.emit_log(&ipc_contract::BackendLogEvent {
-                    level: if line.contains("ERROR") || line.contains("error") { "error" } else { "info" }.to_string(),
-                    source: "yt-dlp".to_string(),
-                    title: "yt-dlp".to_string(),
-                    message: line,
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                });
-            }, cancel_flag).await;
-
-            active.remove(&download_id);
-            if let Err(e) = result {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 0.0,
-                    speed: None,
-                    eta: None,
-                    status: format!("error: {}", e),
-                    item_index: None,
-                    item_total: None,
-                });
+                Some(fetched.uploader)
+            },
+            album: fallback.album.clone(),
+            thumbnail: if fetched.thumbnail.is_empty() {
+                fallback.thumbnail.clone()
             } else {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 100.0,
-                    speed: None,
-                    eta: None,
-                    status: "completed".into(),
-                    item_index: None,
-                    item_total: None,
-                });
-            }
-        });
-
-        ipc_contract::StartDownloadResponse {
-            download_id,
-            success: true,
-            error: None,
-        }
+                Some(fetched.thumbnail)
+            },
+            platform: fallback.platform.clone(),
+            quality: fallback.quality.clone(),
+        })
     }
 
-    pub async fn start_yt_video_download(
+    async fn resolve_download_meta(
         &self,
-        req: ipc_contract::StartYtVideoDownloadRequest,
-    ) -> ipc_contract::StartDownloadResponse {
-        let download_id = self.next_download_id();
-        let settings = self.settings.read().await.clone();
-        if settings.download_location.is_empty() {
-            return self.emit_no_download_location(download_id);
-        }
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        self.active_downloads.insert(download_id, cancel_flag.clone());
-
-        let meta = if req.meta.title.is_none() || req.meta.title.as_deref() == Some("") {
-            let yt_dlp_cmd = downloads::yt_dlp::find_yt_dlp_command(None);
-            if let Ok(fetched) = downloads::yt_dlp::prefetch_metadata(&req.url, &yt_dlp_cmd).await {
-                ipc_contract::DownloadMetadata {
-                    title: if fetched.title.is_empty() { req.meta.title.clone() } else { Some(fetched.title) },
-                    artist: if fetched.uploader.is_empty() { req.meta.artist.clone() } else { Some(fetched.uploader) },
-                    album: req.meta.album.clone(),
-                    thumbnail: if fetched.thumbnail.is_empty() { req.meta.thumbnail.clone() } else { Some(fetched.thumbnail) },
-                    platform: req.meta.platform.clone(),
-                    quality: req.meta.quality.clone(),
-                }
-            } else {
-                req.meta.clone()
+        target: crate::services::DownloadTarget,
+        url: &str,
+        settings: &Settings,
+        fallback: &ipc_contract::DownloadMetadata,
+    ) -> ipc_contract::DownloadMetadata {
+        use crate::services::DownloadTarget as T;
+        let platform_label = match target {
+            T::YtMusic => "youtubemusic",
+            T::YtVideo => "youtube",
+            T::Spotify => "spotify",
+            T::AppleMusic => "applemusic",
+            T::Qobuz => "qobuz",
+            T::Deezer => "deezer",
+            T::Tidal => "tidal",
+        };
+        let backfill = |mut m: ipc_contract::DownloadMetadata| {
+            if m.platform.as_deref().unwrap_or("").is_empty() {
+                m.platform = fallback
+                    .platform
+                    .clone()
+                    .filter(|p| !p.is_empty())
+                    .or_else(|| Some(platform_label.to_string()));
             }
-        } else {
-            req.meta.clone()
+            if m.quality.as_deref().unwrap_or("").is_empty() {
+                m.quality = fallback.quality.clone().filter(|q| !q.is_empty());
+            }
+            m
         };
 
-        self.emitter.emit_download_info(&ipc_contract::DownloadInfoEvent {
-            download_id,
-            meta: meta.clone(),
-        });
-
-        let emitter = self.emitter.clone();
-        let active = self.active_downloads.clone();
-
-        tokio::spawn(async move {
-            use downloads::yt_dlp::{download_video, video_args_from_settings};
-            let yt_dlp_cmd = downloads::yt_dlp::find_yt_dlp_command(None);
-            let quality = req.resolution.as_deref().unwrap_or("bestvideo+bestaudio/best").to_string();
-            let mut args = video_args_from_settings(&req.url, &quality, &settings, false, false);
-            let effective_output_dir = if settings.create_platform_subfolders {
-                std::path::Path::new(&req.output_dir)
-                    .join("YouTube")
-                    .to_string_lossy()
-                    .to_string()
-            } else {
-                req.output_dir.clone()
-            };
-            args.download_path = effective_output_dir.clone();
-            tokio::fs::create_dir_all(&effective_output_dir).await.ok();
-            if let Some(f) = req.format {
-                args.merge_output_format = Some(f);
-            }
-
-            let emitter_p = emitter.clone();
-            let emitter_log = emitter.clone();
-            let result = download_video(args, &yt_dlp_cmd, move |p| {
-                let spd = if p.speed.is_empty() { None } else { Some(p.speed.clone()) };
-                let eta = if p.eta.is_empty() { None } else { Some(p.eta.clone()) };
-                emitter_p.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: p.percent,
-                    speed: spd,
-                    eta,
-                    status: "downloading".into(),
-                    item_index: p.item_index,
-                    item_total: p.item_total,
-                });
-            }, move |line| {
-                emitter_log.emit_log(&ipc_contract::BackendLogEvent {
-                    level: if line.contains("ERROR") || line.contains("error") { "error" } else { "info" }.to_string(),
-                    source: "yt-dlp".to_string(),
-                    title: "yt-dlp".to_string(),
-                    message: line,
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                });
-            }, cancel_flag).await;
-
-            active.remove(&download_id);
-            if let Err(e) = result {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 0.0,
-                    speed: None,
-                    eta: None,
-                    status: format!("error: {}", e),
-                    item_index: None,
-                    item_total: None,
-                });
-            } else {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 100.0,
-                    speed: None,
-                    eta: None,
-                    status: "completed".into(),
-                    item_index: None,
-                    item_total: None,
-                });
-            }
-        });
-
-        ipc_contract::StartDownloadResponse {
-            download_id,
-            success: true,
-            error: None,
+        if !matches!(fallback.title.as_deref(), None | Some("")) {
+            return backfill(fallback.clone());
         }
+        let fetched = match target {
+            T::YtMusic | T::YtVideo => self.try_prefetch_ytdlp_meta(url, fallback).await,
+            T::Spotify => self.try_prefetch_spotify_meta(url, settings).await,
+            T::AppleMusic => self.try_prefetch_apple_meta(url).await,
+            T::Qobuz | T::Deezer | T::Tidal => self.try_prefetch_pipeline_meta(url, settings).await,
+        };
+        backfill(fetched.unwrap_or_else(|| fallback.clone()))
     }
 
-    pub async fn start_spotify_download(
+    async fn start_download<R: serde::Serialize>(
         &self,
-        req: ipc_contract::StartSpotifyDownloadRequest,
+        target: crate::services::DownloadTarget,
+        req: &R,
+        url: &str,
+        meta: &ipc_contract::DownloadMetadata,
     ) -> ipc_contract::StartDownloadResponse {
         let download_id = self.next_download_id();
         let settings = self.settings.read().await.clone();
+        let ctx = crate::services::common::download::DownloadContext::from_state(self);
         if settings.download_location.is_empty() {
-            return self.emit_no_download_location(download_id);
+            return ctx.emit_no_download_location(download_id);
         }
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        self.active_downloads.insert(download_id, cancel_flag.clone());
 
-        let meta = if req.meta.title.is_none() || req.meta.title.as_deref() == Some("") {
-            self.try_prefetch_spotify_meta(&req.url, &settings).await
-                .unwrap_or_else(|| req.meta.clone())
-        } else {
-            req.meta.clone()
-        };
-
-        self.emitter.emit_download_info(&ipc_contract::DownloadInfoEvent {
-            download_id,
-            meta: meta.clone(),
-        });
-
-        let emitter = self.emitter.clone();
-        let active = self.active_downloads.clone();
-        let config_path = settings::spotify_config_path(&self.user_data);
-
-        tokio::spawn(async move {
-            let _ = downloads::gamrip::write_votify_config(&settings, &config_path).await;
-            let quality = req.meta.quality.clone();
-
-            let result = downloads::gamrip::download_with_votify(
-                &settings,
-                &req.url,
-                quality.as_deref(),
-                &config_path,
-                {
-                    let emitter_p = emitter.clone();
-                    move |p: downloads::gamrip::BatchProgress| {
-                        emitter_p.emit_progress(&ipc_contract::DownloadProgressEvent {
-                            download_id,
-                            percent: p.percent,
-                            speed: None,
-                            eta: None,
-                            status: if p.current_track.is_empty() { "downloading".into() } else { p.current_track.clone() },
-                            item_index: Some(p.completed),
-                            item_total: Some(p.total),
-                        });
-                    }
-                },
-                |_| {},
-                {
-                    let emitter_log = emitter.clone();
-                    move |line: String| {
-                        emitter_log.emit_log(&ipc_contract::BackendLogEvent {
-                            level: if line.contains("[CRITICAL") || line.contains("[ERROR") { "error" } else { "info" }.to_string(),
-                            source: "votify".to_string(),
-                            title: "Votify".to_string(),
-                            message: line,
-                            timestamp: chrono::Utc::now().to_rfc3339(),
-                        });
-                    }
-                },
-                cancel_flag,
-            )
+        let meta = self
+            .resolve_download_meta(target, url, &settings, meta)
             .await;
+        self.emitter
+            .emit_download_info(&ipc_contract::DownloadInfoEvent { download_id, meta });
 
-            active.remove(&download_id);
-            if let Err(e) = result {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
+        let req_value = match serde_json::to_value(req) {
+            Ok(v) => v,
+            Err(e) => {
+                return ipc_contract::StartDownloadResponse::failed(
                     download_id,
-                    percent: 0.0,
-                    speed: None,
-                    eta: None,
-                    status: format!("error: {}", e),
-                    item_index: None,
-                    item_total: None,
-                });
-            } else {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 100.0,
-                    speed: None,
-                    eta: None,
-                    status: "completed".into(),
-                    item_index: None,
-                    item_total: None,
-                });
+                    format!("serialize request failed: {e}"),
+                );
             }
-        });
-
-        ipc_contract::StartDownloadResponse {
-            download_id,
-            success: true,
-            error: None,
-        }
-    }
-
-    pub async fn start_apple_download(
-        &self,
-        req: ipc_contract::StartAppleDownloadRequest,
-    ) -> ipc_contract::StartDownloadResponse {
-        let download_id = self.next_download_id();
-        let settings = self.settings.read().await.clone();
-        if settings.download_location.is_empty() {
-            return self.emit_no_download_location(download_id);
-        }
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        self.active_downloads.insert(download_id, cancel_flag.clone());
-
-        let meta = if req.meta.title.is_none() || req.meta.title.as_deref() == Some("") {
-            self.try_prefetch_apple_meta(&req.url).await
-                .unwrap_or_else(|| req.meta.clone())
-        } else {
-            req.meta.clone()
         };
-
-        self.emitter.emit_download_info(&ipc_contract::DownloadInfoEvent {
-            download_id,
-            meta: meta.clone(),
-        });
-
-        let emitter = self.emitter.clone();
-        let active = self.active_downloads.clone();
-        let config_path = settings::apple_config_path(&self.user_data);
-
-        tokio::spawn(async move {
-            let _ = downloads::gamrip::write_gamdl_config(&settings, &config_path).await;
-            let quality = req.meta.quality.clone();
-
-            let result = downloads::gamrip::download_with_gamdl(
-                &settings,
-                &req.url,
-                quality.as_deref(),
-                &config_path,
-                {
-                    let emitter_p = emitter.clone();
-                    move |p: downloads::gamrip::BatchProgress| {
-                        emitter_p.emit_progress(&ipc_contract::DownloadProgressEvent {
-                            download_id,
-                            percent: p.percent,
-                            speed: None,
-                            eta: None,
-                            status: if p.current_track.is_empty() { "downloading".into() } else { p.current_track.clone() },
-                            item_index: Some(p.completed),
-                            item_total: Some(p.total),
-                        });
-                    }
-                },
-                |_| {},
-                {
-                    let emitter_log = emitter.clone();
-                    move |line: String| {
-                        emitter_log.emit_log(&ipc_contract::BackendLogEvent {
-                            level: if line.contains("[CRITICAL") || line.contains("[ERROR") { "error" } else { "info" }.to_string(),
-                            source: "gamdl".to_string(),
-                            title: "gamdl".to_string(),
-                            message: line,
-                            timestamp: chrono::Utc::now().to_rfc3339(),
-                        });
-                    }
-                },
-                cancel_flag,
-            )
-            .await;
-
-            active.remove(&download_id);
-            if let Err(e) = result {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 0.0,
-                    speed: None,
-                    eta: None,
-                    status: format!("error: {}", e),
-                    item_index: None,
-                    item_total: None,
-                });
-            } else {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 100.0,
-                    speed: None,
-                    eta: None,
-                    status: "completed".into(),
-                    item_index: None,
-                    item_total: None,
-                });
-            }
-        });
-
-        ipc_contract::StartDownloadResponse {
-            download_id,
-            success: true,
-            error: None,
-        }
-    }
-
-    pub async fn start_qobuz_download(
-        &self,
-        req: ipc_contract::StartQobuzDownloadRequest,
-    ) -> ipc_contract::StartDownloadResponse {
-        let download_id = self.next_download_id();
-        let settings = self.settings.read().await.clone();
-        if settings.download_location.is_empty() {
-            return self.emit_no_download_location(download_id);
-        }
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        self.active_downloads.insert(download_id, cancel_flag.clone());
-
-        let meta = if req.meta.title.is_none() || req.meta.title.as_deref() == Some("") {
-            self.try_prefetch_streamrip_meta(&req.url, &settings).await.unwrap_or(req.meta.clone())
-        } else {
-            req.meta.clone()
-        };
-
-        self.emitter.emit_download_info(&ipc_contract::DownloadInfoEvent {
-            download_id,
-            meta: meta.clone(),
-        });
-
-        let platform = "qobuz";
-        if settings.orpheus_dl
-            && settings.orpheus_dl_enabled_modules.split(',').any(|m| m.trim() == platform)
-            && orpheus::is_orpheus_installed()
-            && orpheus::is_module_installed(platform)
-        {
-            let emitter = self.emitter.clone();
-            let active = self.active_downloads.clone();
-            let stdin_senders = self.stdin_senders.clone();
-            let url = req.url.clone();
-            let output_dir = req.output_dir.clone();
-            let mut s = settings.clone();
-            if let Some(q) = req.quality { s.qobuz_quality = q; }
-            let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<String>(4);
-            stdin_senders.insert(download_id, stdin_tx);
-            tokio::spawn(async move {
-                let _ = orpheus::run_orpheus_download(&url, &output_dir, platform, download_id, &s, cancel_flag, emitter, stdin_rx).await;
-                active.remove(&download_id);
-                stdin_senders.remove(&download_id);
-            });
-            return ipc_contract::StartDownloadResponse { download_id, success: true, error: None };
-        }
-
-        let emitter = self.emitter.clone();
-        let active = self.active_downloads.clone();
-        let qobuz_cache = self.qobuz_client_cache.clone();
-        tokio::spawn(async move {
-            let mut settings = settings;
-            settings.download_location = req.output_dir.clone();
-            if let Some(q) = req.quality {
-                settings.qobuz_quality = q;
-            }
-            let qobuz_client = {
-                let cached = qobuz_cache.read().await.clone();
-                if let Some(c) = cached {
-                    c
-                } else {
-                    match streamrip::qobuz_client::QobuzClient::authenticate(&settings).await {
-                        Ok(c) => {
-                            *qobuz_cache.write().await = Some(c.clone());
-                            c
-                        }
-                        Err(e) => {
-                            active.remove(&download_id);
-                            emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                                download_id,
-                                percent: 0.0,
-                                speed: None,
-                                eta: None,
-                                status: format!("error: {}", e),
-                                item_index: None,
-                                item_total: None,
-                            });
-                            return;
-                        }
-                    }
-                }
-            };
-
-            let cancel_clone = cancel_flag.clone();
-            let sr_clients = streamrip::orchestrator::StreamripClients {
-                qobuz: Some(qobuz_client),
-                tidal: None,
-                deezer: None,
-            };
-            let (log_buf, on_log) = make_log_buffer();
-            let result = tokio::select! {
-                r = streamrip::orchestrator::download_url(
-                    &req.url,
-                    &settings,
-                    &sr_clients,
-                    {
-                        let emitter_p = emitter.clone();
-                        move |done: u64, total: u64| {
-                            let pct = if total > 0 { (done as f32 / total as f32) * 100.0 } else { 0.0 };
-                            emitter_p.emit_progress(&ipc_contract::DownloadProgressEvent {
-                                download_id,
-                                percent: pct,
-                                speed: None,
-                                eta: None,
-                                status: "downloading".into(),
-                                item_index: None,
-                                item_total: None,
-                            });
-                        }
-                    },
-                    on_log,
-                ) => r,
-                _ = async {
-                    loop {
-                        if cancel_clone.load(std::sync::atomic::Ordering::Relaxed) { break; }
-                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    }
-                } => Err(MhError::Cancelled),
-            };
-
-            active.remove(&download_id);
-            let log_lines = log_buf.lock().map(|v| v.join("\n")).unwrap_or_default();
-            emitter.emit_log(&ipc_contract::BackendLogEvent {
-                level: if result.is_ok() { "info" } else { "error" }.to_string(),
-                source: "streamrip".to_string(),
-                title: "Streamrip: Qobuz".to_string(),
-                message: log_lines,
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            });
-            if let Err(e) = result {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 0.0,
-                    speed: None,
-                    eta: None,
-                    status: format!("error: {}", e),
-                    item_index: None,
-                    item_total: None,
-                });
-            } else {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 100.0,
-                    speed: None,
-                    eta: None,
-                    status: "completed".into(),
-                    item_index: None,
-                    item_total: None,
-                });
-            }
-        });
-
-        ipc_contract::StartDownloadResponse {
-            download_id,
-            success: true,
-            error: None,
-        }
-    }
-
-    pub async fn start_deezer_download(
-        &self,
-        req: ipc_contract::StartDeezerDownloadRequest,
-    ) -> ipc_contract::StartDownloadResponse {
-        let download_id = self.next_download_id();
-        let settings = self.settings.read().await.clone();
-        if settings.download_location.is_empty() {
-            return self.emit_no_download_location(download_id);
-        }
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        self.active_downloads.insert(download_id, cancel_flag.clone());
-
-        let meta = if req.meta.title.is_none() || req.meta.title.as_deref() == Some("") {
-            self.try_prefetch_streamrip_meta(&req.url, &settings).await.unwrap_or(req.meta.clone())
-        } else {
-            req.meta.clone()
-        };
-
-        self.emitter.emit_download_info(&ipc_contract::DownloadInfoEvent {
-            download_id,
-            meta: meta.clone(),
-        });
-
-        let platform = "deezer";
-        if settings.orpheus_dl
-            && settings.orpheus_dl_enabled_modules.split(',').any(|m| m.trim() == platform)
-            && orpheus::is_orpheus_installed()
-            && orpheus::is_module_installed(platform)
-        {
-            let emitter = self.emitter.clone();
-            let active = self.active_downloads.clone();
-            let stdin_senders = self.stdin_senders.clone();
-            let url = req.url.clone();
-            let output_dir = req.output_dir.clone();
-            let mut s = settings.clone();
-            if let Some(q) = req.quality {
-                s.deezer_quality = match q { 2 => "FLAC".into(), 1 => "MP3_320".into(), _ => "MP3_128".into() };
-            }
-            let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<String>(4);
-            stdin_senders.insert(download_id, stdin_tx);
-            tokio::spawn(async move {
-                let _ = orpheus::run_orpheus_download(&url, &output_dir, platform, download_id, &s, cancel_flag, emitter, stdin_rx).await;
-                active.remove(&download_id);
-                stdin_senders.remove(&download_id);
-            });
-            return ipc_contract::StartDownloadResponse { download_id, success: true, error: None };
-        }
-
-        let emitter = self.emitter.clone();
-        let active = self.active_downloads.clone();
-        tokio::spawn(async move {
-            let mut settings = settings;
-            settings.download_location = req.output_dir.clone();
-            if let Some(q) = req.quality {
-                settings.deezer_quality = match q {
-                    2 => "FLAC".into(),
-                    1 => "MP3_320".into(),
-                    _ => "MP3_128".into(),
-                };
-            }
-            if settings.deezer_arl.trim().is_empty() {
-                active.remove(&download_id);
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 0.0,
-                    speed: None,
-                    eta: None,
-                    status: "error: Deezer ARL not set. Go to Settings → Deezer and paste your ARL token.".into(),
-                    item_index: None,
-                    item_total: None,
-                });
-                return;
-            }
-            let deezer_client = match streamrip::deezer_client::DeezerClient::new(&settings.deezer_arl) {
-                Ok(c) => c,
-                Err(e) => {
-                    active.remove(&download_id);
-                    emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                        download_id,
-                        percent: 0.0,
-                        speed: None,
-                        eta: None,
-                        status: format!("error: {}", e),
-                        item_index: None,
-                        item_total: None,
-                    });
-                    return;
-                }
-            };
-            if let Err(e) = deezer_client.authenticate().await {
-                active.remove(&download_id);
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 0.0,
-                    speed: None,
-                    eta: None,
-                    status: format!("error: {}", e),
-                    item_index: None,
-                    item_total: None,
-                });
-                return;
-            }
-
-            let cancel_clone = cancel_flag.clone();
-            let sr_clients = streamrip::orchestrator::StreamripClients {
-                deezer: Some(deezer_client),
-                tidal: None,
-                qobuz: None,
-            };
-            let (log_buf, on_log) = make_log_buffer();
-            let result = tokio::select! {
-                r = streamrip::orchestrator::download_url(
-                    &req.url,
-                    &settings,
-                    &sr_clients,
-                    {
-                        let emitter_p = emitter.clone();
-                        move |done: u64, total: u64| {
-                            let pct = if total > 0 { (done as f32 / total as f32) * 100.0 } else { 0.0 };
-                            emitter_p.emit_progress(&ipc_contract::DownloadProgressEvent {
-                                download_id,
-                                percent: pct,
-                                speed: None,
-                                eta: None,
-                                status: "downloading".into(),
-                                item_index: None,
-                                item_total: None,
-                            });
-                        }
-                    },
-                    on_log,
-                ) => r,
-                _ = async {
-                    loop {
-                        if cancel_clone.load(std::sync::atomic::Ordering::Relaxed) { break; }
-                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    }
-                } => Err(MhError::Cancelled),
-            };
-
-            active.remove(&download_id);
-            let log_lines = log_buf.lock().map(|v| v.join("\n")).unwrap_or_default();
-            emitter.emit_log(&ipc_contract::BackendLogEvent {
-                level: if result.is_ok() { "info" } else { "error" }.to_string(),
-                source: "streamrip".to_string(),
-                title: "Streamrip: Deezer".to_string(),
-                message: log_lines,
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            });
-            if let Err(e) = result {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 0.0,
-                    speed: None,
-                    eta: None,
-                    status: format!("error: {}", e),
-                    item_index: None,
-                    item_total: None,
-                });
-            } else {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 100.0,
-                    speed: None,
-                    eta: None,
-                    status: "completed".into(),
-                    item_index: None,
-                    item_total: None,
-                });
-            }
-        });
-
-        ipc_contract::StartDownloadResponse {
-            download_id,
-            success: true,
-            error: None,
-        }
-    }
-
-    pub async fn start_tidal_download(
-        &self,
-        req: ipc_contract::StartTidalDownloadRequest,
-    ) -> ipc_contract::StartDownloadResponse {
-        let download_id = self.next_download_id();
-        let settings = self.settings.read().await.clone();
-        if settings.download_location.is_empty() {
-            return self.emit_no_download_location(download_id);
-        }
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        self.active_downloads.insert(download_id, cancel_flag.clone());
-
-        let meta = if req.meta.title.is_none() || req.meta.title.as_deref() == Some("") {
-            self.try_prefetch_streamrip_meta(&req.url, &settings).await.unwrap_or(req.meta.clone())
-        } else {
-            req.meta.clone()
-        };
-
-        self.emitter.emit_download_info(&ipc_contract::DownloadInfoEvent {
-            download_id,
-            meta: meta.clone(),
-        });
-
-        let platform = "tidal";
-        if settings.orpheus_dl
-            && settings.orpheus_dl_enabled_modules.split(',').any(|m| m.trim() == platform)
-            && orpheus::is_orpheus_installed()
-            && orpheus::is_module_installed(platform)
-        {
-            let emitter = self.emitter.clone();
-            let active = self.active_downloads.clone();
-            let stdin_senders = self.stdin_senders.clone();
-            let url = req.url.clone();
-            let output_dir = req.output_dir.clone();
-            let s = settings.clone();
-            let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<String>(4);
-            stdin_senders.insert(download_id, stdin_tx);
-            tokio::spawn(async move {
-                let _ = orpheus::run_orpheus_download(&url, &output_dir, platform, download_id, &s, cancel_flag, emitter, stdin_rx).await;
-                active.remove(&download_id);
-                stdin_senders.remove(&download_id);
-            });
-            return ipc_contract::StartDownloadResponse { download_id, success: true, error: None };
-        }
-
-        let emitter = self.emitter.clone();
-        let active = self.active_downloads.clone();
-        let settings_arc = self.settings.clone();
-        let user_data = self.user_data.clone();
-        tokio::spawn(async move {
-            let mut settings = settings;
-            settings.download_location = req.output_dir.clone();
-            let old_token = settings.tidal_access_token.clone();
-            let tidal_client = match streamrip::tidal_client::TidalClient::authenticate(&settings).await {
-                Ok(c) => c,
-                Err(e) => {
-                    active.remove(&download_id);
-                    emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                        download_id,
-                        percent: 0.0,
-                        speed: None,
-                        eta: None,
-                        status: format!("error: {}", e),
-                        item_index: None,
-                        item_total: None,
-                    });
-                    return;
-                }
-            };
-            if tidal_client.access_token != old_token {
-                let mut s = settings_arc.write().await;
-                s.tidal_access_token = tidal_client.access_token.clone();
-                s.tidal_token_expiry = tidal_client.token_expiry.to_string();
-                settings::save_settings(&s, &user_data).await.ok();
-            }
-
-            let cancel_clone = cancel_flag.clone();
-            let sr_clients = streamrip::orchestrator::StreamripClients {
-                tidal: Some(tidal_client),
-                deezer: None,
-                qobuz: None,
-            };
-            let (log_buf, on_log) = make_log_buffer();
-            let result = tokio::select! {
-                r = streamrip::orchestrator::download_url(
-                    &req.url,
-                    &settings,
-                    &sr_clients,
-                    {
-                        let emitter_p = emitter.clone();
-                        move |done: u64, total: u64| {
-                            let pct = if total > 0 { (done as f32 / total as f32) * 100.0 } else { 0.0 };
-                            emitter_p.emit_progress(&ipc_contract::DownloadProgressEvent {
-                                download_id,
-                                percent: pct,
-                                speed: None,
-                                eta: None,
-                                status: "downloading".into(),
-                                item_index: None,
-                                item_total: None,
-                            });
-                        }
-                    },
-                    on_log,
-                ) => r,
-                _ = async {
-                    loop {
-                        if cancel_clone.load(std::sync::atomic::Ordering::Relaxed) { break; }
-                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    }
-                } => Err(MhError::Cancelled),
-            };
-
-            active.remove(&download_id);
-            let log_lines = log_buf.lock().map(|v| v.join("\n")).unwrap_or_default();
-            emitter.emit_log(&ipc_contract::BackendLogEvent {
-                level: if result.is_ok() { "info" } else { "error" }.to_string(),
-                source: "streamrip".to_string(),
-                title: "Streamrip: Tidal".to_string(),
-                message: log_lines,
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            });
-            if let Err(e) = result {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 0.0,
-                    speed: None,
-                    eta: None,
-                    status: format!("error: {}", e),
-                    item_index: None,
-                    item_total: None,
-                });
-            } else {
-                emitter.emit_progress(&ipc_contract::DownloadProgressEvent {
-                    download_id,
-                    percent: 100.0,
-                    speed: None,
-                    eta: None,
-                    status: "completed".into(),
-                    item_index: None,
-                    item_total: None,
-                });
-            }
-        });
-
-        ipc_contract::StartDownloadResponse {
-            download_id,
-            success: true,
-            error: None,
-        }
+        crate::services::download_provider(target, self)
+            .start(req_value, &ctx, download_id)
+            .await
     }
 }
-
 impl BackendState {
     pub async fn scan_directory(
         &self,

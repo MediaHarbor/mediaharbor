@@ -1,16 +1,15 @@
 import { useEffect } from 'react';
 import { useDownloadStore } from '@/stores/useDownloadStore';
 import { useLogStore } from '@/stores/useLogStore';
+import { tauriAPI } from '@/tauri-bridge';
 
 export function useDownloadEvents() {
   const addOrUpdate = useDownloadStore((s) => s.addOrUpdate);
   const addLog = useLogStore((s) => s.addLog);
 
   useEffect(() => {
-    if (!window.electron) return;
-
     const cleanups = [
-      window.electron.downloads.onInfo((data) => {
+      tauriAPI.downloads.onInfo((data) => {
         addOrUpdate({
           order: data.order,
           title: data.title ?? 'Downloading...',
@@ -19,8 +18,6 @@ export function useDownloadEvents() {
           thumbnail: data.thumbnail ?? null,
           platform: data.platform ?? undefined,
           quality: data.quality ? String(data.quality) : undefined,
-          progress: 0,
-          status: 'downloading',
         });
         addLog({
           order: data.order,
@@ -30,7 +27,7 @@ export function useDownloadEvents() {
           level: 'info',
         });
       }),
-      window.electron.downloads.onProgress((data) => {
+      tauriAPI.downloads.onProgress((data) => {
         addOrUpdate({
           order: data.order,
           progress: Math.min(Math.round(data.progress ?? 0), 100),
@@ -39,15 +36,24 @@ export function useDownloadEvents() {
           ...(data.thumbnail != null && { thumbnail: data.thumbnail }),
           ...(data.artist != null && { artist: data.artist }),
           ...(data.album != null && { album: data.album }),
+          ...(data.speed != null && { speed: data.speed }),
+          ...(data.eta != null && { eta: data.eta }),
+          ...(data.itemIndex != null && { itemIndex: data.itemIndex }),
+          ...(data.itemTotal != null && { itemTotal: data.itemTotal }),
+          ...(data.currentTrack != null && { currentTrack: data.currentTrack }),
+          ...(data.quality != null && { quality: data.quality }),
         });
       }),
-      window.electron.downloads.onComplete((data) => {
+      tauriAPI.downloads.onComplete((data) => {
         const hasWarnings = !!data.warnings;
         addOrUpdate({
           order: data.order,
           progress: 100,
-          status: hasWarnings ? 'error' : 'complete',
+          status: hasWarnings ? 'partial' : 'complete',
           error: data.warnings ?? undefined,
+          failures: hasWarnings
+            ? (data.fullLog ?? '').split('\n').filter((l) => l.startsWith('✗'))
+            : undefined,
           location: data.location ?? undefined,
         });
         addLog({
@@ -58,7 +64,7 @@ export function useDownloadEvents() {
           level: hasWarnings ? 'warning' : 'info',
         });
       }),
-      window.electron.downloads.onError((data) => {
+      tauriAPI.downloads.onError((data) => {
         const order = typeof data === 'object' ? data.order : undefined;
         const error = typeof data === 'object' ? data.error : String(data);
         const fullLog = typeof data === 'object' ? data.fullLog : String(data);

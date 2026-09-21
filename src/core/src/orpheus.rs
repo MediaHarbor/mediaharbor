@@ -1,33 +1,74 @@
 use std::{
     path::PathBuf,
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    sync::{atomic::AtomicBool, Arc},
+    time::Duration,
 };
-use chrono::Utc;
-use tokio::io::AsyncWriteExt;
 
 use crate::{
     defaults::Settings,
     errors::{MhError, MhResult},
     ipc_contract::{BackendLogEvent, DownloadProgressEvent, ProcessStdinPromptEvent},
-    subprocess::{run_to_completion, spawn_with_output, LineSource},
-    venv_manager,
-    EventEmitter,
+    services::common::cli::driver::{
+        drive, IdleAction, LineEffect, ProcessDriver, Prompts, Running,
+    },
+    subprocess::{run_to_completion, spawn_with_output_opts, strip_ansi, LineMode, LineSource},
+    venv_manager, EventEmitter,
 };
 
 pub const ORPHEUS_GIT_URL: &str = "https://github.com/OrfiTeam/OrpheusDL";
 
 pub const KNOWN_MODULES: &[(&str, &str, &str)] = &[
-    ("tidal",      "Tidal",       "https://github.com/Dniel97/orpheusdl-tidal"),
-    ("qobuz",      "Qobuz",       "https://github.com/OrfiDev/orpheusdl-qobuz"),
-    ("deezer",     "Deezer",      "https://github.com/uhwot/orpheusdl-deezer"),
-    ("soundcloud", "SoundCloud",  "https://github.com/OrfiDev/orpheusdl-soundcloud"),
-    ("napster",    "Napster",     "https://github.com/OrfiDev/orpheusdl-napster"),
-    ("beatport",   "Beatport",    "https://github.com/Dniel97/orpheusdl-beatport"),
-    ("nugs",       "Nugs.net",    "https://github.com/Dniel97/orpheusdl-nugs"),
-    ("kkbox",      "KKBox",       "https://github.com/uhwot/orpheusdl-kkbox"),
-    ("bugs",       "Bugs! Music", "https://github.com/Dniel97/orpheusdl-bugsmusic"),
-    ("idagio",     "Idagio",      "https://github.com/Dniel97/orpheusdl-idagio"),
-    ("jiosaavn",   "JioSaavn",    "https://github.com/bunnykek/orpheusdl-jiosaavn"),
+    (
+        "tidal",
+        "Tidal",
+        "https://github.com/Dniel97/orpheusdl-tidal",
+    ),
+    (
+        "qobuz",
+        "Qobuz",
+        "https://github.com/OrfiDev/orpheusdl-qobuz",
+    ),
+    (
+        "deezer",
+        "Deezer",
+        "https://github.com/uhwot/orpheusdl-deezer",
+    ),
+    (
+        "soundcloud",
+        "SoundCloud",
+        "https://github.com/OrfiDev/orpheusdl-soundcloud",
+    ),
+    (
+        "napster",
+        "Napster",
+        "https://github.com/OrfiDev/orpheusdl-napster",
+    ),
+    (
+        "beatport",
+        "Beatport",
+        "https://github.com/Dniel97/orpheusdl-beatport",
+    ),
+    (
+        "nugs",
+        "Nugs.net",
+        "https://github.com/Dniel97/orpheusdl-nugs",
+    ),
+    ("kkbox", "KKBox", "https://github.com/uhwot/orpheusdl-kkbox"),
+    (
+        "bugs",
+        "Bugs! Music",
+        "https://github.com/Dniel97/orpheusdl-bugsmusic",
+    ),
+    (
+        "idagio",
+        "Idagio",
+        "https://github.com/Dniel97/orpheusdl-idagio",
+    ),
+    (
+        "jiosaavn",
+        "JioSaavn",
+        "https://github.com/bunnykek/orpheusdl-jiosaavn",
+    ),
 ];
 
 pub fn get_orpheus_dir() -> PathBuf {
@@ -62,17 +103,47 @@ pub fn is_module_installed(id: &str) -> bool {
 }
 
 pub async fn install_orpheus<F: Fn(u8, &str) + Send>(progress: F) -> MhResult<()> {
+    if crate::sandbox::is_sandboxed() {
+        return Err(MhError::Unsupported(
+            "OrpheusDL cannot be installed inside the Flatpak/Snap sandbox — it clones a git \
+             repository and installs into a separate Python environment, which the sandbox \
+             blocks. Use MediaHarbor's native backends, or install the desktop build outside \
+             the sandbox."
+                .to_string(),
+        ));
+    }
+
     let system_python = venv_manager::find_system_python().await?;
     let venv_dir = get_orpheus_venv_dir();
     let orpheus_dir = get_orpheus_dir();
 
-    let venv_str = venv_dir.to_str().unwrap_or("").to_string();
+    let venv_str = venv_dir
+        .to_str()
+        .ok_or_else(|| {
+            MhError::Other(
+                "OrpheusDL's data path contains invalid (non-UTF-8) characters.".to_string(),
+            )
+        })?
+        .to_string();
 
     progress(5, "Creating virtual environment");
     run_to_completion(&system_python, &["-m", "venv", &venv_str], None, None).await?;
 
     let python = get_orpheus_python();
     let python_str = python.to_str().unwrap_or("python").to_string();
+
+    // This venv gets its own certifi: the python.org build MediaHarbor installs on
+    // macOS ships no CA store, so cloning and pip-installing below would otherwise
+    // fail TLS verification. Best effort — the OS bundle is still a fallback.
+    run_to_completion(
+        &python_str,
+        &["-m", "pip", "install", "--upgrade", "certifi"],
+        None,
+        None,
+    )
+    .await
+    .ok();
+    crate::venv_manager::invalidate_ca_bundle_cache();
 
     progress(15, "Cloning OrpheusDL");
     if orpheus_dir.join(".git").exists() {
@@ -88,7 +159,13 @@ pub async fn install_orpheus<F: Fn(u8, &str) + Send>(progress: F) -> MhResult<()
     let req_path = orpheus_dir.join("requirements.txt");
     if req_path.exists() {
         let req_str = req_path.to_str().unwrap_or("").to_string();
-        run_to_completion(&python_str, &["-m", "pip", "install", "-r", &req_str], None, None).await?;
+        run_to_completion(
+            &python_str,
+            &["-m", "pip", "install", "-r", &req_str],
+            None,
+            None,
+        )
+        .await?;
     }
 
     progress(90, "Creating directories");
@@ -96,13 +173,24 @@ pub async fn install_orpheus<F: Fn(u8, &str) + Send>(progress: F) -> MhResult<()
     tokio::fs::create_dir_all(orpheus_dir.join("config")).await?;
 
     progress(95, "Refreshing settings");
-    run_to_completion(&python_str, &["orpheus.py", "settings", "refresh"], None, Some(&orpheus_dir)).await.ok();
+    run_to_completion(
+        &python_str,
+        &["orpheus.py", "settings", "refresh"],
+        None,
+        Some(&orpheus_dir),
+    )
+    .await
+    .ok();
 
     progress(100, "Done");
     Ok(())
 }
 
-pub async fn install_module<F: Fn(u8, &str)>(module_id: &str, git_url: &str, progress: F) -> MhResult<()> {
+pub async fn install_module<F: Fn(u8, &str)>(
+    module_id: &str,
+    git_url: &str,
+    progress: F,
+) -> MhResult<()> {
     let orpheus_dir = get_orpheus_dir();
     let module_dir = orpheus_dir.join("modules").join(module_id);
     let python = get_orpheus_python();
@@ -127,11 +215,24 @@ pub async fn install_module<F: Fn(u8, &str)>(module_id: &str, git_url: &str, pro
     let req_path = module_dir.join("requirements.txt");
     if req_path.exists() {
         let req_str = req_path.to_str().unwrap_or("").to_string();
-        run_to_completion(&python_str, &["-m", "pip", "install", "-r", &req_str], None, None).await?;
+        run_to_completion(
+            &python_str,
+            &["-m", "pip", "install", "-r", &req_str],
+            None,
+            None,
+        )
+        .await?;
     }
 
     progress(90, "Refreshing settings");
-    run_to_completion(&python_str, &["orpheus.py", "settings", "refresh"], None, Some(&orpheus_dir)).await.ok();
+    run_to_completion(
+        &python_str,
+        &["orpheus.py", "settings", "refresh"],
+        None,
+        Some(&orpheus_dir),
+    )
+    .await
+    .ok();
 
     progress(100, "Done");
     Ok(())
@@ -151,103 +252,99 @@ pub fn map_quality(platform: &str, settings: &Settings) -> &'static str {
             _ => "hifi",
         },
         "deezer" => {
-            if settings.deezer_quality == "FLAC" { "lossless" } else { "high" }
-        },
+            if settings.deezer_quality == "FLAC" {
+                "lossless"
+            } else {
+                "high"
+            }
+        }
         _ => "hifi",
     }
 }
+
+/// Default `settings.json` entries per OrpheusDL module. Seeded only when the key
+/// is absent, so a value the user edited by hand is never overwritten.
+#[rustfmt::skip]
+const MODULE_DEFAULTS: &[(&str, &[(&str, &str)])] = &[
+    ("deezer", &[
+        ("client_id", "447462"), ("client_secret", "a83bf7f38ad2f137e444727cfc3775cf"),
+        ("bf_secret", ""), ("email", ""), ("password", ""),
+    ]),
+    ("qobuz", &[
+        ("app_id", ""), ("app_secret", ""), ("quality_format", "{sample_rate}"),
+        ("username", ""), ("password", ""),
+    ]),
+    ("soundcloud", &[("web_access_token", "")]),
+    ("napster", &[
+        ("api_key", ""), ("customer_secret", ""), ("requested_netloc", ""),
+        ("username", ""), ("password", ""),
+    ]),
+    ("beatport", &[("username", ""), ("password", "")]),
+    ("nugs", &[
+        ("username", ""), ("password", ""),
+        ("client_id", "Eg7HuH873H65r5rt325UytR5429"), ("dev_key", "x7f54tgbdyc64y656thy47er4"),
+    ]),
+    ("kkbox", &[
+        ("kc1_key", ""), ("secret_key", ""), ("email", ""), ("password", ""),
+    ]),
+    ("bugs", &[("username", ""), ("password", "")]),
+    ("idagio", &[("username", ""), ("password", "")]),
+];
 
 fn apply_credentials(root: &mut serde_json::Value, settings: &Settings) {
     if root["modules"].as_object().is_none() {
         root["modules"] = serde_json::json!({});
     }
 
-    macro_rules! ensure_field {
-        ($module:expr, $key:expr, $val:expr) => {{
-            if root["modules"][$module].as_object().is_none() {
-                root["modules"][$module] = serde_json::json!({});
-            }
-            root["modules"][$module][$key] = serde_json::Value::String($val.to_string());
-        }};
+    let mut set = |module: &str, key: &str, val: &str, only_if_absent: bool| {
+        let modules = &mut root["modules"];
+        if modules[module].as_object().is_none() {
+            modules[module] = serde_json::json!({});
+        }
+        if !only_if_absent || modules[module][key].is_null() {
+            modules[module][key] = serde_json::Value::String(val.to_string());
+        }
+    };
+
+    for (module, defaults) in MODULE_DEFAULTS {
+        for (key, val) in *defaults {
+            set(module, key, val, true);
+        }
     }
-
-    macro_rules! seed_field {
-        ($module:expr, $key:expr, $val:expr) => {{
-            if root["modules"][$module].as_object().is_none() {
-                root["modules"][$module] = serde_json::json!({});
-            }
-            if root["modules"][$module][$key].is_null() {
-                root["modules"][$module][$key] = serde_json::Value::String($val.to_string());
-            }
-        }};
-        ($module:expr, $key:expr, bool $val:expr) => {{
-            if root["modules"][$module].as_object().is_none() {
-                root["modules"][$module] = serde_json::json!({});
-            }
-            if root["modules"][$module][$key].is_null() {
-                root["modules"][$module][$key] = serde_json::Value::Bool($val);
-            }
-        }};
-    }
-
-    seed_field!("deezer", "client_id", "447462");
-    seed_field!("deezer", "client_secret", "a83bf7f38ad2f137e444727cfc3775cf");
-    seed_field!("deezer", "bf_secret", "");
-    seed_field!("deezer", "email", "");
-    seed_field!("deezer", "password", "");
-
-    seed_field!("qobuz", "app_id", "");
-    seed_field!("qobuz", "app_secret", "");
-    seed_field!("qobuz", "quality_format", "{sample_rate}");
-    seed_field!("qobuz", "username", "");
-    seed_field!("qobuz", "password", "");
-
-    seed_field!("soundcloud", "web_access_token", "");
-
-    seed_field!("napster", "api_key", "");
-    seed_field!("napster", "customer_secret", "");
-    seed_field!("napster", "requested_netloc", "");
-    seed_field!("napster", "username", "");
-    seed_field!("napster", "password", "");
-
-    seed_field!("beatport", "username", "");
-    seed_field!("beatport", "password", "");
-
-    seed_field!("nugs", "username", "");
-    seed_field!("nugs", "password", "");
-    seed_field!("nugs", "client_id", "Eg7HuH873H65r5rt325UytR5429");
-    seed_field!("nugs", "dev_key", "x7f54tgbdyc64y656thy47er4");
-
-    seed_field!("kkbox", "kc1_key", "");
-    seed_field!("kkbox", "secret_key", "");
-    seed_field!("kkbox", "email", "");
-    seed_field!("kkbox", "password", "");
-
-    seed_field!("bugs", "username", "");
-    seed_field!("bugs", "password", "");
-
-    seed_field!("idagio", "username", "");
-    seed_field!("idagio", "password", "");
 
     if !settings.qobuz_email_or_userid.is_empty() {
-        ensure_field!("qobuz", "username", settings.qobuz_email_or_userid);
-        ensure_field!("qobuz", "password", settings.qobuz_password_or_token);
-        ensure_field!("qobuz", "app_id", settings.qobuz_app_id);
-        ensure_field!("qobuz", "app_secret", settings.qobuz_app_secret);
+        set("qobuz", "username", &settings.qobuz_email_or_userid, false);
+        set(
+            "qobuz",
+            "password",
+            &settings.qobuz_password_or_token,
+            false,
+        );
+        let qobuz_pair = crate::services::qobuz::app_credentials::configured_pair(settings);
+        let (qobuz_app_id, qobuz_app_secret) =
+            qobuz_pair.map(|p| (p.app_id, p.secret)).unwrap_or_default();
+        set("qobuz", "app_id", &qobuz_app_id, false);
+        set("qobuz", "app_secret", &qobuz_app_secret, false);
     }
 }
 
-pub async fn write_settings_json(settings: &Settings, output_dir: &str, quality: &str) -> MhResult<()> {
+pub async fn write_settings_json(
+    settings: &Settings,
+    output_dir: &str,
+    quality: &str,
+) -> MhResult<()> {
     let orpheus_dir = get_orpheus_dir();
     let config_dir = orpheus_dir.join("config");
     tokio::fs::create_dir_all(&config_dir).await?;
     let settings_path = config_dir.join("settings.json");
 
     let mut root = if settings_path.exists() {
-        let raw = tokio::fs::read_to_string(&settings_path).await
+        let raw = tokio::fs::read_to_string(&settings_path)
+            .await
             .map_err(|e| MhError::Other(format!("Failed to read settings.json: {}", e)))?;
-        serde_json::from_str(&raw)
-            .unwrap_or_else(|_| serde_json::json!({"global": {"general": {}}, "extensions": {}, "modules": {}}))
+        serde_json::from_str(&raw).unwrap_or_else(
+            |_| serde_json::json!({"global": {"general": {}}, "extensions": {}, "modules": {}}),
+        )
     } else {
         serde_json::json!({"global": {"general": {}}, "extensions": {}, "modules": {}})
     };
@@ -264,23 +361,26 @@ pub async fn write_settings_json(settings: &Settings, output_dir: &str, quality:
 }
 
 fn emit_log(emitter: &Arc<dyn EventEmitter>, level: &str, message: &str) {
-    emitter.emit_log(&BackendLogEvent {
-        level: level.to_string(),
-        source: "orpheusdl".to_string(),
-        title: "OrpheusDL".to_string(),
-        message: message.to_string(),
-        timestamp: Utc::now().to_rfc3339(),
-    });
+    emitter.emit_log(&BackendLogEvent::new(
+        level,
+        "orpheusdl",
+        "OrpheusDL",
+        message.to_string(),
+    ));
 }
 
-fn emit_consolidated_log(emitter: &Arc<dyn EventEmitter>, level: &str, title: &str, lines: &[String]) {
-    emitter.emit_log(&BackendLogEvent {
-        level: level.to_string(),
-        source: "orpheusdl".to_string(),
-        title: title.to_string(),
-        message: lines.join("\n"),
-        timestamp: Utc::now().to_rfc3339(),
-    });
+fn emit_consolidated_log(
+    emitter: &Arc<dyn EventEmitter>,
+    level: &str,
+    title: &str,
+    lines: &[String],
+) {
+    emitter.emit_log(&BackendLogEvent::new(
+        level,
+        "orpheusdl",
+        title,
+        lines.join("\n"),
+    ));
 }
 
 fn emit_error_progress(emitter: &Arc<dyn EventEmitter>, download_id: u64, msg: &str) {
@@ -292,6 +392,7 @@ fn emit_error_progress(emitter: &Arc<dyn EventEmitter>, download_id: u64, msg: &
         status: format!("error: {}", msg),
         item_index: None,
         item_total: None,
+        quality: None,
     });
 }
 
@@ -306,7 +407,6 @@ fn is_prompt_indicator(line: &str) -> bool {
         || (lower.contains("choose") && lower.ends_with(':'))
 }
 
-
 pub async fn run_orpheus_download(
     url: &str,
     output_dir: &str,
@@ -319,7 +419,10 @@ pub async fn run_orpheus_download(
 ) -> MhResult<()> {
     let quality = map_quality(platform, settings);
     let mut log_buf: Vec<String> = Vec::new();
-    let log_title = format!("OrpheusDL: {}", if url.len() > 60 { &url[..60] } else { url });
+    let log_title = format!(
+        "OrpheusDL: {}",
+        crate::services::common::pipeline::truncate_str_bytes(url, 60)
+    );
 
     log_buf.push(format!(
         "Starting OrpheusDL download: url={} platform={} output_dir={} quality={}",
@@ -327,14 +430,16 @@ pub async fn run_orpheus_download(
     ));
     log_buf.push(format!(
         "orpheus_installed={} module_installed={}",
-        is_orpheus_installed(), is_module_installed(platform)
+        is_orpheus_installed(),
+        is_module_installed(platform)
     ));
 
     let python = get_orpheus_python();
     let orpheus_dir = get_orpheus_dir();
     log_buf.push(format!(
         "python={} cwd={}",
-        python.display(), orpheus_dir.display()
+        python.display(),
+        orpheus_dir.display()
     ));
 
     if let Err(e) = write_settings_json(settings, output_dir, quality).await {
@@ -356,13 +461,16 @@ pub async fn run_orpheus_download(
     ));
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(LineSource, String)>(256);
-    let mut handle = match spawn_with_output(
+    let mut handle = match spawn_with_output_opts(
         &python_str,
         &["-u", "orpheus.py", &url_owned, "-o", &output_owned],
         None,
         Some(&orpheus_dir_clone),
         tx,
-    ).await {
+        LineMode::NewlineOrCarriageReturn,
+    )
+    .await
+    {
         Ok(h) => h,
         Err(e) => {
             let msg = format!("Failed to spawn orpheus.py: {}", e);
@@ -375,98 +483,51 @@ pub async fn run_orpheus_download(
 
     log_buf.push("Process spawned, reading output...".to_string());
 
-    let mut stdin_writer = handle.stdin.take().map(tokio::io::BufWriter::new);
-
-    let emitter_clone = emitter.clone();
-    let mut new_settings_detected = false;
-    let mut prompt_lines: Vec<String> = Vec::new();
-
-    loop {
-        if cancelled.load(Ordering::Relaxed) {
-            handle.kill().await;
-            log_buf.push("Download cancelled".to_string());
-            emit_consolidated_log(&emitter_clone, "info", &log_title, &log_buf);
-            return Err(MhError::Cancelled);
-        }
-
-        let prompt_pending = !prompt_lines.is_empty();
-        tokio::select! {
-            msg = rx.recv() => {
-                match msg {
-                    Some((src, line)) => {
-                        let src_label = match src { LineSource::Stdout => "stdout", LineSource::Stderr => "stderr" };
-                        let clean = strip_ansi_cr(&line);
-                        log_buf.push(format!("[{}] {}", src_label, clean));
-                        if clean.contains("New settings detected") {
-                            new_settings_detected = true;
-                        }
-                        if is_prompt_indicator(&clean) {
-                            prompt_lines.clear();
-                            prompt_lines.push(clean.clone());
-                        } else if !prompt_lines.is_empty() {
-                            if !clean.trim().is_empty() {
-                                prompt_lines.push(clean.clone());
-                            }
-                        }
-                        let percent = parse_orpheus_progress(&clean);
-                        if percent > 0.0 {
-                            emitter_clone.emit_progress(&DownloadProgressEvent {
-                                download_id,
-                                percent,
-                                speed: None,
-                                eta: None,
-                                status: "downloading".into(),
-                                item_index: None,
-                                item_total: None,
-                            });
-                        }
-                    }
-                    None => break,
-                }
-            }
-            _ = tokio::time::sleep(std::time::Duration::from_millis(300)), if prompt_pending => {
-                emitter_clone.emit_stdin_prompt(&ProcessStdinPromptEvent {
-                    download_id,
-                    prompt_lines: prompt_lines.clone(),
-                });
-                prompt_lines.clear();
-                if let Some(response) = stdin_rx.recv().await {
-                    if let Some(ref mut w) = stdin_writer {
-                        let _ = w.write_all(response.as_bytes()).await;
-                        let _ = w.write_all(b"\n").await;
-                        let _ = w.flush().await;
-                    }
-                }
-            }
-        }
-    }
-
-    if new_settings_detected {
-        let msg = "OrpheusDL reset its settings.json — a newly installed module needs its credentials filled in via Settings → OrpheusDL, then retry the download";
-        log_buf.push(msg.to_string());
-        emit_consolidated_log(&emitter, "error", &log_title, &log_buf);
-        emit_error_progress(&emitter, download_id, msg);
-        return Err(MhError::Other(msg.to_string()));
-    }
-
-    let status = match handle.child.wait().await {
-        Ok(s) => s,
-        Err(e) => {
-            let msg = format!("Failed to wait for orpheus.py: {}", e);
-            log_buf.push(msg.clone());
-            emit_consolidated_log(&emitter, "error", &log_title, &log_buf);
-            emit_error_progress(&emitter, download_id, &msg);
-            return Err(MhError::Subprocess(e.to_string()));
+    let ask = {
+        let emitter = emitter.clone();
+        move |prompt_lines: Vec<String>| {
+            emitter.emit_stdin_prompt(&ProcessStdinPromptEvent {
+                download_id,
+                prompt_lines,
+            });
         }
     };
+    let mut driver = OrpheusDriver::default();
+    let result = drive(
+        &mut driver,
+        Running::new(&mut handle, &mut rx, PROMPT_DEBOUNCE).answered_by(Prompts {
+            replies: &mut stdin_rx,
+            ask: &ask,
+        }),
+        &cancelled,
+        |percent| {
+            emitter.emit_progress(&DownloadProgressEvent {
+                download_id,
+                percent,
+                speed: None,
+                eta: None,
+                status: "downloading".into(),
+                item_index: None,
+                item_total: None,
+                quality: None,
+            });
+        },
+        |_| {},
+    )
+    .await;
 
-    log_buf.push(format!("orpheus.py exited with code {:?}", status.code()));
+    log_buf.extend(driver.log);
 
-    if !status.success() {
-        let msg = format!("orpheus.py exited with code {:?}", status.code());
-        emit_consolidated_log(&emitter, "error", &log_title, &log_buf);
-        emit_error_progress(&emitter, download_id, &msg);
-        return Err(MhError::Subprocess(msg));
+    if let Err(e) = result {
+        let level = if matches!(e, MhError::Cancelled) {
+            "info"
+        } else {
+            emit_error_progress(&emitter, download_id, &e.to_string());
+            "error"
+        };
+        log_buf.push(e.to_string());
+        emit_consolidated_log(&emitter, level, &log_title, &log_buf);
+        return Err(e);
     }
 
     emit_consolidated_log(&emitter, "info", &log_title, &log_buf);
@@ -478,8 +539,91 @@ pub async fn run_orpheus_download(
         status: "completed".into(),
         item_index: None,
         item_total: None,
+        quality: None,
     });
     Ok(())
+}
+
+/// How long OrpheusDL must be silent before a half-printed question is taken as a
+/// prompt it is now blocked on. It prints the question across several lines and then
+/// simply waits, with no newline to mark the end.
+const PROMPT_DEBOUNCE: Duration = Duration::from_millis(300);
+
+/// Silence that means the run is wedged rather than thinking.
+const ORPHEUS_STALL: Duration = Duration::from_secs(300);
+
+/// What OrpheusDL's output means. The loop feeding it is shared with every other
+/// spawned downloader.
+#[derive(Default)]
+struct OrpheusDriver {
+    /// OrpheusDL's log is emitted once at the end rather than streamed, so the lines
+    /// are collected here instead of going out through `on_log`.
+    log: Vec<String>,
+    prompt_lines: Vec<String>,
+    new_settings_detected: bool,
+}
+
+impl ProcessDriver for OrpheusDriver {
+    type Progress = f32;
+
+    fn feed(&mut self, source: LineSource, line: &str) -> LineEffect<f32> {
+        let label = match source {
+            LineSource::Stdout => "stdout",
+            LineSource::Stderr => "stderr",
+        };
+        let clean = strip_ansi(line);
+        let clean = clean.trim();
+        self.log.push(format!("[{}] {}", label, clean));
+
+        if clean.contains("New settings detected") {
+            self.new_settings_detected = true;
+        }
+
+        // A question starts a block; the lines after it are its continuation, until the
+        // output goes quiet and `on_idle` hands the whole block over.
+        if is_prompt_indicator(clean) {
+            self.prompt_lines.clear();
+            self.prompt_lines.push(clean.to_string());
+        } else if !self.prompt_lines.is_empty() && !clean.is_empty() {
+            self.prompt_lines.push(clean.to_string());
+        }
+
+        let percent = parse_orpheus_progress(clean);
+        if percent > 0.0 {
+            LineEffect::important(percent)
+        } else {
+            LineEffect::None
+        }
+    }
+
+    fn on_idle(&mut self, idle: Duration) -> IdleAction {
+        if !self.prompt_lines.is_empty() {
+            return IdleAction::Prompt(std::mem::take(&mut self.prompt_lines));
+        }
+        if idle > ORPHEUS_STALL {
+            IdleAction::Stall(
+                "OrpheusDL stopped responding (no output for 5 minutes) and was stopped.".into(),
+            )
+        } else {
+            IdleAction::Wait
+        }
+    }
+
+    fn finish(&mut self, exit_code: i32) -> MhResult<Option<f32>> {
+        if self.new_settings_detected {
+            return Err(MhError::Other(
+                "OrpheusDL reset its settings.json — a newly installed module needs its credentials filled in via Settings → OrpheusDL, then retry the download".into(),
+            ));
+        }
+        if exit_code != 0 {
+            return Err(MhError::Subprocess(format!(
+                "orpheus.py exited with code {}",
+                exit_code
+            )));
+        }
+        // The caller emits the completed event, which carries a status this cannot.
+        Ok(None)
+    }
 }
 
 pub async fn read_settings_json() -> MhResult<String> {
@@ -487,7 +631,8 @@ pub async fn read_settings_json() -> MhResult<String> {
     if !path.exists() {
         return Ok(String::new());
     }
-    tokio::fs::read_to_string(&path).await
+    tokio::fs::read_to_string(&path)
+        .await
         .map_err(|e| MhError::Other(format!("Failed to read settings.json: {}", e)))
 }
 
@@ -500,85 +645,59 @@ pub async fn write_raw_settings_json(content: &str) -> MhResult<()> {
     Ok(())
 }
 
+/// A depth-1 clone builder. These checkouts are only ever read as a working
+/// tree — nothing inspects their history — so the rest of the log is download
+/// and disk nobody spends.
+fn shallow() -> git2::build::RepoBuilder<'static> {
+    let mut fetch = git2::FetchOptions::new();
+    fetch.depth(1);
+    let mut builder = git2::build::RepoBuilder::new();
+    builder.fetch_options(fetch);
+    builder
+}
+
 async fn git_clone(url: &str, dest: &std::path::Path) -> MhResult<()> {
     let url = url.to_string();
     let dest = dest.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        git2::Repository::clone(&url, &dest)
-            .map(|_| ())
-            .map_err(|e| MhError::Other(e.to_string()))
-    })
-    .await
-    .map_err(|e| MhError::Other(e.to_string()))?
+    tokio::task::spawn_blocking(move || shallow().clone(&url, &dest).map(|_| ())).await??;
+    Ok(())
 }
 
 async fn git_clone_recursive(url: &str, dest: &std::path::Path) -> MhResult<()> {
     let url = url.to_string();
     let dest = dest.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::clone(&url, &dest)
-            .map_err(|e| MhError::Other(e.to_string()))?;
-        let mut submodules = repo.submodules()
-            .map_err(|e| MhError::Other(e.to_string()))?;
-        for sub in submodules.iter_mut() {
-            sub.update(true, None)
-                .map_err(|e| MhError::Other(e.to_string()))?;
+    tokio::task::spawn_blocking(move || -> Result<(), git2::Error> {
+        let repo = shallow().clone(&url, &dest)?;
+        for sub in repo.submodules()?.iter_mut() {
+            sub.update(true, None)?;
         }
         Ok(())
     })
-    .await
-    .map_err(|e| MhError::Other(e.to_string()))?
+    .await??;
+    Ok(())
 }
 
 async fn git_pull(repo_path: &std::path::Path) -> MhResult<()> {
     let repo_path = repo_path.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)
-            .map_err(|e| MhError::Other(e.to_string()))?;
-        let mut remote = repo.find_remote("origin")
-            .map_err(|e| MhError::Other(e.to_string()))?;
-        remote.fetch(&[] as &[&str], None, None)
-            .map_err(|e| MhError::Other(e.to_string()))?;
-        let fetch_head = repo.find_reference("FETCH_HEAD")
-            .map_err(|e| MhError::Other(e.to_string()))?;
-        let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)
-            .map_err(|e| MhError::Other(e.to_string()))?;
-        let (analysis, _) = repo.merge_analysis(&[&fetch_commit])
-            .map_err(|e| MhError::Other(e.to_string()))?;
+    tokio::task::spawn_blocking(move || -> Result<(), git2::Error> {
+        let repo = git2::Repository::open(&repo_path)?;
+        repo.find_remote("origin")?
+            .fetch(&[] as &[&str], None, None)?;
+        let fetch_head = repo.find_reference("FETCH_HEAD")?;
+        let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
+        let (analysis, _) = repo.merge_analysis(&[&fetch_commit])?;
         if analysis.is_fast_forward() {
-            let head = repo.head().map_err(|e| MhError::Other(e.to_string()))?;
+            let head = repo.head()?;
             let refname = head.name().unwrap_or("refs/heads/main").to_string();
-            let mut reference = repo.find_reference(&refname)
-                .map_err(|e| MhError::Other(e.to_string()))?;
-            reference.set_target(fetch_commit.id(), "fast-forward")
-                .map_err(|e| MhError::Other(e.to_string()))?;
-            repo.set_head(&refname)
-                .map_err(|e| MhError::Other(e.to_string()))?;
-            repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
-                .map_err(|e| MhError::Other(e.to_string()))?;
+            repo.find_reference(&refname)?
+                .set_target(fetch_commit.id(), "fast-forward")?;
+            repo.set_head(&refname)?;
+            repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))?;
         }
         Ok(())
     })
-    .await
-    .map_err(|e| MhError::Other(e.to_string()))?
-}
-
-fn strip_ansi_cr(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                for ch in chars.by_ref() {
-                    if ch.is_ascii_alphabetic() { break; }
-                }
-            }
-        } else if c != '\r' {
-            out.push(c);
-        }
-    }
-    out
+    .await??;
+    Ok(())
 }
 
 fn parse_orpheus_progress(line: &str) -> f32 {

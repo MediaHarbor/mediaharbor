@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+use crate::services::common::library::ServicePlatform;
+
 pub fn default_download_dir() -> String {
+    if crate::sandbox::is_snap() {
+        if let Some(p) = crate::sandbox::snap_download_dir() {
+            return p.to_string_lossy().to_string();
+        }
+    }
     dirs::download_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join("Downloads")))
         .or_else(dirs::home_dir)
@@ -11,8 +18,12 @@ pub fn default_download_dir() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    #[serde(rename = "schemaVersion")]
+    pub schema_version: u32,
     #[serde(rename = "autoUpdate")]
     pub auto_update: bool,
+    #[serde(rename = "autoDownloadUpdates")]
+    pub auto_download_updates: bool,
     pub theme: String,
     #[serde(rename = "downloadLocation")]
     pub download_location: String,
@@ -21,10 +32,21 @@ pub struct Settings {
     #[serde(rename = "orpheusDL")]
     pub orpheus_dl: bool,
 
+    #[serde(rename = "enabledServices")]
+    pub enabled_services: Vec<String>,
+
+    /// Station directories the radio page asks. The user's own stations are not
+    /// listed here — they are data rather than a feed, and are always present.
+    #[serde(rename = "radioDirectorySources")]
+    pub radio_directory_sources: Vec<String>,
+
     pub use_cookies: bool,
     pub cookies: String,
     pub cookies_from_browser: String,
-    pub override_download_extension: bool,
+    pub ytdlp_cookies_path: String,
+    pub youtube_cookies_path: String,
+    pub ytmusic_cookies_path: String,
+    pub ytmusic_sync_playback_history: bool,
     pub yt_override_download_extension: bool,
     pub ytm_override_download_extension: bool,
     #[serde(rename = "youtubeVideoExtensions")]
@@ -54,22 +76,60 @@ pub struct Settings {
     pub no_sponsorblock: bool,
     pub sponsorblock_api_url: String,
 
+    pub concurrent_fragments: u32,
+    pub remux_format: String,
+    pub convert_thumbnails_jpg: bool,
+    pub sub_langs: String,
+    pub write_auto_subs: bool,
+    pub convert_subs_srt: bool,
+    pub fragment_retries: String,
+    pub extractor_retries: String,
+    pub file_access_retries: String,
+    pub socket_timeout: u32,
+    pub throttled_rate: String,
+    pub sleep_requests: String,
+    pub sleep_interval: String,
+    pub max_sleep_interval: String,
+    pub aria2c_args: String,
+    pub postprocessor_args: String,
+    pub faststart_mp4: bool,
+    pub trim_filenames: u32,
+    pub restrict_filenames: bool,
+    pub windows_filenames: bool,
+    pub no_overwrites: bool,
+    pub geo_bypass_country: String,
+    pub set_mtime: bool,
+    pub player_client: String,
+    pub ejs_remote_components: String,
+    pub pot_provider_enabled: bool,
+    pub po_token: String,
+    pub pot_trace: bool,
+    pub extra_args: String,
+
     pub disc_subdirectories: bool,
-    pub concurrency: bool,
-    pub max_connections: u32,
-    pub requests_per_minute: u32,
+    pub save_playlist_file: bool,
 
     pub qobuz_quality: u8,
     pub qobuz_download_booklets: bool,
-    pub qobuz_token_or_email: bool,
     pub qobuz_email_or_userid: String,
     pub qobuz_password_or_token: String,
     pub qobuz_app_id: String,
     pub qobuz_app_secret: String,
     pub qobuz_secrets: String,
+    pub qobuz_telemetry_enabled: bool,
+    pub qobuz_sync_playback_history: bool,
 
     pub tidal_quality: u8,
+    pub tidal_telemetry_enabled: bool,
+    pub tidal_sync_playback_history: bool,
+    pub tidal_device_model: String,
+    pub tidal_device_vendor: String,
+    pub tidal_device_type: String,
+    pub tidal_os_version: String,
+    pub tidal_screen_width: u32,
+    pub tidal_screen_height: u32,
     pub tidal_download_videos: bool,
+    pub tidal_video_quality: String,
     pub tidal_user_id: String,
     pub tidal_country_code: String,
     pub tidal_access_token: String,
@@ -77,14 +137,10 @@ pub struct Settings {
     pub tidal_token_expiry: String,
 
     pub deezer_quality: String,
-    pub deezer_use_deezloader: bool,
     pub deezer_arl: String,
-    pub deezloader_warnings: bool,
-
-    pub downloads_database_check: bool,
-    pub downloads_database: String,
-    pub failed_downloads_database_check: bool,
-    pub failed_downloads_database: String,
+    pub deezer_lrc_public_fallback: bool,
+    pub deezer_telemetry_enabled: bool,
+    pub deezer_sync_playback_history: bool,
 
     pub conversion_check: bool,
     pub conversion_codec: String,
@@ -92,12 +148,9 @@ pub struct Settings {
     pub conversion_bit_depth: Option<u32>,
     pub conversion_lossy_bitrate: u32,
 
-    pub meta_album_name_playlist_check: bool,
-    pub meta_album_order_playlist_check: bool,
     pub meta_exclude_tags_check: bool,
     pub excluded_tags: String,
 
-    pub filepaths_add_singles_to_folder: bool,
     pub filepaths_folder_format: String,
     pub filepaths_track_format: String,
     pub filepaths_restrict_characters: bool,
@@ -105,7 +158,21 @@ pub struct Settings {
 
     pub embed_cover: bool,
     pub save_cover: bool,
+    /// One `cover.jpg` for the release folder, independent of the per-track sidecar.
+    pub save_album_cover: bool,
+    /// Longest edge of the cover art fetched for Tidal, Qobuz and Deezer. Apple and
+    /// Spotify have had their own key for this; these three had a hardcoded size.
+    pub pipeline_cover_size: u32,
+    /// Whether a track already sitting on disk is re-fetched and overwritten. The
+    /// dedup ledger only knows what this install downloaded, so it cannot see a file
+    /// restored from a backup or kept across a library reset.
+    pub pipeline_overwrite: bool,
     pub save_lrc_files: bool,
+    /// LRCLIB is account-less and applies to every service, so it is switched
+    /// separately from Deezer's public endpoint.
+    pub lyrics_fallback_lrclib: bool,
+    pub native_synced_lyrics_format: String,
+    pub embed_lyrics: bool,
 
     pub qobuz_filters_extras: bool,
     pub qobuz_repeats: bool,
@@ -114,20 +181,7 @@ pub struct Settings {
     pub qobuz_non_studio_albums: bool,
     pub qobuz_non_remaster: bool,
 
-    pub soundcloud_quality: u32,
-    pub soundcloud_client_id: String,
-    pub soundcloud_app_version: String,
-
     pub youtube_quality: u32,
-    pub youtube_download_videos: bool,
-    pub youtube_video_downloads_folder: String,
-
-    pub lastfm_source: String,
-    pub lastfm_fallback_source: String,
-
-    pub cli_text_output: bool,
-    pub cli_progress_bars: bool,
-    pub cli_max_search_results: String,
 
     pub spotify_client_id: String,
     pub spotify_client_secret: String,
@@ -171,11 +225,17 @@ pub struct Settings {
     pub spotify_session_type: String,
     pub spotify_dll_path: String,
 
+    pub spotify_downloader_backend: String,
+    pub spotify_native_quality: String,
+    pub spotify_sync_playback_history: bool,
+    pub spotify_telemetry_enabled: bool,
+
+    pub native_skip_existing: bool,
+
     pub apple_cookies_path: String,
     pub apple_output_path: String,
     pub apple_temp_path: String,
     pub apple_download_mode: String,
-    pub apple_remux_mode: String,
     pub apple_cover_format: String,
     pub apple_cover_size: u32,
     pub apple_save_cover: bool,
@@ -197,31 +257,31 @@ pub struct Settings {
     pub apple_exclude_tags: String,
     pub apple_log_level: String,
     pub apple_use_album_date: bool,
-    pub apple_fetch_extra_tags: bool,
     pub apple_no_exceptions: bool,
-    pub apple_mv_enabled: bool,
     pub apple_mv_codec_priority: String,
     pub apple_mv_remux_format: String,
     pub apple_mv_resolution: String,
     pub apple_uploaded_video_quality: String,
-    pub apple_custom_paths_enabled: bool,
     pub apple_nm3u8dlre_path: String,
-    pub apple_mp4decrypt_path: String,
     pub apple_ffmpeg_path: String,
-    pub apple_mp4box_path: String,
     pub apple_wvd_path: String,
     pub apple_use_wrapper: bool,
-    pub apple_wrapper_account_url: String,
-    pub apple_wrapper_decrypt_ip: String,
+    pub apple_wrapper_url: String,
+    pub apple_wrapper_decrypt_host: String,
+    pub apple_wrapper_decrypt_port: String,
+    pub apple_wrapper_email: String,
+    pub apple_wrapper_password: String,
     pub apple_artist_auto_select: String,
     pub apple_playlist_folder_template: String,
-    pub apple_wrapper_m3u8_ip: String,
+
+    pub apple_downloader_backend: String,
+    pub apple_native_quality: String,
+    pub apple_sync_playback_history: bool,
 
     pub orpheus_dl_enabled_modules: String,
-    pub orpheus_download_quality: String,
-    pub orpheus_covers_enabled: bool,
     pub orpheus_custom_modules: String,
 
+    pub replaygain_mode: String,
     pub crossfade_enabled: bool,
     pub crossfade_duration: u32,
 
@@ -230,7 +290,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        let download_location = if crate::sandbox::is_sandboxed() {
+        let download_location = if crate::sandbox::is_flatpak() {
             String::new()
         } else {
             default_download_dir()
@@ -242,16 +302,26 @@ impl Default for Settings {
             .to_string();
 
         Self {
+            schema_version: crate::settings::CURRENT_SCHEMA_VERSION,
             auto_update: true,
+            auto_download_updates: false,
             theme: "auto".into(),
             download_location,
             create_platform_subfolders: false,
             orpheus_dl: false,
+            enabled_services: Vec::new(),
+            radio_directory_sources: crate::services::radio::DEFAULT_SOURCES
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
 
             use_cookies: false,
             cookies: String::new(),
             cookies_from_browser: String::new(),
-            override_download_extension: false,
+            ytdlp_cookies_path: String::new(),
+            youtube_cookies_path: String::new(),
+            ytmusic_cookies_path: String::new(),
+            ytmusic_sync_playback_history: false,
             yt_override_download_extension: false,
             ytm_override_download_extension: false,
             youtube_video_extensions: "mp4".into(),
@@ -278,22 +348,60 @@ impl Default for Settings {
             no_sponsorblock: false,
             sponsorblock_api_url: "https://sponsor.ajay.app".into(),
 
+            concurrent_fragments: 4,
+            remux_format: "mp4".into(),
+            convert_thumbnails_jpg: true,
+            sub_langs: String::new(),
+            write_auto_subs: false,
+            convert_subs_srt: false,
+            fragment_retries: "10".into(),
+            extractor_retries: "3".into(),
+            file_access_retries: "3".into(),
+            socket_timeout: 15,
+            throttled_rate: String::new(),
+            sleep_requests: String::new(),
+            sleep_interval: String::new(),
+            max_sleep_interval: String::new(),
+            aria2c_args: "-x16 -s16 -k1M".into(),
+            postprocessor_args: String::new(),
+            faststart_mp4: true,
+            trim_filenames: 0,
+            restrict_filenames: false,
+            windows_filenames: false,
+            no_overwrites: true,
+            geo_bypass_country: String::new(),
+            set_mtime: false,
+            player_client: String::new(),
+            ejs_remote_components: "ejs:github".into(),
+            pot_provider_enabled: false,
+            po_token: String::new(),
+            pot_trace: false,
+            extra_args: String::new(),
+
             disc_subdirectories: true,
-            concurrency: true,
-            max_connections: 6,
-            requests_per_minute: 60,
+            save_playlist_file: true,
 
             qobuz_quality: 27,
             qobuz_download_booklets: true,
-            qobuz_token_or_email: false,
             qobuz_email_or_userid: String::new(),
             qobuz_password_or_token: String::new(),
             qobuz_app_id: String::new(),
             qobuz_app_secret: String::new(),
             qobuz_secrets: String::new(),
+            qobuz_telemetry_enabled: false,
+            qobuz_sync_playback_history: false,
 
             tidal_quality: 3,
+            tidal_telemetry_enabled: false,
+            tidal_sync_playback_history: false,
+            tidal_device_model: "SM-A166B".to_string(),
+            tidal_device_vendor: "samsung".to_string(),
+            tidal_device_type: "phone".to_string(),
+            tidal_os_version: "14".to_string(),
+            tidal_screen_width: 1080,
+            tidal_screen_height: 2340,
             tidal_download_videos: false,
+            tidal_video_quality: "1080p".into(),
             tidal_user_id: String::new(),
             tidal_country_code: String::new(),
             tidal_access_token: String::new(),
@@ -301,14 +409,10 @@ impl Default for Settings {
             tidal_token_expiry: String::new(),
 
             deezer_quality: "FLAC".into(),
-            deezer_use_deezloader: false,
             deezer_arl: String::new(),
-            deezloader_warnings: true,
-
-            downloads_database_check: false,
-            downloads_database: String::new(),
-            failed_downloads_database_check: false,
-            failed_downloads_database: String::new(),
+            deezer_lrc_public_fallback: true,
+            deezer_telemetry_enabled: false,
+            deezer_sync_playback_history: false,
 
             conversion_check: false,
             conversion_codec: "FLAC".into(),
@@ -316,12 +420,9 @@ impl Default for Settings {
             conversion_bit_depth: None,
             conversion_lossy_bitrate: 320,
 
-            meta_album_name_playlist_check: false,
-            meta_album_order_playlist_check: false,
             meta_exclude_tags_check: false,
             excluded_tags: String::new(),
 
-            filepaths_add_singles_to_folder: true,
             filepaths_folder_format: "{albumartist} - {album} ({year})".into(),
             filepaths_track_format: "{tracknumber:02}. {artist} - {title}{explicit}".into(),
             filepaths_restrict_characters: true,
@@ -329,7 +430,13 @@ impl Default for Settings {
 
             embed_cover: true,
             save_cover: false,
+            save_album_cover: false,
+            pipeline_cover_size: 1280,
+            pipeline_overwrite: false,
             save_lrc_files: false,
+            lyrics_fallback_lrclib: true,
+            native_synced_lyrics_format: "lrc".into(),
+            embed_lyrics: true,
 
             qobuz_filters_extras: false,
             qobuz_repeats: false,
@@ -338,20 +445,7 @@ impl Default for Settings {
             qobuz_non_studio_albums: false,
             qobuz_non_remaster: false,
 
-            soundcloud_quality: 0,
-            soundcloud_client_id: String::new(),
-            soundcloud_app_version: String::new(),
-
             youtube_quality: 0,
-            youtube_download_videos: false,
-            youtube_video_downloads_folder: String::new(),
-
-            lastfm_source: "qobuz".into(),
-            lastfm_fallback_source: String::new(),
-
-            cli_text_output: true,
-            cli_progress_bars: true,
-            cli_max_search_results: "100".into(),
 
             spotify_client_id: String::new(),
             spotify_client_secret: String::new(),
@@ -392,17 +486,22 @@ impl Default for Settings {
             spotify_no_exceptions: false,
             spotify_artist_media_option: "albums".into(),
             spotify_prefer_video: false,
-            spotify_session_type: "web".into(),
+            spotify_session_type: "librespot".into(),
             spotify_dll_path: String::new(),
+
+            spotify_downloader_backend: "native".into(),
+            spotify_native_quality: "aac-high".into(),
+            spotify_sync_playback_history: false,
+            spotify_telemetry_enabled: false,
+            native_skip_existing: true,
 
             apple_cookies_path: String::new(),
             apple_output_path: "Apple Music".into(),
             apple_temp_path,
             apple_download_mode: "ytdlp".into(),
-            apple_remux_mode: "ffmpeg".into(),
             apple_cover_format: "jpg".into(),
             apple_cover_size: 1200,
-            apple_save_cover: true,
+            apple_save_cover: false,
             apple_synced_lyrics_format: "lrc".into(),
             apple_synced_lyrics_only: false,
             apple_no_synced_lyrics: false,
@@ -421,35 +520,65 @@ impl Default for Settings {
             apple_exclude_tags: String::new(),
             apple_log_level: "INFO".into(),
             apple_use_album_date: false,
-            apple_fetch_extra_tags: false,
             apple_no_exceptions: false,
-            apple_mv_enabled: false,
             apple_mv_codec_priority: "h264".into(),
             apple_mv_remux_format: "m4v".into(),
             apple_mv_resolution: "1080p".into(),
             apple_uploaded_video_quality: "best".into(),
-            apple_custom_paths_enabled: false,
             apple_nm3u8dlre_path: "N_m3u8DL-RE".into(),
-            apple_mp4decrypt_path: "mp4decrypt".into(),
             apple_ffmpeg_path: "ffmpeg".into(),
-            apple_mp4box_path: "MP4Box".into(),
             apple_wvd_path: String::new(),
             apple_use_wrapper: false,
-            apple_wrapper_account_url: String::new(),
-            apple_wrapper_decrypt_ip: String::new(),
+            apple_wrapper_url: "http://127.0.0.1".into(),
+            apple_wrapper_decrypt_host: "127.0.0.1".into(),
+            apple_wrapper_decrypt_port: "10020".into(),
+            apple_wrapper_email: String::new(),
+            apple_wrapper_password: String::new(),
             apple_artist_auto_select: String::new(),
             apple_playlist_folder_template: "Playlists/{playlist_name}".into(),
-            apple_wrapper_m3u8_ip: String::new(),
+
+            apple_downloader_backend: "native".into(),
+            apple_native_quality: "aac-256".into(),
+            apple_sync_playback_history: false,
 
             orpheus_dl_enabled_modules: "tidal,qobuz,deezer".into(),
-            orpheus_download_quality: "lossless".into(),
-            orpheus_covers_enabled: true,
             orpheus_custom_modules: "[]".into(),
 
+            replaygain_mode: "off".to_string(),
             crossfade_enabled: false,
             crossfade_duration: 6,
 
             onboarding_completed: false,
+        }
+    }
+}
+
+impl Settings {
+    /// Whether finished plays should be written back to the service's own
+    /// listening history. Off for every service by default.
+    pub fn sync_playback_history(&self, platform: ServicePlatform) -> bool {
+        match platform {
+            ServicePlatform::Spotify => self.spotify_sync_playback_history,
+            ServicePlatform::Tidal => self.tidal_sync_playback_history,
+            ServicePlatform::Qobuz => self.qobuz_sync_playback_history,
+            ServicePlatform::Deezer => self.deezer_sync_playback_history,
+            ServicePlatform::AppleMusic => self.apple_sync_playback_history,
+            ServicePlatform::YtMusic => self.ytmusic_sync_playback_history,
+            ServicePlatform::Youtube => false,
+        }
+    }
+
+    /// Whether to replicate the service app's own analytics traffic. Only the
+    /// four services whose telemetry has been captured can answer `true`.
+    pub fn telemetry_enabled(&self, platform: ServicePlatform) -> bool {
+        match platform {
+            ServicePlatform::Spotify => self.spotify_telemetry_enabled,
+            ServicePlatform::Tidal => self.tidal_telemetry_enabled,
+            ServicePlatform::Qobuz => self.qobuz_telemetry_enabled,
+            ServicePlatform::Deezer => self.deezer_telemetry_enabled,
+            ServicePlatform::AppleMusic | ServicePlatform::YtMusic | ServicePlatform::Youtube => {
+                false
+            }
         }
     }
 }
@@ -470,7 +599,6 @@ mod tests {
         assert_eq!(s.spotify_audio_download_mode, "ytdlp");
         assert_eq!(s.apple_cover_size, 1200);
         assert!(s.embed_cover);
-        assert_eq!(s.requests_per_minute, 60);
     }
 
     #[test]

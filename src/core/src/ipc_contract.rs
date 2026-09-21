@@ -8,15 +8,23 @@ pub fn de_string_or_int<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String
         fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.write_str("string or integer")
         }
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<String, E> { Ok(v.to_string()) }
-        fn visit_string<E: de::Error>(self, v: String) -> Result<String, E> { Ok(v) }
-        fn visit_i64<E: de::Error>(self, v: i64) -> Result<String, E> { Ok(v.to_string()) }
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<String, E> { Ok(v.to_string()) }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+        fn visit_string<E: de::Error>(self, v: String) -> Result<String, E> {
+            Ok(v)
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<String, E> {
+            Ok(v.to_string())
+        }
     }
     d.deserialize_any(StrOrInt)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SearchPlatform {
     #[serde(rename = "spotify")]
     Spotify,
@@ -63,20 +71,19 @@ pub struct SetSettingsRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SetSettingsResponse {
+pub struct OpResponse {
     pub success: bool,
     pub error: Option<String>,
 }
+pub type SetSettingsResponse = OpResponse;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct DialogOpenFolderResponse {
+pub struct PathResponse {
     pub path: Option<String>,
 }
+pub type DialogOpenFolderResponse = PathResponse;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DialogOpenFileResponse {
-    pub path: Option<String>,
-}
+pub type DialogOpenFileResponse = PathResponse;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PerformSearchRequest {
@@ -84,6 +91,16 @@ pub struct PerformSearchRequest {
     pub query: String,
     #[serde(rename = "type")]
     pub search_type: SearchType,
+    #[serde(default)]
+    pub offset: Option<u32>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SearchSuggestionsRequest {
+    pub platform: SearchPlatform,
+    pub query: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -106,22 +123,63 @@ pub struct PlayMediaResponse {
     pub media_type: Option<String>, // "audio" | "video"
     #[serde(default)]
     pub is_live: bool,
+    /// Audio for a `"video"` response, when it is served separately from the
+    /// picture.
+    ///
+    /// The player decodes audio natively for every media type; the `<video>`
+    /// element only draws frames, muted. That needs the two as separate URLs,
+    /// because a progressive stream is consumed once and cannot be read by both.
+    /// `None` means the audio is inside `stream_url` and the element still owns
+    /// it — live HLS, which is remuxed as a single transport stream.
+    #[serde(default)]
+    pub audio_stream_url: Option<String>,
+}
+
+impl PlayMediaResponse {
+    pub fn new(stream_url: String, platform: &str, media_type: &str, is_live: bool) -> Self {
+        Self {
+            stream_url,
+            platform: platform.to_string(),
+            duration_sec: None,
+            media_type: Some(media_type.to_string()),
+            is_live,
+            audio_stream_url: None,
+        }
+    }
+
+    /// Video whose audio is served as its own stream for the native player.
+    pub fn video_with_audio(stream_url: String, audio_stream_url: String, platform: &str) -> Self {
+        Self {
+            audio_stream_url: Some(audio_stream_url),
+            ..Self::new(stream_url, platform, "video", false)
+        }
+    }
+
+    pub fn audio(stream_url: String, platform: &str) -> Self {
+        Self::new(stream_url, platform, "audio", false)
+    }
+
+    pub fn video(stream_url: String, platform: &str) -> Self {
+        Self::new(stream_url, platform, "video", false)
+    }
+
+    pub fn live_video(stream_url: String, platform: &str) -> Self {
+        Self::new(stream_url, platform, "video", true)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PauseMediaResponse {
+pub struct SuccessResponse {
     pub success: bool,
 }
+pub type PauseMediaResponse = SuccessResponse;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SpotifyOAuthLoginResponse {
     pub profile: serde_json::Value,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SpotifyOAuthLogoutResponse {
-    pub success: bool,
-}
+pub type SpotifyOAuthLogoutResponse = SuccessResponse;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SpotifyOAuthStatusResponse {
@@ -188,12 +246,12 @@ pub struct MediaDetailsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadMetadata {
-    pub title:     Option<String>,
-    pub artist:    Option<String>,
-    pub album:     Option<String>,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
     pub thumbnail: Option<String>,
-    pub platform:  Option<String>,
-    pub quality:   Option<String>,
+    pub platform: Option<String>,
+    pub quality: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -201,6 +259,8 @@ pub struct DownloadMetadata {
 pub struct StartYtMusicDownloadRequest {
     pub url: String,
     pub output_dir: String,
+    /// Shadows the flattened `meta.quality`, which has the same name and type
+    /// and lands in the same JSON object. This field is the one that wins.
     pub quality: Option<String>,
     #[serde(flatten)]
     pub meta: DownloadMetadata,
@@ -213,56 +273,42 @@ pub struct StartYtVideoDownloadRequest {
     pub output_dir: String,
     pub resolution: Option<String>,
     pub format: Option<String>,
+    #[serde(default)]
+    pub is_generic: bool,
     #[serde(flatten)]
     pub meta: DownloadMetadata,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StartSpotifyDownloadRequest {
+pub struct StartNativeDownloadRequest {
     pub url: String,
     pub output_dir: String,
+    #[serde(default)]
+    pub force_redownload: Option<bool>,
     #[serde(flatten)]
     pub meta: DownloadMetadata,
 }
+pub type StartSpotifyDownloadRequest = StartNativeDownloadRequest;
+
+pub type StartAppleDownloadRequest = StartNativeDownloadRequest;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StartAppleDownloadRequest {
-    pub url: String,
-    pub output_dir: String,
-    #[serde(flatten)]
-    pub meta: DownloadMetadata,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartQobuzDownloadRequest {
-    pub url: String,
-    pub output_dir: String,
-    pub quality: Option<u8>,
-    #[serde(flatten)]
-    pub meta: DownloadMetadata,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartDeezerDownloadRequest {
+pub struct StartStreamripDownloadRequest {
     pub url: String,
     pub output_dir: String,
     pub quality: Option<u8>,
+    #[serde(default)]
+    pub force_redownload: Option<bool>,
     #[serde(flatten)]
     pub meta: DownloadMetadata,
 }
+pub type StartQobuzDownloadRequest = StartStreamripDownloadRequest;
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartTidalDownloadRequest {
-    pub url: String,
-    pub output_dir: String,
-    #[serde(flatten)]
-    pub meta: DownloadMetadata,
-}
+pub type StartDeezerDownloadRequest = StartStreamripDownloadRequest;
+
+pub type StartTidalDownloadRequest = StartStreamripDownloadRequest;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -292,16 +338,31 @@ pub struct StartDownloadResponse {
     pub error: Option<String>,
 }
 
+impl StartDownloadResponse {
+    pub fn ok(download_id: u64) -> Self {
+        Self {
+            download_id,
+            success: true,
+            error: None,
+        }
+    }
+
+    pub fn failed(download_id: u64, error: impl Into<String>) -> Self {
+        Self {
+            download_id,
+            success: false,
+            error: Some(error.into()),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelDownloadRequest {
     pub download_id: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CancelDownloadResponse {
-    pub success: bool,
-}
+pub type CancelDownloadResponse = SuccessResponse;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadInfoEvent {
@@ -319,6 +380,90 @@ pub struct DownloadProgressEvent {
     pub status: String,
     pub item_index: Option<u32>,
     pub item_total: Option<u32>,
+    /// What the service actually served, once it is known. Sent on progress rather
+    /// than on the info event so it merges into the existing row instead of
+    /// replacing the title and re-announcing the download.
+    #[serde(default)]
+    pub quality: Option<String>,
+}
+
+impl DownloadProgressEvent {
+    /// A terminal failure on the progress channel the download row watches.
+    /// The `error: ` prefix is what the frontend keys the failed state off.
+    pub fn error(download_id: u64, msg: impl std::fmt::Display) -> Self {
+        Self {
+            download_id,
+            percent: 0.0,
+            speed: None,
+            eta: None,
+            status: format!("error: {msg}"),
+            item_index: None,
+            item_total: None,
+            quality: None,
+        }
+    }
+
+    pub fn completed(download_id: u64) -> Self {
+        Self {
+            download_id,
+            percent: 100.0,
+            speed: None,
+            eta: None,
+            status: "completed".into(),
+            item_index: None,
+            item_total: None,
+            quality: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadFailure {
+    pub id: String,
+    pub label: String,
+    pub reason: String,
+}
+
+/// Per-item outcome of a multi-track download, so a run where some tracks failed is
+/// never presented as a plain success.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DownloadSummaryEvent {
+    pub download_id: u64,
+    pub succeeded: u32,
+    pub skipped: u32,
+    pub failed: u32,
+    pub total: u32,
+    pub failures: Vec<DownloadFailure>,
+    /// Where the files landed, so the UI's "Show in folder" action has a target.
+    pub dest_dir: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrapperProbeRequest {
+    /// When set, sign in as well as probing; a `code` continues a 2FA challenge.
+    #[serde(default)]
+    pub sign_in: bool,
+    /// When set, drop the daemon's session instead of probing or signing in.
+    #[serde(default)]
+    pub sign_out: bool,
+    #[serde(default)]
+    pub code: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrapperProbeResponse {
+    pub reachable: bool,
+    pub authenticated: bool,
+    pub needs_two_factor: bool,
+    /// The daemon's own login-state string, so a failed sign-in cannot read as success.
+    pub state: String,
+    pub playback_ready: bool,
+    pub version: String,
+    pub runtime: String,
+    pub apple_id: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -326,10 +471,7 @@ pub struct ShowItemInFolderRequest {
     pub path: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ShowItemInFolderResponse {
-    pub success: bool,
-}
+pub type ShowItemInFolderResponse = SuccessResponse;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ScanDirectoryRequest {
@@ -398,6 +540,29 @@ pub struct BackendLogEvent {
     pub timestamp: String,
 }
 
+impl BackendLogEvent {
+    /// Build a log event with the current timestamp. Every emitter stamped this
+    /// by hand, which is why the field order and the timestamp format had to be
+    /// repeated at each call site.
+    pub fn new(level: &str, source: &str, title: &str, message: impl Into<String>) -> Self {
+        Self {
+            level: level.to_string(),
+            source: source.to_string(),
+            title: title.to_string(),
+            message: message.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    pub fn error(source: &str, title: &str, message: impl Into<String>) -> Self {
+        Self::new("error", source, title, message)
+    }
+
+    pub fn info(source: &str, title: &str, message: impl Into<String>) -> Self {
+        Self::new("info", source, title, message)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamReadyEvent {
     pub stream_url: String,
@@ -445,10 +610,7 @@ pub struct SendProcessStdinRequest {
     pub input: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SendProcessStdinResponse {
-    pub success: bool,
-}
+pub type SendProcessStdinResponse = SuccessResponse;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrpheusModuleStatus {
