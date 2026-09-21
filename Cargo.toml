@@ -1,3 +1,10 @@
 [workspace]
 members = ["src/core", "src/app"]
+exclude = ["vendor/oxideav-aac", "vendor/oxideav-core"]
 resolver = "2"
+
+# Vendored so the AAC filterbanks can use FFT-based transforms; upstream
+# evaluates them as O(N^2) sums, which decodes HE-AAC at ~1.25x realtime.
+[patch.crates-io]
+oxideav-aac = { path = "vendor/oxideav-aac" }
+oxideav-core = { path = "vendor/oxideav-core" }
