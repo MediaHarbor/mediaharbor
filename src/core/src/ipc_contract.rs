@@ -214,6 +214,22 @@ pub struct TidalExchangeCodeResponse {
     pub country_code: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TidalImportTokenRequest {
+    pub token_json: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TidalImportTokenResponse {
+    pub user_id: String,
+    pub country_code: String,
+    pub expiry_time: f64,
+    pub access_token: String,
+    pub refresh_token: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadMetadata {
@@ -966,6 +982,25 @@ pub struct AppErrorEvent {
     pub message: String,
     pub context: Option<String>,
     pub needs_auth: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialsHealthSnapshot {
+    pub services:
+        std::collections::HashMap<String, crate::auth::credential_health::CredentialStatus>,
+    #[serde(default)]
+    pub fingerprints: std::collections::HashMap<String, String>,
+    pub generated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialStatusChangedEvent {
+    pub platform: String,
+    pub status: crate::auth::credential_health::CredentialStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

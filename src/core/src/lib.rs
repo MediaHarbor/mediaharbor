@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod defaults;
 pub mod errors;
 pub mod http_client;
@@ -61,6 +62,9 @@ pub trait EventEmitter: Send + Sync {
     fn emit_service_playlist_changed(&self, event: &ipc_contract::ServicePlaylistChangedEvent) {
         let _ = event;
     }
+    fn emit_credential_status_changed(&self, event: &ipc_contract::CredentialStatusChangedEvent) {
+        let _ = event;
+    }
     fn emit_player_position(&self, event: &ipc_contract::PlayerPositionEvent) {
         let _ = event;
     }
@@ -105,7 +109,7 @@ pub struct BackendState {
     pub librespot: Arc<RwLock<crate::services::spotify::session::LibrespotService>>,
     pub license_limiter: std::sync::Arc<crate::services::spotify::rate_limit::LicenseRateLimiter>,
     pub apple_music: Arc<RwLock<crate::services::apple_music::playback::AppleMusicService>>,
-    pub credentials: apis::credentials::ApiCredentials,
+    pub credentials: auth::credentials::ApiCredentials,
     pub user_data: PathBuf,
     pub logger: Logger,
     pub emitter: Arc<dyn EventEmitter>,
@@ -114,6 +118,7 @@ pub struct BackendState {
     pub library: Arc<media::library::Library>,
     pub mirror_refresh_in_flight:
         Arc<std::sync::Mutex<std::collections::HashSet<(String, String)>>>,
+    pub credentials_health: Arc<auth::credential_health::CredentialsHealth>,
     pub spotify_stream_memo: Arc<crate::services::spotify::session::SpotifyStreamMemo>,
     pub player: Arc<player::NativePlayer>,
 }
@@ -265,15 +270,32 @@ impl BackendState {
         let apple_music =
             crate::services::apple_music::playback::AppleMusicService::from_settings(&loaded);
 
-        let credentials = apis::credentials::bundled();
+        let credentials_path = user_data.join("credentials.json");
+        let credentials = match auth::credentials::bundled_with_overrides(&credentials_path) {
+            Ok(c) => {
+                if credentials_path.exists() {
+                    logger.info("system", "API keys loaded from credentials.json");
+                }
+                c
+            }
+            Err(e) => {
+                logger.warn(
+                    "system",
+                    &format!("credentials.json ignored, using bundled keys: {e}"),
+                );
+                auth::credentials::bundled()
+            }
+        };
 
         if !loaded.spotify_wvd_path.is_empty() {
             librespot.wvd_path = Some(loaded.spotify_wvd_path.clone());
         }
-        if !loaded.spotify_cookies_path.is_empty() {
-            let path = PathBuf::from(&loaded.spotify_cookies_path);
-            let _ = librespot.login_from_cookies(&path).await;
-        }
+        let spotify_cookies_path = (!loaded.spotify_cookies_path.is_empty())
+            .then(|| PathBuf::from(&loaded.spotify_cookies_path));
+
+        let credentials_health = Arc::new(auth::credential_health::CredentialsHealth::new(
+            emitter.clone(),
+        ));
         let emitter_for_player = emitter.clone();
         let state = BackendState {
             settings: Arc::new(RwLock::new(loaded)),
@@ -293,6 +315,7 @@ impl BackendState {
             mirror_refresh_in_flight: Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
+            credentials_health: credentials_health.clone(),
             spotify_stream_memo: Arc::new(Default::default()),
             player: player::NativePlayer::new(
                 http_client::build_audio_client()?,
@@ -303,6 +326,31 @@ impl BackendState {
                 }),
             ),
         };
+
+        {
+            let settings_arc = state.settings.clone();
+            let health = credentials_health.clone();
+            let librespot = state.librespot.clone();
+            let em = state.emitter.clone();
+            tokio::spawn(async move {
+                if let Some(path) = spotify_cookies_path {
+                    if let Err(e) = librespot.write().await.login_from_cookies(&path).await {
+                        em.emit_log(&ipc_contract::BackendLogEvent::error(
+                            "spotify",
+                            "Spotify",
+                            format!("Spotify cookie login failed: {e}"),
+                        ));
+                    }
+                }
+                health.sweep_all(&settings_arc, Some(&librespot)).await;
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(15 * 60));
+                tick.tick().await;
+                loop {
+                    tick.tick().await;
+                    health.sweep_all(&settings_arc, Some(&librespot)).await;
+                }
+            });
+        }
 
         {
             let em = state.emitter.clone();
@@ -1132,28 +1180,112 @@ impl BackendState {
     }
 }
 
+pub const TIDAL_REDIRECT_URI: &str = "https://tidal.com/android/login/auth";
+
+pub fn build_tidal_authorize_url() -> MhResult<(String, String)> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use sha2::{Digest, Sha256};
+
+    let mut code_verifier_bytes = [0u8; 32];
+    getrandom_bytes(&mut code_verifier_bytes)?;
+    let code_verifier = URL_SAFE_NO_PAD.encode(code_verifier_bytes);
+
+    let mut hasher = Sha256::new();
+    hasher.update(code_verifier.as_bytes());
+    let code_challenge = URL_SAFE_NO_PAD.encode(hasher.finalize());
+
+    let qs = format!(
+        "response_type=code&redirect_uri={}&client_id=6BDSRdpK9hqEBTgU\
+         &scope=r_usr%2Bw_usr%2Bw_sub&code_challenge_method=S256\
+         &code_challenge={}&appMode=android&lang=en_US",
+        url_encode(TIDAL_REDIRECT_URI),
+        url_encode(&code_challenge)
+    );
+    let auth_url = format!("https://login.tidal.com/authorize?{}", qs);
+    Ok((code_verifier, auth_url))
+}
+
+pub async fn tidal_exchange_code_inner(
+    code: &str,
+    code_verifier: &str,
+) -> MhResult<ipc_contract::TidalExchangeCodeResponse> {
+    let body = format!(
+        "code={}&client_id=6BDSRdpK9hqEBTgU&grant_type=authorization_code\
+         &redirect_uri={}&scope=r_usr%2Bw_usr%2Bw_sub&code_verifier={}",
+        url_encode(code),
+        url_encode(TIDAL_REDIRECT_URI),
+        url_encode(code_verifier)
+    );
+
+    let client = http_client::build_client()?;
+    let resp = client
+        .post("https://auth.tidal.com/v1/oauth2/token")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .map_err(MhError::Network)?;
+
+    let status = resp.status();
+    let body_text = resp.text().await.map_err(MhError::Network)?;
+    if !status.is_success() {
+        return Err(MhError::Auth(format!(
+            "Tidal token exchange failed ({}): {}",
+            status, body_text
+        )));
+    }
+    let json: serde_json::Value = serde_json::from_str(&body_text)
+        .map_err(|e| MhError::Auth(format!("Tidal response parse error: {}", e)))?;
+    let access_token = json["access_token"]
+        .as_str()
+        .ok_or_else(|| MhError::Auth("No access_token in Tidal response".into()))?
+        .to_string();
+    let refresh_token = json["refresh_token"].as_str().unwrap_or("").to_string();
+    let expires_in = json["expires_in"].as_u64().unwrap_or(86400);
+
+    let (user_id, country_code) = fetch_tidal_user_profile(&client, &access_token).await;
+
+    Ok(ipc_contract::TidalExchangeCodeResponse {
+        access_token,
+        refresh_token,
+        expires_in,
+        user_id,
+        country_code,
+    })
+}
+
+async fn fetch_tidal_user_profile(
+    client: &reqwest::Client,
+    access_token: &str,
+) -> (String, String) {
+    let user_resp = match client
+        .get("https://openapi.tidal.com/v2/users/me")
+        .bearer_auth(access_token)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return (String::new(), "US".to_string()),
+    };
+    let user_json: serde_json::Value = user_resp.json().await.unwrap_or(serde_json::json!({}));
+    let user_id = user_json["data"]["id"].as_str().unwrap_or("").to_string();
+    let country_code = user_json["data"]["attributes"]["country"]
+        .as_str()
+        .unwrap_or("US")
+        .to_string();
+    (user_id, country_code)
+}
+
+fn decode_jwt_payload(token: &str) -> Option<serde_json::Value> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let mid = token.split('.').nth(1)?;
+    let bytes = URL_SAFE_NO_PAD.decode(mid).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
 impl BackendState {
     pub async fn tidal_start_auth(&self) -> MhResult<ipc_contract::TidalStartAuthResponse> {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-        use sha2::{Digest, Sha256};
-
-        let mut code_verifier_bytes = [0u8; 32];
-        getrandom_bytes(&mut code_verifier_bytes)?;
-        let code_verifier = URL_SAFE_NO_PAD.encode(code_verifier_bytes);
-
-        let mut hasher = Sha256::new();
-        hasher.update(code_verifier.as_bytes());
-        let code_challenge = URL_SAFE_NO_PAD.encode(hasher.finalize());
-
-        let qs = format!(
-            "response_type=code&redirect_uri={}&client_id=6BDSRdpK9hqEBTgU\
-             &scope=r_usr%2Bw_usr%2Bw_sub&code_challenge_method=S256\
-             &code_challenge={}&appMode=android&lang=en_US",
-            url_encode("https://tidal.com/android/login/auth"),
-            url_encode(&code_challenge)
-        );
-        let auth_url = format!("https://login.tidal.com/authorize?{}", qs);
-
+        let (code_verifier, auth_url) = build_tidal_authorize_url()?;
         Ok(ipc_contract::TidalStartAuthResponse {
             code_verifier,
             auth_url,
@@ -1170,60 +1302,82 @@ impl BackendState {
             .find(|(k, _)| k == "code")
             .map(|(_, v)| v.to_string())
             .ok_or_else(|| MhError::Auth("No auth code in redirect URL".into()))?;
+        tidal_exchange_code_inner(&code, &req.code_verifier).await
+    }
 
-        let body = format!(
-            "code={}&client_id=6BDSRdpK9hqEBTgU&grant_type=authorization_code\
-             &redirect_uri={}&scope=r_usr%2Bw_usr%2Bw_sub&code_verifier={}",
-            url_encode(&code),
-            url_encode("https://tidal.com/android/login/auth"),
-            url_encode(&req.code_verifier)
-        );
-
-        let client = http_client::build_client()?;
-        let resp = client
-            .post("https://auth.tidal.com/v1/oauth2/token")
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body)
-            .send()
-            .await
-            .map_err(MhError::Network)?;
-
-        let status = resp.status();
-        let body_text = resp.text().await.map_err(MhError::Network)?;
-        if !status.is_success() {
-            return Err(MhError::Auth(format!(
-                "Tidal token exchange failed ({}): {}",
-                status, body_text
-            )));
-        }
-        let json: serde_json::Value = serde_json::from_str(&body_text)
-            .map_err(|e| MhError::Auth(format!("Tidal response parse error: {}", e)))?;
+    pub async fn tidal_import_token(
+        &self,
+        req: ipc_contract::TidalImportTokenRequest,
+    ) -> MhResult<ipc_contract::TidalImportTokenResponse> {
+        let json: serde_json::Value = serde_json::from_str(req.token_json.trim())
+            .map_err(|e| MhError::Auth(format!("Token JSON parse error: {}", e)))?;
         let access_token = json["access_token"]
             .as_str()
-            .ok_or_else(|| MhError::Auth("No access_token in Tidal response".into()))?
+            .ok_or_else(|| MhError::Auth("Missing access_token in token JSON".into()))?
             .to_string();
         let refresh_token = json["refresh_token"].as_str().unwrap_or("").to_string();
-        let expires_in = json["expires_in"].as_u64().unwrap_or(86400);
 
-        let user_resp = client
-            .get("https://openapi.tidal.com/v2/users/me")
-            .bearer_auth(&access_token)
-            .send()
-            .await?;
-        let user_json: serde_json::Value =
-            user_resp.json().await.unwrap_or(serde_json::json!({}));
-        let user_id = user_json["data"]["id"].as_str().unwrap_or("").to_string();
-        let country_code = user_json["data"]["attributes"]["country"]
-            .as_str()
-            .unwrap_or("US")
-            .to_string();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
 
-        Ok(ipc_contract::TidalExchangeCodeResponse {
-            access_token,
-            refresh_token,
-            expires_in,
+        let expiry_time = if let Some(v) = json["expiry_time"].as_f64() {
+            v
+        } else if let Some(v) = json["expires_in"].as_f64() {
+            now + v
+        } else if let Some(claims) = decode_jwt_payload(&access_token) {
+            claims["exp"].as_f64().unwrap_or(now + 86400.0)
+        } else {
+            now + 86400.0
+        };
+
+        let client = http_client::build_client()?;
+        let (mut user_id, mut country_code) =
+            fetch_tidal_user_profile(&client, &access_token).await;
+
+        if user_id.is_empty() || country_code.is_empty() || country_code == "US" {
+            if let Some(claims) = decode_jwt_payload(&access_token) {
+                if user_id.is_empty() {
+                    if let Some(uid) = claims["uid"].as_u64() {
+                        user_id = uid.to_string();
+                    } else if let Some(uid) = claims["uid"].as_str() {
+                        user_id = uid.to_string();
+                    }
+                }
+                if country_code.is_empty() {
+                    if let Some(cc) = claims["cc"].as_str() {
+                        country_code = cc.to_string();
+                    }
+                }
+            }
+        }
+        if country_code.is_empty() {
+            country_code = "US".to_string();
+        }
+
+        let mut settings = self.get_settings().await.settings;
+        settings.tidal_access_token = access_token.clone();
+        settings.tidal_refresh_token = refresh_token.clone();
+        settings.tidal_token_expiry = (expiry_time as i64).to_string();
+        settings.tidal_user_id = user_id.clone();
+        settings.tidal_country_code = country_code.clone();
+        let resp = self
+            .set_settings(ipc_contract::SetSettingsRequest { settings })
+            .await;
+        if !resp.success {
+            return Err(MhError::Auth(format!(
+                "Failed to save Tidal token: {}",
+                resp.error.unwrap_or_default()
+            )));
+        }
+
+        Ok(ipc_contract::TidalImportTokenResponse {
             user_id,
             country_code,
+            expiry_time,
+            access_token,
+            refresh_token,
         })
     }
 }
@@ -1294,14 +1448,17 @@ impl BackendState {
             };
         }
 
-        {
+        let cookie_changed = {
             let old = self.settings.read().await;
             if old.qobuz_email_or_userid != req.settings.qobuz_email_or_userid
                 || old.qobuz_password_or_token != req.settings.qobuz_password_or_token
             {
                 *self.qobuz_client_cache.write().await = None;
             }
-        }
+            old.cookies != req.settings.cookies
+                || old.use_cookies != req.settings.use_cookies
+                || old.cookies_from_browser != req.settings.cookies_from_browser
+        };
 
         {
             let mut s = self.settings.write().await;
@@ -1328,6 +1485,15 @@ impl BackendState {
             }
         }
 
+        if cookie_changed {
+            let health = self.credentials_health.clone();
+            let settings_arc = self.settings.clone();
+            tokio::spawn(async move {
+                use crate::services::common::library::ServicePlatform::*;
+                health.recheck(YtMusic, &settings_arc, None).await;
+                health.recheck(Youtube, &settings_arc, None).await;
+            });
+        }
 
         ipc_contract::SetSettingsResponse {
             success: true,
@@ -2139,6 +2305,17 @@ impl BackendState {
         plat: crate::services::common::library::ServicePlatform,
         res: MhResult<T>,
     ) -> MhResult<T> {
+        if let Err(MhError::Auth(_)) = res {
+            use crate::services::common::library::ServicePlatform::*;
+            if matches!(plat, Youtube | YtMusic | AppleMusic) {
+                let health = self.credentials_health.clone();
+                let settings = self.settings.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                    health.recheck(plat, &settings, None).await;
+                });
+            }
+        }
         res
     }
 

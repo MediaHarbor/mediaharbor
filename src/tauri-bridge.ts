@@ -516,6 +516,27 @@ export interface ServicePlaylistChangedPayload {
 const savedStateHub = makeHub<SavedStateChangedPayload>();
 const servicePlaylistHub = makeHub<ServicePlaylistChangedPayload>();
 
+export type CredentialStatus =
+  | { kind: 'notConfigured' }
+  | { kind: 'ok'; expiresAt: number | null }
+  | { kind: 'expiringSoon'; expiresAt: number }
+  | { kind: 'expired'; since: number | null }
+  | { kind: 'unknown'; lastCheck: number; error: string };
+
+export interface CredentialStatusChangedPayload {
+  platform: string;
+  status: CredentialStatus;
+  /** Hash of the credential material; changes when the user rotates it. */
+  fingerprint?: string | null;
+}
+
+export interface CredentialsHealthSnapshot {
+  services: Record<string, CredentialStatus>;
+  fingerprints?: Record<string, string>;
+  generatedAt: number;
+}
+const credentialStatusHub = makeHub<CredentialStatusChangedPayload>();
+
 function bindHub<T>(event: string, hub: { emit: (data: T) => void }) {
   listen<T>(event, (e) => hub.emit(e.payload));
 }
@@ -560,6 +581,7 @@ function registerAppEvents() {
   bindHub<{ downloadId: number; promptLines: string[] }>('process-stdin-prompt', stdinPromptHub);
   bindHub<SavedStateChangedPayload>('saved-state-changed', savedStateHub);
   bindHub<ServicePlaylistChangedPayload>('service-playlist-changed', servicePlaylistHub);
+  bindHub<CredentialStatusChangedPayload>('credential-status-changed', credentialStatusHub);
 }
 
 let bridgeStarted = false;
@@ -588,6 +610,15 @@ function subscribe<P>(event: string, cb: (payload: P) => void) {
   const unlistenP = listen<P>(event, (e) => cb(e.payload));
   return () => {
     unlistenP.then((u) => u()).catch(() => {});
+  };
+}
+
+function makeLoginWrapper<P>(openCmd: string, capturedEvent: string) {
+  return {
+    openLoginWindow: async () => {
+      await invoke(openCmd);
+    },
+    onLoginCaptured: (cb: (payload: P) => void) => subscribe<P>(capturedEvent, cb),
   };
 }
 
@@ -793,6 +824,7 @@ export const tauriAPI = {
     },
   },
 
+  qobuz: makeLoginWrapper<{ userId: string }>('qobuz_open_login_window', 'qobuz-login-captured'),
 
   radio: {
     sources: async () => invoke<RadioDirectorySource[]>('radio_sources'),
@@ -1088,6 +1120,15 @@ export const tauriAPI = {
     onServicePlaylistChanged: servicePlaylistHub.on.bind(servicePlaylistHub),
   },
 
+  credentials: {
+    snapshot: () => invoke<CredentialsHealthSnapshot>('credentials_health_snapshot'),
+    recheck: (platform?: string) =>
+      invoke<CredentialsHealthSnapshot>('credentials_health_recheck', {
+        platform: platform ?? null,
+      }),
+    onStatusChanged: credentialStatusHub.on.bind(credentialStatusHub),
+  },
+
   player: {
     playMedia: async (params: { url: string; platform: string }) => {
       const r = await invoke<{
@@ -1224,30 +1265,32 @@ export const tauriAPI = {
     },
   },
 
-  tidalAuth: {
-    startAuth: async () => {
-      const r = await invoke<{ code_verifier: string; auth_url: string }>('tidal_start_auth');
-      return { codeVerifier: r.code_verifier, authUrl: r.auth_url };
-    },
-    exchangeCode: async (data: { redirectUrl: string; codeVerifier: string }) => {
+  tidal: {
+    ...makeLoginWrapper<{
+      userId: string;
+      countryCode: string;
+      accessToken: string;
+      refreshToken: string;
+      expiryTime: number;
+    }>('tidal_open_login_window', 'tidal-login-captured'),
+    importToken: async (tokenJson: string) => {
       const r = await invoke<{
-        access_token: string;
-        refresh_token: string;
-        expires_in: number;
         user_id: string;
         country_code: string;
-      }>('tidal_exchange_code', {
-        req: { redirectUrl: data.redirectUrl, codeVerifier: data.codeVerifier },
-      });
-      const expiry = String(Math.floor(Date.now() / 1000) + (r.expires_in ?? 86400));
+        expiry_time: number;
+        access_token: string;
+        refresh_token: string;
+      }>('tidal_import_token', { req: { tokenJson } });
       return {
-        tidal_access_token: r.access_token,
-        tidal_refresh_token: r.refresh_token ?? '',
-        tidal_token_expiry: expiry,
-        tidal_user_id: r.user_id ?? '',
-        tidal_country_code: r.country_code ?? 'US',
+        userId: r.user_id,
+        countryCode: r.country_code,
+        expiryTime: r.expiry_time,
+        accessToken: r.access_token,
+        refreshToken: r.refresh_token,
       };
     },
+    onLoginError: (cb: (payload: { error: string }) => void) =>
+      subscribe<{ error: string }>('tidal-login-error', cb),
   },
 
   app: {

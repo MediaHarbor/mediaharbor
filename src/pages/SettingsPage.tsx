@@ -26,6 +26,7 @@ import {
   useThemeStore,
   type ThemePreference,
 } from '@/stores/useThemeStore';
+import { useCredentialStatus } from '@/stores/useCredentialHealthStore';
 import { useRadioSources } from '@/features/radio/hooks/useRadioQueries';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '@/utils/cn';
@@ -46,6 +47,7 @@ import {
   X,
 } from 'lucide-react';
 import { PlatformIcon, YtDlpIcon } from '@/utils/platforms';
+import { CredentialStatusPill } from '@/features/credentials/CredentialStatusPill';
 import { normalizePlatform } from '@/utils/platform-data';
 import {
   APPLE_COVER_FORMAT_OPTS,
@@ -68,6 +70,29 @@ import {
 import type { Settings, SettingsSetter } from '@/types/settings';
 import { DEEZER_TIER_TO_FORMAT, QUALITY_OPTIONS, deezerTierOf } from '@/utils/constants';
 import { tauriAPI } from '@/tauri-bridge';
+
+function useServiceLoginWindow(
+  channel: LogSource,
+  label: string,
+  open: (() => Promise<void>) | undefined
+) {
+  const [busy, setBusy] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const startLogin = useCallback(async () => {
+    if (!open) return;
+    setBusy(true);
+    setErrorMsg('');
+    try {
+      await open();
+    } catch (e) {
+      const msg = errorMessage(e);
+      logError(channel, `${label} login window failed`, msg);
+      setErrorMsg(msg);
+      setBusy(false);
+    }
+  }, [channel, label, open]);
+  return { busy, setBusy, errorMsg, setErrorMsg, startLogin };
+}
 function Row({
   label,
   help,
@@ -733,6 +758,9 @@ export default function SettingsPage() {
           <h1 className="text-sm font-semibold tracking-tight">{currentTab.label}</h1>
           {tabPlatform && (
             <div className="ml-auto flex items-center gap-2">
+              <CredentialStatusPill
+                platform={tabPlatform === 'youtube' ? 'ytmusic' : normalizePlatform(tabPlatform)}
+              />
               {currentIsGatedService && (
                 <Button
                   variant="ghost"
@@ -1765,18 +1793,69 @@ function DeezerTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
 }
 
 function QobuzTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
+  const [showManual, setShowManual] = useState(false);
+  const [signedIn, setSignedIn] = useState<string | null>(null);
+  const { busy, setBusy, startLogin } = useServiceLoginWindow(
+    'qobuz',
+    'Qobuz',
+    tauriAPI.qobuz?.openLoginWindow
+  );
+
+  useEffect(() => {
+    const off = tauriAPI.qobuz.onLoginCaptured(({ userId }) => {
+      setSignedIn(userId);
+      setBusy(false);
+    });
+    return off;
+  }, [setBusy]);
+
+  const userId = s.qobuz_email_or_userid || '';
+  const hasToken = !!(userId && s.qobuz_password_or_token);
+
   return (
     <>
-      <Section title="Authentication">
-        <Check2 id="qobuz_token_or_email" label="Use user ID + auth token instead of email/password"
-          help="Enable if you have a user_auth_token from the Qobuz API"
-          checked={!!s.qobuz_token_or_email} onChange={(v) => set('qobuz_token_or_email', v)} />
-        <Row label={s.qobuz_token_or_email ? 'User ID' : 'Email'}>
-          <Input value={s.qobuz_email_or_userid || ''} onChange={(e) => set('qobuz_email_or_userid', e.target.value)} />
-        </Row>
-        <Row label={s.qobuz_token_or_email ? 'Auth Token' : 'Password'}>
-          <Input type="password" value={s.qobuz_password_or_token || ''} onChange={(e) => set('qobuz_password_or_token', e.target.value)} />
-        </Row>
+      <Section title="Sign in">
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Qobuz disabled email/password API login in April 2026. Sign in below — a Qobuz login
+          window will open, and your user ID + auth token are captured automatically once you log
+          in.
+        </p>
+        <div className="flex items-center gap-3 pt-1">
+          <Button onClick={startLogin} disabled={busy} className="gap-2">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+            {hasToken ? 'Sign in again' : 'Sign in with Qobuz'}
+          </Button>
+          {(signedIn || hasToken) && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-2.5 py-1 text-xs font-medium">
+              <Check className="h-3 w-3" /> User ID {signedIn || userId}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowManual((v) => !v)}
+          className="text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline pt-2"
+        >
+          {showManual ? 'Hide manual token entry' : 'Paste token manually instead'}
+        </button>
+        {showManual && (
+          <div className="space-y-3 pt-1">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Paste your Qobuz <code>user.id</code> and <code>user_auth_token</code>. The easiest
+              source is <code>play.qobuz.com</code>: sign in, open DevTools → Network, filter for{' '}
+              <code>user/login</code>, and copy both values from the response body. Tokens from the
+              Qobuz desktop or mobile apps are also supported.
+            </p>
+            <Txt k="qobuz_email_or_userid" label="User ID" placeholder="e.g. 12345678" />
+            <Txt
+              k="qobuz_password_or_token"
+              label="Auth Token"
+              type="password"
+              placeholder="user_auth_token"
+            />
+          </div>
+        )}
+      </Section>
 
       <Section title="Quality">
         <DefaultQualityRow
@@ -1828,40 +1907,57 @@ function QobuzTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
 }
 
 function TidalTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
+  const [showManual, setShowManual] = useState(false);
+  const [tokenJson, setTokenJson] = useState('');
+  const { busy, setBusy, errorMsg, setErrorMsg, startLogin } = useServiceLoginWindow(
+    'tidal',
+    'Tidal',
+    tauriAPI.tidal?.openLoginWindow
+  );
+
+  useEffect(() => {
+    const offCap = tauriAPI.tidal.onLoginCaptured(
+      ({ userId, countryCode, accessToken, refreshToken, expiryTime }) => {
+        set('tidal_access_token', accessToken);
+        set('tidal_refresh_token', refreshToken);
+        set('tidal_token_expiry', String(expiryTime));
+        set('tidal_user_id', userId);
+        set('tidal_country_code', countryCode);
+        setBusy(false);
+        setErrorMsg('');
+      }
+    );
+    const offErr = tauriAPI.tidal.onLoginError(({ error }) => {
+      setErrorMsg(error || 'Tidal login failed');
+      setBusy(false);
+    });
+    return () => {
+      offCap();
+      offErr();
+    };
+  }, [set, setBusy, setErrorMsg]);
+
+  const userId = s.tidal_user_id || '';
+  const countryCode = s.tidal_country_code || '';
   const hasToken = !!s.tidal_access_token;
-  const [authState, setAuthState] = useState<'idle' | 'waiting' | 'loading' | 'success' | 'error'>('idle');
-  const [codeVerifier, setCodeVerifier] = useState('');
-  const [redirectUrl, setRedirectUrl] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
 
-  async function startLogin() {
-    if (!window.electron) return;
-    setAuthState('loading');
+  async function importToken() {
+    if (!tokenJson.trim()) return;
+    setBusy(true);
     setErrorMsg('');
     try {
-      const { codeVerifier: cv, authUrl } = await window.electron.tidalAuth.startAuth();
-      setCodeVerifier(cv);
-      if (authUrl) await window.electron.updates.openRelease(authUrl);
-      setAuthState('waiting');
-    } catch (e: unknown) {
-      setErrorMsg(e instanceof Error ? e.message : 'Failed to open Tidal login');
-      setAuthState('error');
-    }
-  }
-
-  async function submitRedirect() {
-    if (!window.electron) return;
-    if (!redirectUrl.trim()) return;
-    setAuthState('loading');
-    setErrorMsg('');
-    try {
-      const tokens = await window.electron.tidalAuth.exchangeCode({ redirectUrl: redirectUrl.trim(), codeVerifier });
-      Object.entries(tokens).forEach(([k, v]) => set(k as keyof Settings, v));
-      setAuthState('success');
-      setRedirectUrl('');
-    } catch (e: unknown) {
-      setErrorMsg(typeof e === 'string' ? e : (e instanceof Error ? e.message : 'Failed to exchange code'));
-      setAuthState('error');
+      const r = await tauriAPI.tidal.importToken(tokenJson.trim());
+      set('tidal_access_token', r.accessToken);
+      set('tidal_refresh_token', r.refreshToken);
+      set('tidal_token_expiry', String(r.expiryTime));
+      set('tidal_user_id', r.userId);
+      set('tidal_country_code', r.countryCode);
+      setTokenJson('');
+    } catch (e) {
+      const msg = errorMessage(e);
+      setErrorMsg(msg);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1871,20 +1967,30 @@ function TidalTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
     set('tidal_token_expiry', '');
     set('tidal_user_id', '');
     set('tidal_country_code', '');
-    setAuthState('idle');
+    setErrorMsg('');
   }
 
   return (
     <>
-      <Section title="Authentication">
+      <Section title="Sign in">
         {hasToken ? (
           <div className="flex items-center justify-between rounded-md bg-green-500/10 border border-green-500/30 px-3 py-2">
             <div className="flex items-center gap-2 text-sm text-green-500">
               <Check className="h-4 w-4" />
-              <span>{authState === 'success' ? 'Successfully logged in to Tidal!' : 'Logged in to Tidal'}</span>
-              {s.tidal_user_id && <span className="text-green-500/70 text-xs">· User {s.tidal_user_id}{s.tidal_country_code ? ` (${s.tidal_country_code})` : ''}</span>}
+              <span>Logged in to Tidal</span>
+              {userId && (
+                <span className="text-green-500/70 text-xs">
+                  · User {userId}
+                  {countryCode ? ` (${countryCode})` : ''}
+                </span>
+              )}
             </div>
-            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive h-7 text-xs" onClick={logout}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground hover:text-destructive h-7 text-xs"
+              onClick={logout}
+            >
               Log out
             </Button>
           </div>
@@ -1895,48 +2001,52 @@ function TidalTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
           </div>
         )}
 
-        {authState === 'idle' || authState === 'error' ? (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Click the button below to open the Tidal login page in your browser. After logging in, Tidal will redirect you to a URL — paste that URL back here.
+        <p className="text-xs text-muted-foreground leading-relaxed pt-2">
+          Sign in below — a Tidal login window will open, and your access token is captured
+          automatically once you log in.
+        </p>
+        <div className="flex items-center gap-3 pt-1">
+          <Button onClick={startLogin} disabled={busy} className="gap-2">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+            {hasToken ? 'Sign in again' : 'Sign in with Tidal'}
+          </Button>
+          {hasToken && userId && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-2.5 py-1 text-xs font-medium">
+              <Check className="h-3 w-3" /> User {userId}
+              {countryCode ? ` · ${countryCode}` : ''}
+            </span>
+          )}
+        </div>
+        {errorMsg && <p className="text-xs text-destructive pt-1">{errorMsg}</p>}
+
+        <button
+          type="button"
+          onClick={() => setShowManual((v) => !v)}
+          className="text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline pt-2"
+        >
+          {showManual ? 'Hide manual token entry' : 'Paste token manually instead'}
+        </button>
+        {showManual && (
+          <div className="space-y-3 pt-1">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Paste the contents of streamrip&apos;s <code>tidal/token.json</code> (or any JSON
+              object with
+              <code> access_token</code> and <code>refresh_token</code>). The expiry, user ID, and
+              country code are derived from the token automatically.
             </p>
-            <Button onClick={startLogin} className="w-full sm:w-auto">
-              {hasToken ? 'Re-authenticate with Tidal' : 'Login with Tidal'}
+            <textarea
+              value={tokenJson}
+              onChange={(e) => setTokenJson(e.target.value)}
+              placeholder='{"token_type":"Bearer","access_token":"...","refresh_token":"...","expiry_time":1774175542.289}'
+              spellCheck={false}
+              className="w-full min-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-xs font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <Button onClick={importToken} disabled={busy || !tokenJson.trim()} size="sm">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Import token
             </Button>
-            {authState === 'error' && errorMsg && (
-              <p className="text-xs text-destructive">{errorMsg}</p>
-            )}
           </div>
-        ) : authState === 'waiting' ? (
-          <div className="space-y-3 rounded-md bg-muted/50 border border-border p-3">
-            <p className="text-sm font-medium">Complete login in your browser</p>
-            <ol className="text-xs text-muted-foreground list-decimal list-inside space-y-1">
-              <li>A Tidal login page has opened in your browser — sign in there.</li>
-              <li>After signing in, your browser will show a page that may not load (that&apos;s normal).</li>
-              <li>Copy the full URL from your browser&apos;s address bar and paste it below.</li>
-            </ol>
-            <div className="flex gap-2">
-              <Input
-                value={redirectUrl}
-                onChange={(e) => setRedirectUrl(e.target.value)}
-                placeholder="https://tidal.com/android/login/auth?code=..."
-                className="flex-1 text-xs"
-                onKeyDown={(e) => e.key === 'Enter' && submitRedirect()}
-              />
-              <Button onClick={submitRedirect} disabled={!redirectUrl.trim()}>
-                Submit
-              </Button>
-            </div>
-            <button className="text-xs text-muted-foreground hover:text-foreground underline" onClick={() => setAuthState('idle')}>
-              Cancel
-            </button>
-          </div>
-        ) : authState === 'loading' ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Exchanging tokens…</span>
-          </div>
-        ) : null}
+        )}
       </Section>
 
       <Section title="Quality">
@@ -3032,6 +3142,8 @@ function OrpheusDLTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter })
 }
 
 function ApiKeysTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
+  const spotifyStatus = useCredentialStatus('spotify');
+  const spotifyCookieSearch = !!s.spotify_cookies_path?.trim() && spotifyStatus?.kind === 'ok';
   return (
     <>
       <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 text-xs text-yellow-600 dark:text-yellow-400 mb-2">
@@ -3040,7 +3152,13 @@ function ApiKeysTab({ s, set }: { s: Partial<Settings>; set: SettingsSetter }) {
         Spotify).
       </div>
 
-      <Section title="Spotify Search API">
+      <Section title={spotifyCookieSearch ? 'Spotify Search API (optional)' : 'Spotify Search API'}>
+        {spotifyCookieSearch && (
+          <p className="text-xs text-muted-foreground mb-2">
+            You are signed in to Spotify with cookies, so search works without API keys. These
+            fields are only needed as a fallback when you are not logged in.
+          </p>
+        )}
         <Row label="Client ID" help="Optional when signed in with cookies">
           <SecretInput
             value={s.spotify_client_id || ''}
