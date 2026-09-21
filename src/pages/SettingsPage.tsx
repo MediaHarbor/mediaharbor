@@ -1077,7 +1077,8 @@ function GeneralTab({
 
       <Section title="Tools">
         <Chk k="orpheusDL" label="Prioritize OrpheusDL" />
-        <Check2 id="autoUpdate" label="Auto update on launch" checked={s.autoUpdate ?? false} onChange={(v) => set('autoUpdate', v)} />
+        <Chk k="autoUpdate" label="Check for updates automatically" />
+        <Chk k="autoDownloadUpdates" label="Download updates in the background" />
       </Section>
 
       <Section title="File Naming (Native downloads)">

@@ -5,6 +5,7 @@
 )]
 
 mod media_controls;
+mod updater;
 
 use mediaharbor_core::{
     build_tidal_authorize_url, ipc_contract, tidal_exchange_code_inner, BackendState, EventEmitter,
@@ -387,6 +388,29 @@ async fn clear_database(
     state: State<'_, AppState>,
 ) -> Result<ipc_contract::ClearDatabaseResponse, String> {
     Ok(state.0.clear_database(false, false))
+}
+
+#[tauri::command]
+async fn get_version(
+    state: State<'_, AppState>,
+) -> Result<ipc_contract::GetVersionResponse, String> {
+    Ok(state.0.get_version())
+}
+
+#[tauri::command]
+async fn check_updates(
+    state: State<'_, AppState>,
+) -> Result<ipc_contract::CheckUpdatesResponse, String> {
+    Ok(state
+        .0
+        .check_updates()
+        .await
+        .unwrap_or(ipc_contract::CheckUpdatesResponse {
+            update_available: false,
+            latest_version: None,
+            release_url: None,
+            release_notes: None,
+        }))
 }
 
 #[tauri::command]
@@ -779,25 +803,6 @@ async fn tidal_open_login_window(app: AppHandle, state: State<'_, AppState>) -> 
     Ok(())
 }
 
-#[tauri::command]
-async fn get_version(
-    state: State<'_, AppState>,
-) -> Result<ipc_contract::GetVersionResponse, String> {
-    Ok(state.0.get_version())
-}
-
-#[tauri::command]
-async fn check_updates(
-    state: State<'_, AppState>,
-) -> Result<ipc_contract::CheckUpdatesResponse, String> {
-    Ok(state.0.check_updates().await.unwrap_or_else(|_| ipc_contract::CheckUpdatesResponse {
-        update_available: false,
-        latest_version: None,
-        release_url: None,
-        release_notes: None,
-    }))
-}
-
 /// Append panics to the log file before letting the default hook run.
 ///
 /// Playback work happens on threads — `mh-audio-decode`, `mh-audio-device`,
@@ -862,6 +867,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_handle = app.handle().clone();
             let emitter: Arc<dyn EventEmitter> = Arc::new(TauriEmitter(app_handle));
@@ -880,6 +886,7 @@ fn main() {
             install_panic_hook(state.logger.clone());
 
             app.manage(AppState(Arc::new(state)));
+            app.manage(updater::PendingUpdate::default());
             media_controls::setup(&app.handle().clone());
             Ok(())
         })
@@ -1007,6 +1014,9 @@ fn main() {
             clear_database,
             get_version,
             check_updates,
+            updater::updater_check,
+            updater::updater_download,
+            updater::updater_apply,
             check_deps,
             install_dep,
             get_dependency_versions,

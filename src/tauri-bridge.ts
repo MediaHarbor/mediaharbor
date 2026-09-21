@@ -108,6 +108,28 @@ interface UndecodableStreamWire {
   channels: number | null;
   app: string;
 }
+
+export interface UpdateProgressPayload {
+  downloaded: number;
+  contentLength: number | null;
+  percent: number;
+}
+
+export type UpdateChannel =
+  'appimage' | 'deb' | 'rpm' | 'nsis' | 'msi' | 'app' | 'flatpak' | 'snap' | 'source';
+
+export interface UpdateStatus {
+  supported: boolean;
+  channel: UpdateChannel;
+  currentVersion: string;
+  available: boolean;
+  version: string | null;
+  notes: string | null;
+  date: string | null;
+  releaseUrl: string | null;
+  staged: boolean;
+}
+
 interface ScanProgressPayload {
   directory: string;
   percent: number;
@@ -364,6 +386,7 @@ function summaryWarnings(
 
 const streamReadyHub = makeHub<StreamReadyPayload>();
 const installProgressHub = makeHub<InstallProgressPayload>();
+const updateProgressHub = makeHub<UpdateProgressPayload>();
 const scanProgressHub = makeHub<ScanProgressPayload>();
 const filesChangedHub = makeHub<FilesChangedPayload>();
 const appErrorHub = makeHub<AppErrorPayload>();
@@ -546,6 +569,7 @@ const lastPercentByDir = new Map<string, number>();
 function registerAppEvents() {
   bindHub<StreamReadyPayload>('stream-ready', streamReadyHub);
   bindHub<InstallProgressPayload>('install-progress', installProgressHub);
+  bindHub<UpdateProgressPayload>('update-progress', updateProgressHub);
   bindHub<ScanProgressPayload>('scan-progress', scanProgressHub);
   listen<LibraryScanProgressPayload>('library-scan-progress', (e) => {
     const p = e.payload;
@@ -694,6 +718,10 @@ export const tauriAPI = {
     openRelease: async (url: string) => {
       await invoke('open_external', { url });
     },
+    status: async () => invoke<UpdateStatus>('updater_check'),
+    download: async () => invoke<void>('updater_download'),
+    apply: async () => invoke<void>('updater_apply'),
+    onUpdateProgress: updateProgressHub.on.bind(updateProgressHub),
     checkDeps: async () => invoke<Record<string, boolean>>('check_deps'),
     getDependencyVersions: async () => {
       const r = await invoke<{ versions: Record<string, string> }>('get_dependency_versions');
@@ -1339,5 +1367,3 @@ export const tauriAPI = {
 export function isBackendAvailable(): boolean {
   return isTauri();
 }
-
-(window as unknown as { electron: typeof tauriAPI }).electron = tauriAPI;

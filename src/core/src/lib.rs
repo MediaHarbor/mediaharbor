@@ -2397,7 +2397,11 @@ impl BackendState {
     }
 
     pub async fn check_updates(&self) -> MhResult<ipc_contract::CheckUpdatesResponse> {
-        let checker = update_checker::UpdateChecker::new("MediaHarbor", "mediaharbor", env!("CARGO_PKG_VERSION"));
+        let checker = update_checker::UpdateChecker::new(
+            "MediaHarbor",
+            "mediaharbor",
+            env!("CARGO_PKG_VERSION"),
+        );
         match checker.check_for_updates().await? {
             Some(release) => Ok(ipc_contract::CheckUpdatesResponse {
                 update_available: true,
