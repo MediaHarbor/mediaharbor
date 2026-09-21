@@ -19,6 +19,7 @@ MediaHarbor is an all-in-one media downloader and player. Search, stream, and do
 - [Installation](#installation)
 - [Building from Source](#building-from-source)
 - [In-App Dependency Setup](#in-app-dependency-setup)
+- [Verifying a Release](#verifying-a-release)
 - [Known Issues](#known-issues)
 - [Contributing](#contributing)
 - [License](#license)
@@ -104,6 +105,61 @@ MediaHarbor manages its own tool dependencies through the **Dependencies** page 
 - **OrpheusDL + modules** optional alternative backend for platform downloads
 
 Platform credentials (Tidal OAuth, Deezer ARL, Qobuz login, Spotify/Apple cookies) are all configured from the **Settings** page.
+
+---
+
+## Verifying a Release
+
+Every release artifact is hashed in `SHA256SUMS.txt`, and that manifest is GPG-signed as
+`SHA256SUMS.txt.asc`. Verifying the manifest therefore verifies every file listed in it.
+
+```sh
+# one-time: import the release signing key
+curl -fsSL https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/packaging/keys/mediaharbor-release.asc | gpg --import
+
+# check the manifest signature, then the downloaded files against it
+gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
+sha256sum --ignore-missing -c SHA256SUMS.txt
+```
+
+Release signing key fingerprint:
+
+```
+4E7E D764 DFB4 F1B6 59C1  C570 DD7A E5F9 C20A 4047
+MediaHarbor Release Signing <info@mediaharbor.org>
+```
+
+The RPM additionally carries an embedded signature:
+
+```sh
+sudo rpm --import packaging/keys/mediaharbor-release.asc
+rpm --checksig MediaHarbor-*.rpm
+```
+
+Every artifact also has a [Sigstore build-provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds),
+proving it was produced by this repository's release workflow and not rebuilt elsewhere:
+
+```sh
+gh attestation verify <file> --repo MediaHarbor/mediaharbor
+```
+
+### macOS: first launch
+
+MediaHarbor is not notarized — that requires a paid Apple Developer ID, which the project
+does not have yet. macOS quarantines the app on first launch. After dragging it to
+Applications:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/MediaHarbor.app
+```
+
+This is only needed once. Updates installed from inside the app are not re-quarantined.
+
+### Windows
+
+The installers are not Authenticode-signed, so SmartScreen shows an "unknown publisher"
+warning; choose **More info -> Run anyway**. Verify the download against `SHA256SUMS.txt`
+above if you want certainty about what you are running.
 
 ---
 
