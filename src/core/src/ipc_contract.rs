@@ -572,6 +572,110 @@ pub struct StreamReadyEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerPositionEvent {
+    pub position_secs: f64,
+    pub duration_secs: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PlayerStateEvent {
+    pub playing: bool,
+    pub ended: bool,
+    pub buffering: bool,
+}
+
+/// The decode thread has finished handing over to the track that was queued
+/// behind the current one.
+///
+/// A crossfade is started by an `mpsc::send` that returns immediately, so the
+/// frontend has no other way to learn when the swap actually happened — it used
+/// to advance the queue at fade *start*, leaving MPRIS advertising the next
+/// track against the previous one's clock for the whole fade.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PlayerTrackChangedEvent {
+    /// Seconds of the outgoing track that had played when the swap completed,
+    /// for logs — the position is reset to zero by the same handover.
+    pub at_secs: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerErrorEvent {
+    pub message: String,
+    /// Set when the stream opened but the player could not decode it. The
+    /// frontend turns it into a report a user can file as-is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undecodable: Option<UndecodableStream>,
+}
+
+/// Everything the decoder knows about a stream it gave up on.
+///
+/// Fields rather than a rendered message: the frontend adds the one fact the
+/// backend never has — which service and track the URL came from — and the
+/// report is only worth filing if it carries both.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UndecodableStream {
+    /// The URL the player was handed, for matching back to the queued track.
+    pub url: String,
+    /// The demuxer's or decoder's own words, verbatim.
+    pub detail: String,
+    /// Sniffed from the first bytes, so it is known even when probing failed.
+    pub container: Option<String>,
+    pub codec: Option<String>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u32>,
+    /// `MediaHarbor <version> · <os> <arch>`.
+    pub app: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioSpectrumEvent {
+    pub bars: Vec<u8>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlayerLoadRequest {
+    pub url: String,
+    pub mime_type: Option<String>,
+    /// The local file this stream came from, when there is one. The ReplayGain the
+    /// scanner read is looked up from it rather than threaded through every view that
+    /// can start playback.
+    #[serde(default)]
+    pub source_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlayerCrossfadeRequest {
+    pub url: String,
+    pub mime_type: Option<String>,
+    pub duration_secs: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlayerSeekRequest {
+    pub position_secs: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlayerVolumeRequest {
+    pub volume: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlayerMutedRequest {
+    pub muted: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlayerSpectrumRequest {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlayerDevicesResponse {
+    pub devices: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppErrorEvent {
     pub message: String,
     pub context: Option<String>,

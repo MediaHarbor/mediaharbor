@@ -87,6 +87,27 @@ interface InstallProgressPayload {
   status: string;
 }
 
+/** What the native player knew about a stream it could not decode. */
+export interface UndecodableStream {
+  /** The URL the player was handed, for matching back to the queued track. */
+  url: string;
+  detail: string;
+  container: string | null;
+  codec: string | null;
+  sampleRate: number | null;
+  channels: number | null;
+  app: string;
+}
+
+interface UndecodableStreamWire {
+  url: string;
+  detail: string;
+  container: string | null;
+  codec: string | null;
+  sample_rate: number | null;
+  channels: number | null;
+  app: string;
+}
 interface ScanProgressPayload {
   directory: string;
   percent: number;
@@ -562,6 +583,79 @@ export const tauriAPI = {
       await invoke('pause_media');
     },
     onStreamReady: streamReadyHub.on.bind(streamReadyHub),
+
+    native: {
+      load: (url: string, mimeType?: string | null, sourcePath?: string | null) =>
+        invoke<void>('player_load', {
+          req: { url, mime_type: mimeType ?? null, source_path: sourcePath ?? null },
+        }),
+      play: () => invoke<void>('player_play'),
+      pause: () => invoke<void>('player_pause'),
+      stop: () => invoke<void>('player_stop'),
+      seek: (positionSecs: number) =>
+        invoke<void>('player_seek', { req: { position_secs: positionSecs } }),
+      crossfadeTo: (url: string, durationSecs: number, mimeType?: string | null) =>
+        invoke<void>('player_crossfade_to', {
+          req: { url, mime_type: mimeType ?? null, duration_secs: durationSecs },
+        }),
+      setVolume: (volume: number) => invoke<void>('player_set_volume', { req: { volume } }),
+      setMuted: (muted: boolean) => invoke<void>('player_set_muted', { req: { muted } }),
+      setSpectrumEnabled: (enabled: boolean) =>
+        invoke<void>('player_set_spectrum_enabled', { req: { enabled } }),
+      listDevices: async () => {
+        const r = await invoke<{ devices: string[] }>('player_list_devices');
+        return r.devices;
+      },
+      onPosition: (cb: (p: { positionSecs: number; durationSecs?: number }) => void) =>
+        subscribe<{ position_secs: number; duration_secs: number | null }>('player-position', (p) =>
+          cb({ positionSecs: p.position_secs, durationSecs: p.duration_secs ?? undefined })
+        ),
+      onState: (cb: (s: { playing: boolean; ended: boolean; buffering: boolean }) => void) =>
+        subscribe<{ playing: boolean; ended: boolean; buffering: boolean }>('player-state', cb),
+      onError: (cb: (e: { message: string; undecodable?: UndecodableStream }) => void) =>
+        subscribe<{ message: string; undecodable?: UndecodableStreamWire }>('player-error', (p) =>
+          cb({
+            message: p.message,
+            undecodable: p.undecodable
+              ? {
+                  url: p.undecodable.url,
+                  detail: p.undecodable.detail,
+                  container: p.undecodable.container ?? null,
+                  codec: p.undecodable.codec ?? null,
+                  sampleRate: p.undecodable.sample_rate ?? null,
+                  channels: p.undecodable.channels ?? null,
+                  app: p.undecodable.app,
+                }
+              : undefined,
+          })
+        ),
+      onSpectrum: (cb: (bars: number[]) => void) =>
+        subscribe<{ bars: number[] }>('audio-spectrum', (p) => cb(p.bars)),
+      /** Fires when the decode thread has actually handed over to the queued
+       *  track — `crossfadeTo` resolves a whole fade earlier than that. */
+      onTrackChanged: (cb: (p: { atSecs: number }) => void) =>
+        subscribe<{ at_secs: number }>('player-track-changed', (p) => cb({ atSecs: p.at_secs })),
+    },
+    setMediaMetadata: (meta: {
+      title?: string | null;
+      artist?: string | null;
+      album?: string | null;
+      coverUrl?: string | null;
+      durationSecs?: number | null;
+    }) => {
+      void invoke('media_set_metadata', { meta }).catch(() => {});
+    },
+    setMediaPlayback: (playback: { playing: boolean; positionSecs?: number | null }) => {
+      void invoke('media_set_playback', { playback }).catch(() => {});
+    },
+    onMediaControl: (cb: (payload: { action: string; seconds?: number }) => void) => {
+      const unlisten = listen<{ action: string; seconds?: number }>('media-control', (e) =>
+        cb(e.payload)
+      );
+      return () => {
+        void unlisten.then((u) => u());
+      };
+    },
   },
 
   spotifyAccount: {

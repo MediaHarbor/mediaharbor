@@ -941,13 +941,38 @@ function GeneralTab({
       </Section>
 
       <Section title="Playback">
-        <Check2 id="crossfade_enabled" label="Crossfade between tracks"
+        <Row
+          label="Volume levelling"
+          help="Use the ReplayGain values in your files so tracks play at a consistent loudness"
+        >
+          <Select
+            value={s.replaygain_mode ?? 'off'}
+            onValueChange={(v) => set('replaygain_mode', v)}
+          >
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="off">Off</SelectItem>
+              <SelectItem value="track">Per track</SelectItem>
+              <SelectItem value="album">Per album</SelectItem>
+            </SelectContent>
+          </Select>
+        </Row>
+        <Chk
+          k="crossfade_enabled"
+          label="Crossfade between tracks"
           help="Smoothly blend the end of one track into the beginning of the next"
-          checked={s.crossfade_enabled ?? false} onChange={(v) => set('crossfade_enabled', v)} />
+        />
         {s.crossfade_enabled && (
           <Row label="Crossfade duration" help="Seconds of overlap between tracks">
-            <Select value={String(s.crossfade_duration ?? 6)} onValueChange={(v) => set('crossfade_duration', Number(v))}>
-              <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <Select
+              value={String(s.crossfade_duration ?? 6)}
+              onValueChange={(v) => set('crossfade_duration', Number(v))}
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="2">2 seconds</SelectItem>
                 <SelectItem value="4">4 seconds</SelectItem>

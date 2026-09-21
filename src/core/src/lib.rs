@@ -15,6 +15,7 @@ pub mod downloads;
 pub mod drm;
 pub mod installers;
 pub mod media;
+pub mod player;
 pub mod services;
 
 pub use defaults::Settings;
@@ -36,6 +37,21 @@ pub trait EventEmitter: Send + Sync {
     fn emit_install_progress(&self, event: &ipc_contract::InstallationProgressEvent);
     fn emit_app_error(&self, event: &ipc_contract::AppErrorEvent);
     fn emit_stdin_prompt(&self, event: &ipc_contract::ProcessStdinPromptEvent);
+    fn emit_player_position(&self, event: &ipc_contract::PlayerPositionEvent) {
+        let _ = event;
+    }
+    fn emit_player_state(&self, event: &ipc_contract::PlayerStateEvent) {
+        let _ = event;
+    }
+    fn emit_player_error(&self, event: &ipc_contract::PlayerErrorEvent) {
+        let _ = event;
+    }
+    fn emit_audio_spectrum(&self, event: &ipc_contract::AudioSpectrumEvent) {
+        let _ = event;
+    }
+    fn emit_player_track_changed(&self, event: &ipc_contract::PlayerTrackChangedEvent) {
+        let _ = event;
+    }
 }
 
 pub struct NoopEventEmitter;
@@ -72,6 +88,93 @@ pub struct BackendState {
     pub yt_stream_cache: Arc<crate::services::youtube::stream::YtAudioStreamCache>,
     pub qobuz_client_cache: Arc<RwLock<Option<crate::services::qobuz::client::QobuzClient>>>,
     pub spotify_stream_memo: Arc<crate::services::spotify::session::SpotifyStreamMemo>,
+    pub player: Arc<player::NativePlayer>,
+}
+
+/// Bridges player callbacks onto the app's event emitter, keeping the player
+/// itself free of any knowledge of the IPC layer.
+struct PlayerEventBridge {
+    emitter: Arc<dyn EventEmitter>,
+    /// Playback failures have to reach the log file, not just the frontend:
+    /// a Windows release build has no console (`windows_subsystem = "windows"`),
+    /// so an error that only goes out over IPC leaves nothing behind to read
+    /// afterwards.
+    logger: Logger,
+}
+
+impl player::PlayerObserver for PlayerEventBridge {
+    fn position(&self, position_secs: f64, duration_secs: Option<f64>) {
+        self.emitter
+            .emit_player_position(&ipc_contract::PlayerPositionEvent {
+                position_secs,
+                duration_secs,
+            });
+    }
+
+    fn state(&self, state: player::PlayerState) {
+        self.emitter
+            .emit_player_state(&ipc_contract::PlayerStateEvent {
+                playing: state.playing,
+                ended: state.ended,
+                buffering: state.buffering,
+            });
+    }
+
+    fn error(&self, message: String) {
+        self.logger.error("playback", &message);
+        self.emitter
+            .emit_player_error(&ipc_contract::PlayerErrorEvent {
+                message,
+                undecodable: None,
+            });
+    }
+
+    fn undecodable(&self, report: ipc_contract::UndecodableStream) {
+        let message = format!("Can't decode: {}", report.detail);
+        let known: Vec<String> = [
+            report.container.clone(),
+            report.codec.clone(),
+            report.sample_rate.map(|r| format!("{r} Hz")),
+            report.channels.map(|c| format!("{c} ch")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let context = if known.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", known.join(", "))
+        };
+        self.logger
+            .error("playback", &format!("{message}{context} <{}>", report.url));
+        self.emitter
+            .emit_player_error(&ipc_contract::PlayerErrorEvent {
+                message,
+                undecodable: Some(report),
+            });
+    }
+
+    fn warning(&self, message: String) {
+        self.logger.warn("playback", &message);
+        self.emitter.emit_log(&ipc_contract::BackendLogEvent::new(
+            "warning", "playback", "Playback", message,
+        ));
+    }
+
+    fn opened(&self, description: String) {
+        self.logger
+            .info("playback", &format!("Audio output: {description}"));
+    }
+
+    fn spectrum(&self, bars: Vec<u8>) {
+        self.emitter
+            .emit_audio_spectrum(&ipc_contract::AudioSpectrumEvent { bars });
+    }
+
+    fn track_changed(&self, at_secs: f64) {
+        self.emitter
+            .emit_player_track_changed(&ipc_contract::PlayerTrackChangedEvent { at_secs });
+    }
 }
 
 impl BackendState {
@@ -131,6 +234,7 @@ impl BackendState {
             let path = PathBuf::from(&loaded.spotify_cookies_path);
             let _ = librespot.login_from_cookies(&path).await;
         }
+        let emitter_for_player = emitter.clone();
         let state = BackendState {
             settings: Arc::new(RwLock::new(loaded)),
             active_downloads: Arc::new(DashMap::new()),
@@ -146,6 +250,14 @@ impl BackendState {
             yt_stream_cache: Arc::new(crate::services::youtube::stream::YtAudioStreamCache::new()),
             qobuz_client_cache: Arc::new(RwLock::new(None)),
             spotify_stream_memo: Arc::new(Default::default()),
+            player: player::NativePlayer::new(
+                http_client::build_audio_client()?,
+                tokio::runtime::Handle::current(),
+                Arc::new(PlayerEventBridge {
+                    emitter: emitter_for_player,
+                    logger: logger.clone(),
+                }),
+            ),
         };
 
         {
@@ -244,6 +356,25 @@ impl BackendState {
         };
         let ctx = crate::services::common::search::SearchContext::from_state(self);
         provider.suggestions(query, &ctx).await
+    }
+}
+
+impl BackendState {
+    /// Sets the player's per-track gain from what the scanner read out of the file.
+    /// Off unless the user turned it on, and silently no-ops for anything that is not a
+    /// scanned local file.
+    async fn apply_replay_gain(&self, source_path: Option<&str>) {
+        let mode = self.settings.read().await.replaygain_mode.clone();
+        let track = match (mode.as_str(), source_path) {
+            ("track" | "album", Some(path)) => self.library.track_gain(path).ok().flatten(),
+            _ => None,
+        };
+        let (gain, peak) = match (mode.as_str(), track) {
+            ("album", Some(t)) => (t.album_gain.or(t.track_gain), t.album_peak.or(t.track_peak)),
+            ("track", Some(t)) => (t.track_gain, t.track_peak),
+            _ => (None, None),
+        };
+        self.player.set_track_gain(gain, peak);
     }
 }
 
@@ -897,7 +1028,62 @@ impl BackendState {
 
 impl BackendState {
     pub async fn pause_media(&self) -> ipc_contract::PauseMediaResponse {
-        ipc_contract::PauseMediaResponse { success: true }
+        ipc_contract::PauseMediaResponse {
+            success: self.player.pause().is_ok(),
+        }
+    }
+
+    pub async fn player_load(&self, req: ipc_contract::PlayerLoadRequest) -> MhResult<()> {
+        self.apply_replay_gain(req.source_path.as_deref()).await;
+        self.player.load(&req.url, req.mime_type.as_deref())
+    }
+
+    pub async fn player_play(&self) -> MhResult<()> {
+        self.player.play()
+    }
+
+    pub async fn player_pause(&self) -> MhResult<()> {
+        self.player.pause()
+    }
+
+    pub async fn player_stop(&self) -> MhResult<()> {
+        self.player.stop()
+    }
+
+    pub async fn player_crossfade_to(
+        &self,
+        req: ipc_contract::PlayerCrossfadeRequest,
+    ) -> MhResult<()> {
+        self.player
+            .crossfade_to(&req.url, req.mime_type.as_deref(), req.duration_secs)
+    }
+
+    pub async fn player_seek(&self, req: ipc_contract::PlayerSeekRequest) -> MhResult<()> {
+        self.player.seek(req.position_secs)
+    }
+
+    pub async fn player_set_volume(&self, req: ipc_contract::PlayerVolumeRequest) -> MhResult<()> {
+        self.player.set_volume(req.volume);
+        Ok(())
+    }
+
+    pub async fn player_set_muted(&self, req: ipc_contract::PlayerMutedRequest) -> MhResult<()> {
+        self.player.set_muted(req.muted);
+        Ok(())
+    }
+
+    pub async fn player_set_spectrum_enabled(
+        &self,
+        req: ipc_contract::PlayerSpectrumRequest,
+    ) -> MhResult<()> {
+        self.player.set_spectrum_enabled(req.enabled);
+        Ok(())
+    }
+
+    pub async fn player_list_devices(&self) -> MhResult<ipc_contract::PlayerDevicesResponse> {
+        Ok(ipc_contract::PlayerDevicesResponse {
+            devices: player::output::list_output_devices()?,
+        })
     }
 }
 

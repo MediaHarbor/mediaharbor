@@ -3,6 +3,8 @@
     all(not(debug_assertions), not(feature = "console")),
     windows_subsystem = "windows"
 )]
+
+mod media_controls;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use mediaharbor_core::{
@@ -47,6 +49,11 @@ impl EventEmitter for TauriEmitter {
     }
     emit_events! {
         emit_download_summary => DownloadSummaryEvent, "download-summary";
+        emit_player_position => PlayerPositionEvent, "player-position";
+        emit_player_state => PlayerStateEvent, "player-state";
+        emit_player_error => PlayerErrorEvent, "player-error";
+        emit_audio_spectrum => AudioSpectrumEvent, "audio-spectrum";
+        emit_player_track_changed => PlayerTrackChangedEvent, "player-track-changed";
     }
 }
 
@@ -120,6 +127,17 @@ tauri_delegates! {
     infallible get_settings -> ipc_contract::GetSettingsResponse;
     infallible set_settings(ipc_contract::SetSettingsRequest) -> ipc_contract::SetSettingsResponse;
     play_media(ipc_contract::PlayMediaRequest) -> ipc_contract::PlayMediaResponse;
+    infallible pause_media -> ipc_contract::PauseMediaResponse;
+    player_load(ipc_contract::PlayerLoadRequest) -> ();
+    player_play -> ();
+    player_pause -> ();
+    player_stop -> ();
+    player_seek(ipc_contract::PlayerSeekRequest) -> ();
+    player_crossfade_to(ipc_contract::PlayerCrossfadeRequest) -> ();
+    player_set_volume(ipc_contract::PlayerVolumeRequest) -> ();
+    player_set_muted(ipc_contract::PlayerMutedRequest) -> ();
+    player_set_spectrum_enabled(ipc_contract::PlayerSpectrumRequest) -> ();
+    player_list_devices -> ipc_contract::PlayerDevicesResponse;
     spotify_oauth_login -> ipc_contract::SpotifyOAuthLoginResponse;
     infallible spotify_oauth_logout -> ipc_contract::SpotifyOAuthLogoutResponse;
     infallible spotify_oauth_status -> ipc_contract::SpotifyOAuthStatusResponse;
@@ -132,13 +150,6 @@ tauri_delegates! {
     infallible start_qobuz_download(ipc_contract::StartQobuzDownloadRequest) -> ipc_contract::StartDownloadResponse;
     infallible start_deezer_download(ipc_contract::StartDeezerDownloadRequest) -> ipc_contract::StartDownloadResponse;
     infallible start_tidal_download(ipc_contract::StartTidalDownloadRequest) -> ipc_contract::StartDownloadResponse;
-
-#[tauri::command]
-async fn pause_media(
-    state: State<'_, AppState>,
-) -> Result<ipc_contract::PauseMediaResponse, String> {
-    Ok(state.0.pause_media().await)
-}
     infallible start_orpheus_download(ipc_contract::StartOrpheusDownloadRequest) -> ipc_contract::StartDownloadResponse;
     infallible send_process_stdin(ipc_contract::SendProcessStdinRequest) -> ipc_contract::SendProcessStdinResponse;
     get_lyrics(ipc_contract::GetLyricsRequest) -> ipc_contract::GetLyricsResponse;
@@ -361,7 +372,54 @@ async fn install_orpheus_module(
     Ok(state.0.install_orpheus_module(req).await)
 }
 
+/// Append panics to the log file before letting the default hook run.
+///
+/// Playback work happens on threads — `mh-audio-decode`, `mh-audio-device`,
+/// cpal's own audio thread — whose panics unwind into nothing and kill only
+/// that thread. In a release build there is no console to notice on, so
+/// without this the symptom is silence or a crash with no record of either.
+///
+/// Note this cannot catch an access violation or a stack overflow: those never
+/// reach a Rust panic. An empty log after a crash is itself a signal.
+fn install_panic_hook(logger: mediaharbor_core::Logger) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        logger.error(
+            "panic",
+            &format!(
+                "thread '{}' panicked at {}: {}\n{}",
+                thread.name().unwrap_or("unnamed"),
+                info.location()
+                    .map(|l| l.to_string())
+                    .unwrap_or_else(|| "unknown location".to_string()),
+                info.payload()
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_string())
+                    .or_else(|| info.payload().downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unknown payload".to_string()),
+                std::backtrace::Backtrace::force_capture()
+            ),
+        );
+        previous(info);
+    }));
+}
+
 fn main() {
+    if std::env::var_os("RUST_BACKTRACE").is_none() {
+        std::env::set_var("RUST_BACKTRACE", "1");
+    }
+
+    // Nothing here suppresses WebKitGTK's own MPRIS session. It used to set
+    // WEBKIT_DISABLE_MEDIA_SESSION_API=1, which reads like a fix and is not one:
+    // no such environment variable exists in WebKitGTK. Dumping the strings in
+    // libwebkit2gtk-4.1.so.0 (2.52.6) shows every WEBKIT_* symbol is an enum
+    // name, while the MPRIS registration code is very much present. The real
+    // switch is the `MediaSessionEnabled` feature, reachable only through
+    // `webkit_settings_set_feature_enabled`, which webkit2gtk 2.0.2 does not
+    // bind — so it would take raw FFI.
+
+    mediaharbor_core::player::output::init_stream_identity();
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .thread_stack_size(8 * 1024 * 1024)
@@ -390,8 +448,10 @@ fn main() {
                     .expect("Failed to initialize MediaHarbor backend")
             });
 
+            install_panic_hook(state.logger.clone());
 
             app.manage(AppState(Arc::new(state)));
+            media_controls::setup(&app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -403,6 +463,18 @@ fn main() {
             search_suggestions,
             play_media,
             pause_media,
+            player_load,
+            player_play,
+            player_pause,
+            player_stop,
+            player_seek,
+            player_crossfade_to,
+            player_set_volume,
+            player_set_muted,
+            player_set_spectrum_enabled,
+            player_list_devices,
+            media_controls::media_set_metadata,
+            media_controls::media_set_playback,
             spotify_oauth_login,
             spotify_oauth_logout,
             spotify_oauth_status,
