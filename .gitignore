@@ -5,6 +5,7 @@
 *.swp
 *.swo
 *~
+.flatpak
 
 # Dependencies
 node_modules
@@ -41,6 +42,7 @@ next-env.d.ts
 
 # OS
 .DS_Store
+._*
 Thumbs.db
 *.pem
 
@@ -75,3 +77,15 @@ CLAUDE.md
 src/app/gen/
 src/app/icons/android/
 src/app/icons/ios/
+src/app/icons/Square*Logo.png
+src/app/icons/StoreLogo.png
+
+# Claude Code session-local state
+.claude/settings.local.json
+.claude/plans/
+.claude/RESUME.md
+
+# debugging stuff
+scripts/library_probes/
+scripts/qobuz_login_test.rs
+src/core/examples/
