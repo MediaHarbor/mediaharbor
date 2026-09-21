@@ -1,7 +1,7 @@
 import { Check } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
-const STEP_LABELS = ['Welcome', 'Install', 'Tools', 'Setup', 'Tour'];
+const STEP_LABELS = ['Welcome', 'Install', 'Tools', 'Setup', 'Services', 'Tour'];
 
 interface OnboardingStepIndicatorProps {
   currentStep: number;

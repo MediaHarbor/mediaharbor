@@ -235,7 +235,11 @@ tauri_delegates! {
     service_library_playlist_reorder(ipc_contract::ServiceLibraryPlaylistReorderRequest) -> mediaharbor_core::services::common::library::PlaylistMutateResult;
     service_library_radio_for(ipc_contract::ServiceLibraryRadioRequest) -> mediaharbor_core::services::common::library::RadioResult;
     service_library_radio_continue(ipc_contract::ServiceLibraryRadioContinueRequest) -> mediaharbor_core::services::common::library::RadioResult;
+    infallible install_dep(ipc_contract::InstallDepRequest) -> ipc_contract::InstallDepResponse;
+    infallible get_dependency_versions -> ipc_contract::GetDependencyVersionsResponse;
     infallible start_orpheus_download(ipc_contract::StartOrpheusDownloadRequest) -> ipc_contract::StartDownloadResponse;
+    infallible check_orpheus_deps -> ipc_contract::CheckOrpheusDepsResponse;
+    infallible install_orpheus_module(ipc_contract::InstallOrpheusModuleRequest) -> ipc_contract::InstallOrpheusModuleResponse;
     infallible send_process_stdin(ipc_contract::SendProcessStdinRequest) -> ipc_contract::SendProcessStdinResponse;
     tidal_import_token(ipc_contract::TidalImportTokenRequest) -> ipc_contract::TidalImportTokenResponse;
     get_lyrics(ipc_contract::GetLyricsRequest) -> ipc_contract::GetLyricsResponse;
@@ -383,6 +387,13 @@ async fn clear_database(
     state: State<'_, AppState>,
 ) -> Result<ipc_contract::ClearDatabaseResponse, String> {
     Ok(state.0.clear_database(false, false))
+}
+
+#[tauri::command]
+async fn check_deps(
+    state: State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, bool>, String> {
+    Ok(state.0.check_deps().await)
 }
 
 #[tauri::command]
@@ -787,43 +798,6 @@ async fn check_updates(
     }))
 }
 
-#[tauri::command]
-async fn check_deps(
-    state: State<'_, AppState>,
-) -> Result<ipc_contract::CheckDepsResponse, String> {
-    Ok(state.0.check_deps().await)
-}
-
-#[tauri::command]
-async fn install_dep(
-    state: State<'_, AppState>,
-    req: ipc_contract::InstallDepRequest,
-) -> Result<ipc_contract::InstallDepResponse, String> {
-    Ok(state.0.install_dep(req).await)
-}
-
-#[tauri::command]
-async fn get_dependency_versions(
-    state: State<'_, AppState>,
-) -> Result<ipc_contract::GetDependencyVersionsResponse, String> {
-    Ok(state.0.get_dependency_versions().await)
-}
-
-#[tauri::command]
-async fn check_orpheus_deps(
-    state: State<'_, AppState>,
-) -> Result<ipc_contract::CheckOrpheusDepsResponse, String> {
-    Ok(state.0.check_orpheus_deps().await)
-}
-
-#[tauri::command]
-async fn install_orpheus_module(
-    state: State<'_, AppState>,
-    req: ipc_contract::InstallOrpheusModuleRequest,
-) -> Result<ipc_contract::InstallOrpheusModuleResponse, String> {
-    Ok(state.0.install_orpheus_module(req).await)
-}
-
 /// Append panics to the log file before letting the default hook run.
 ///
 /// Playback work happens on threads — `mh-audio-decode`, `mh-audio-device`,
@@ -872,6 +846,9 @@ fn main() {
     // bind — so it would take raw FFI.
 
     mediaharbor_core::player::output::init_stream_identity();
+
+    mediaharbor_core::venv_manager::ensure_managed_bin_dir();
+    mediaharbor_core::venv_manager::augment_process_path();
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .thread_stack_size(8 * 1024 * 1024)

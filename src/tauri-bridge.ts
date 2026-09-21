@@ -694,38 +694,19 @@ export const tauriAPI = {
     openRelease: async (url: string) => {
       await invoke('open_external', { url });
     },
-    checkDeps: async () => {
-      const r = await invoke<Record<string, boolean>>('check_deps');
-      return {
-        ...r,
-        ytdlp: r['yt_dlp'] ?? false,
-        apple: r['gamdl'] ?? false,
-        spotify: r['votify'] ?? false,
-      };
-    },
-    getDependencyVersions: async (_packages: string[]) => {
+    checkDeps: async () => invoke<Record<string, boolean>>('check_deps'),
+    getDependencyVersions: async () => {
       const r = await invoke<{ versions: Record<string, string> }>('get_dependency_versions');
       return r.versions;
     },
-    getBinaryVersions: async () => {
-      const r = await invoke<{ versions: Record<string, string> }>('get_dependency_versions');
-      return {
-        python: r.versions['python'] ?? '',
-        ffmpeg: r.versions['ffmpeg'] ?? '',
-      };
-    },
-    installDep: async (dep: string) => {
+    installDep: async (dep: string, force = false) => {
       const r = await invoke<{ success: boolean; error: string | null }>('install_dep', {
-        req: { dependency: dep },
+        req: { dependency: dep, force },
       });
       if (!r.success) throw new Error(r.error ?? 'Installation failed');
       return { success: true };
     },
-    updateDependencies: (_packages: string[]) => {
-    },
     onInstallProgress: installProgressHub.on.bind(installProgressHub),
-    onDependencyNotification: (_cb: (data: Record<string, unknown>) => void) => () => {},
-    onDependencyLoading:      (_cb: (isLoading: boolean) => void) => () => {},
   },
 
   search: {
@@ -1318,11 +1299,14 @@ export const tauriAPI = {
 
   orpheus: {
     checkDeps: () =>
-      invoke<{ orpheus_installed: boolean; modules: Array<{ id: string; label: string; installed: boolean }> }>(
-        'check_orpheus_deps'
-      ),
+      invoke<{
+        orpheus_installed: boolean;
+        modules: Array<{ id: string; label: string; installed: boolean }>;
+      }>('check_orpheus_deps'),
     installCore: () =>
-      invoke<{ success: boolean; error: string | null }>('install_dep', { req: { dependency: 'orpheus' } }),
+      invoke<{ success: boolean; error: string | null }>('install_dep', {
+        req: { dependency: 'orpheus' },
+      }),
     installModule: (moduleId: string, customUrl?: string, label?: string) =>
       invoke<{ success: boolean; error: string | null }>('install_orpheus_module', {
         req: { moduleId, customUrl: customUrl ?? null, label: label ?? null },

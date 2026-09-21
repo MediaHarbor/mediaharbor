@@ -2414,39 +2414,21 @@ impl BackendState {
         }
     }
 
-    pub async fn check_deps(&self) -> ipc_contract::CheckDepsResponse {
+    pub async fn check_deps(&self) -> std::collections::HashMap<String, bool> {
         let python_ok = venv_manager::is_venv_ready();
-        let ffmpeg_ok = which_binary("ffmpeg");
+        let venv_pkgs = venv_pip_list().await;
 
-        let (yt_dlp_ok, votify_ok, gamdl_ok, bento4_ok) = if python_ok {
-            let mut pip_cmd = tokio::process::Command::new(venv_manager::get_venv_python());
-            pip_cmd.args(["-m", "pip", "list"]);
-            subprocess::apply_no_window(&mut pip_cmd);
-            let pip_list = pip_cmd
-                .output()
-                .await
-                .ok()
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .unwrap_or_default();
-
-            let yt_dlp = pip_list.contains("yt-dlp");
-            let votify = pip_list.contains("votify");
-            let gamdl  = pip_list.contains("gamdl");
-            let bento4 = installers::bento4::get_bento4_bin_dir().exists();
-            (yt_dlp, votify, gamdl, bento4)
-        } else {
-            (false, false, false, false)
-        };
-
-        ipc_contract::CheckDepsResponse {
-            ffmpeg: ffmpeg_ok,
-            python: python_ok,
-            yt_dlp: yt_dlp_ok,
-            votify: votify_ok,
-            gamdl: gamdl_ok,
-            bento4: bento4_ok,
-            is_sandboxed: crate::sandbox::is_sandboxed(),
+        let mut deps = std::collections::HashMap::new();
+        deps.insert("python".to_string(), python_ok);
+        for dep in PIP_DEPS {
+            deps.insert(dep.status_key.to_string(), pip_dep_present(dep, &venv_pkgs));
         }
+        deps.insert("bento4".to_string(), installers::bento4::detect().is_some());
+        for spec in installers::MANAGED_BINARIES {
+            deps.insert(spec.id.to_string(), (spec.detect)().is_some());
+        }
+        deps.insert("is_sandboxed".to_string(), crate::sandbox::is_sandboxed());
+        deps
     }
 
     pub async fn install_dep(
@@ -2477,50 +2459,72 @@ impl BackendState {
 
         let emitter = self.emitter.clone();
         let dep = req.dependency.clone();
+        let force = req.force;
 
-        let make_progress = move |pct: u8, msg: &str| {
-            emitter.emit_install_progress(&ipc_contract::InstallationProgressEvent {
-                dependency: dep.clone(),
-                percent: pct,
-                status: msg.to_string(),
-            });
+        let make_progress = install_progress_emitter(emitter, dep);
+
+        let skip_if_system = |bin: &str| -> Option<ipc_contract::InstallDepResponse> {
+            if force {
+                return None;
+            }
+            which_binary(bin).then(|| {
+                make_progress(100, &format!("System {bin} found — skipping pip install."));
+                ipc_contract::InstallDepResponse {
+                    success: true,
+                    error: None,
+                }
+            })
         };
 
         let result: MhResult<()> = match req.dependency.as_str() {
-            "python" => {
-                match venv_manager::ensure_venv(|pct, msg| make_progress(pct, msg)).await {
-                    Ok(()) => Ok(()),
-                    Err(_) => {
-                        make_progress(1, "Fetching available Python versions…");
-                        match installers::python::fetch_python_versions().await {
-                            Err(e) => Err(e),
-                            Ok(versions) => {
-                                match versions
-                                    .into_iter()
-                                    .max_by_key(|(k, _)| {
-                                        k.split('.').nth(1).and_then(|m| m.parse::<u32>().ok()).unwrap_or(0)
-                                    })
-                                    .map(|(_, full)| full)
-                                {
-                                    None => Err(MhError::Other(
-                                        "No Python versions available on python.org".to_string(),
-                                    )),
-                                    Some(best_version) => {
-                                        make_progress(3, "Downloading Python…");
-                                        match installers::python::download_and_install_python(
-                                            &best_version,
-                                            |pct, msg| make_progress(3 + (pct as u16 * 85 / 100) as u8, msg),
-                                        )
-                                        .await
-                                        {
-                                            Err(e) => Err(e),
-                                            Ok(()) => {
-                                                make_progress(88, "Setting up Python environment…");
-                                                venv_manager::ensure_venv(|pct, msg| {
-                                                    make_progress(88u8.saturating_add((pct as u16 * 12 / 15) as u8), msg)
-                                                })
-                                                .await
-                                            }
+            "python" => match venv_manager::ensure_venv(|pct, msg| make_progress(pct, msg)).await {
+                Ok(()) => Ok(()),
+                Err(e)
+                    if cfg!(not(any(target_os = "windows", target_os = "macos")))
+                        || crate::sandbox::is_sandboxed() =>
+                {
+                    Err(e)
+                }
+                Err(_) => {
+                    make_progress(1, "Fetching available Python versions…");
+                    match installers::python::fetch_python_versions().await {
+                        Err(e) => Err(e),
+                        Ok(versions) => {
+                            match versions
+                                .into_iter()
+                                .max_by_key(|(k, _)| {
+                                    k.split('.')
+                                        .nth(1)
+                                        .and_then(|m| m.parse::<u32>().ok())
+                                        .unwrap_or(0)
+                                })
+                                .map(|(_, full)| full)
+                            {
+                                None => Err(MhError::Other(
+                                    "No Python versions available on python.org".to_string(),
+                                )),
+                                Some(best_version) => {
+                                    make_progress(3, "Downloading Python…");
+                                    match installers::python::download_and_install_python(
+                                        &best_version,
+                                        |pct, msg| {
+                                            make_progress(3 + (pct as u16 * 85 / 100) as u8, msg)
+                                        },
+                                    )
+                                    .await
+                                    {
+                                        Err(e) => Err(e),
+                                        Ok(()) => {
+                                            make_progress(88, "Setting up Python environment…");
+                                            venv_manager::ensure_venv(|pct, msg| {
+                                                make_progress(
+                                                    88u8.saturating_add(
+                                                        (pct as u16 * 12 / 15) as u8,
+                                                    ),
+                                                    msg,
+                                                )
+                                            })
+                                            .await
                                         }
                                     }
                                 }
@@ -2528,45 +2532,62 @@ impl BackendState {
                         }
                     }
                 }
-            }
+            },
             "ffmpeg" => {
-                installers::ffmpeg::download_and_install_ffmpeg(|pct, msg| make_progress(pct, msg)).await
+                installers::ffmpeg::download_and_install_ffmpeg(
+                    |pct, msg| make_progress(pct, msg),
+                    force,
+                )
+                .await
             }
-            "yt_dlp" | "ytdlp" => {
-                match venv_manager::ensure_venv(|pct, msg| make_progress(pct, msg)).await {
-                    Err(e) => Err(e),
-                    Ok(()) => {
-                        make_progress(50, "Installing yt-dlp...");
-                        let mut c = tokio::process::Command::new(venv_manager::get_venv_python());
-                        c.args(["-m", "pip", "install", "--upgrade", "yt-dlp", "isodate"]);
-                        subprocess::apply_no_window(&mut c);
-                        run_pip(c).await
+            "bento4" | "mp4decrypt" => {
+                installers::bento4::download_and_install_bento4(
+                    |pct, msg| make_progress(pct, msg),
+                    force,
+                )
+                .await
+            }
+            id if PIP_DEPS.iter().any(|d| d.aliases.contains(&id)) => {
+                let dep = PIP_DEPS
+                    .iter()
+                    .find(|d| d.aliases.contains(&id))
+                    .expect("guard matched");
+                if dep.skip_install_if_on_path {
+                    if let Some(r) = skip_if_system(dep.path_binary) {
+                        return r;
                     }
                 }
-            }
-            "apple" | "gamdl" => {
-                match venv_manager::ensure_venv(|pct, msg| make_progress(pct, msg)).await {
-                    Err(e) => Err(e),
-                    Ok(()) => {
-                        let _ = installers::bento4::download_and_install_bento4(|pct, msg| make_progress(pct, msg)).await;
-                        make_progress(50, "Installing gamdl...");
-                        let mut c = tokio::process::Command::new(venv_manager::get_venv_python());
-                        c.args(["-m", "pip", "install", "--upgrade", "gamdl"]);
-                        subprocess::apply_no_window(&mut c);
-                        run_pip(c).await
-                    }
+                // Only the venv half of the presence test, never `which_binary`:
+                // deps with `skip_install_if_on_path: false` want their own copy
+                // in the venv even when a foreign one sits on `$PATH`. Asked
+                // before `ensure_venv` so the already-installed case does no work.
+                if !force && venv_has_pip_dep(dep).await {
+                    make_progress(
+                        100,
+                        &format!("{} is already installed — no download needed.", dep.label),
+                    );
+                    return ipc_contract::InstallDepResponse {
+                        success: true,
+                        error: None,
+                    };
                 }
-            }
-            "spotify" | "votify" => {
                 match venv_manager::ensure_venv(|pct, msg| make_progress(pct, msg)).await {
                     Err(e) => Err(e),
                     Ok(()) => {
-                        let _ = installers::bento4::download_and_install_bento4(|pct, msg| make_progress(pct, msg)).await;
-                        make_progress(50, "Installing votify...");
+                        make_progress(50, &format!("Installing {}...", dep.label));
                         let mut c = tokio::process::Command::new(venv_manager::get_venv_python());
-                        c.args(["-m", "pip", "install", "--upgrade", "votify", "pywidevine"]);
+                        c.args(["-m", "pip", "install", "--upgrade"]);
+                        c.args(dep.packages);
+                        c.envs(venv_manager::python_env());
                         subprocess::apply_no_window(&mut c);
-                        run_pip(c).await
+                        let result = run_pip(c).await;
+                        // A console script may have just landed in the venv's bin
+                        // dir — the highest-priority search dir — and certifi with
+                        // it. Re-probe both on the next spawn. Unconditional: a
+                        // failed pip run can still have moved files.
+                        venv_manager::invalidate_binary_cache();
+                        venv_manager::invalidate_ca_bundle_cache();
+                        result
                     }
                 }
             }
@@ -2574,16 +2595,24 @@ impl BackendState {
                 make_progress(100, "built-in (native Rust)");
                 Ok(())
             }
-            "orpheus" => {
-                orpheus::install_orpheus(|pct, msg| make_progress(pct, msg)).await
+            "orpheus" => orpheus::install_orpheus(|pct, msg| make_progress(pct, msg)).await,
+            other => {
+                match installers::install_managed(other, &|pct, msg| make_progress(pct, msg), force)
+                    .await
+                {
+                    Some(r) => r,
+                    None => Err(MhError::Other(format!("Unknown dependency: {}", other))),
+                }
             }
-            other => Err(MhError::Other(format!("Unknown dependency: {}", other))),
         };
 
         match result {
             Ok(_) => {
                 make_progress(100, "done");
-                ipc_contract::InstallDepResponse { success: true, error: None }
+                ipc_contract::InstallDepResponse {
+                    success: true,
+                    error: None,
+                }
             }
             Err(e) => ipc_contract::InstallDepResponse {
                 success: false,
@@ -2594,15 +2623,17 @@ impl BackendState {
 
     pub async fn check_orpheus_deps(&self) -> ipc_contract::CheckOrpheusDepsResponse {
         let settings = self.settings.read().await;
-        let mut modules: Vec<ipc_contract::OrpheusModuleStatus> = orpheus::KNOWN_MODULES.iter().map(|(id, label, _)| {
-            ipc_contract::OrpheusModuleStatus {
+        let mut modules: Vec<ipc_contract::OrpheusModuleStatus> = orpheus::KNOWN_MODULES
+            .iter()
+            .map(|(id, label, _)| ipc_contract::OrpheusModuleStatus {
                 id: id.to_string(),
                 label: label.to_string(),
                 installed: orpheus::is_module_installed(id),
-            }
-        }).collect();
+            })
+            .collect();
 
-        let custom: Vec<serde_json::Value> = serde_json::from_str(&settings.orpheus_custom_modules).unwrap_or_default();
+        let custom: Vec<serde_json::Value> =
+            serde_json::from_str(&settings.orpheus_custom_modules).unwrap_or_default();
         for item in custom {
             let id = match item["id"].as_str() {
                 Some(s) if !s.is_empty() => s.to_string(),
@@ -2632,18 +2663,15 @@ impl BackendState {
         let emitter = self.emitter.clone();
         let dep = format!("orpheus_module_{}", req.module_id);
 
-        let make_progress = move |pct: u8, msg: &str| {
-            emitter.emit_install_progress(&ipc_contract::InstallationProgressEvent {
-                dependency: dep.clone(),
-                percent: pct,
-                status: msg.to_string(),
-            });
-        };
+        let make_progress = install_progress_emitter(emitter, dep);
 
         let git_url = if let Some(url) = req.custom_url.as_deref() {
             url.to_string()
         } else {
-            match orpheus::KNOWN_MODULES.iter().find(|(id, _, _)| *id == req.module_id) {
+            match orpheus::KNOWN_MODULES
+                .iter()
+                .find(|(id, _, _)| *id == req.module_id)
+            {
                 Some((_, _, url)) => url.to_string(),
                 None => {
                     return ipc_contract::InstallOrpheusModuleResponse {
@@ -2660,15 +2688,26 @@ impl BackendState {
                 if req.custom_url.is_some() {
                     if let Some(label) = req.label.filter(|l| !l.is_empty()) {
                         let mut settings = self.settings.write().await;
-                        let mut custom: Vec<serde_json::Value> = serde_json::from_str(&settings.orpheus_custom_modules).unwrap_or_default();
-                        if !custom.iter().any(|m| m["id"].as_str() == Some(&req.module_id)) {
+                        let mut custom: Vec<serde_json::Value> =
+                            serde_json::from_str(&settings.orpheus_custom_modules)
+                                .unwrap_or_default();
+                        if !custom
+                            .iter()
+                            .any(|m| m["id"].as_str() == Some(&req.module_id))
+                        {
                             custom.push(serde_json::json!({ "id": req.module_id, "label": label }));
-                            settings.orpheus_custom_modules = serde_json::to_string(&custom).unwrap_or_else(|_| "[]".into());
-                            settings::save_settings(&settings, &self.user_data).await.ok();
+                            settings.orpheus_custom_modules =
+                                serde_json::to_string(&custom).unwrap_or_else(|_| "[]".into());
+                            settings::save_settings(&settings, &self.user_data)
+                                .await
+                                .ok();
                         }
                     }
                 }
-                ipc_contract::InstallOrpheusModuleResponse { success: true, error: None }
+                ipc_contract::InstallOrpheusModuleResponse {
+                    success: true,
+                    error: None,
+                }
             }
             Err(e) => ipc_contract::InstallOrpheusModuleResponse {
                 success: false,
@@ -2680,9 +2719,9 @@ impl BackendState {
     pub async fn get_dependency_versions(&self) -> ipc_contract::GetDependencyVersionsResponse {
         let mut versions = std::collections::HashMap::new();
 
-        for bin in &["ffmpeg"] {
-            if let Some(v) = binary_version(bin) {
-                versions.insert(bin.to_string(), v);
+        if let Some(path) = venv_manager::find_ffmpeg() {
+            if let Some(v) = binary_version_at(&path) {
+                versions.insert("ffmpeg".to_string(), v);
             }
         }
 
@@ -2690,22 +2729,61 @@ impl BackendState {
             versions.insert("python".to_string(), v);
         }
 
+        let pip_deps = [
+            ("ytdlp", "yt-dlp"),
+            ("apple", "gamdl"),
+            ("spotify", "votify"),
+        ];
+        let mut venv_versions: std::collections::HashMap<&str, String> =
+            std::collections::HashMap::new();
         if venv_manager::is_venv_ready() {
             let py = venv_manager::get_venv_python();
-            for pkg in &["yt-dlp", "gamdl", "votify"] {
+            let version_re = regex::Regex::new(r"(?m)^Version:\s+(.+)$").ok();
+            for (_, pkg) in pip_deps {
                 let mut c = tokio::process::Command::new(&py);
                 c.args(["-m", "pip", "show", pkg]);
+                c.envs(venv_manager::python_env());
                 subprocess::apply_no_window(&mut c);
-                let out = c.output().await;
-                if let Ok(output) = out {
+                if let Ok(output) = c.output().await {
                     let text = String::from_utf8_lossy(&output.stdout);
-                    if let Some(m) = regex::Regex::new(r"(?m)^Version:\s+(.+)$")
-                        .ok()
+                    if let Some(m) = version_re
+                        .as_ref()
                         .and_then(|re| re.captures(&text))
                         .and_then(|c| c.get(1))
                     {
-                        versions.insert(pkg.to_string(), m.as_str().trim().to_string());
+                        venv_versions.insert(pkg, m.as_str().trim().to_string());
                     }
+                }
+            }
+        }
+        for (dep_id, pkg) in pip_deps {
+            let found = venv_versions
+                .get(pkg)
+                .cloned()
+                .or_else(|| system_binary_version(pkg));
+            if let Some(v) = found {
+                versions.insert(pkg.to_string(), v.clone());
+                versions.insert(dep_id.to_string(), v);
+            }
+        }
+
+        for (dep_id, binary) in [
+            ("aria2c", "aria2c"),
+            ("nm3u8dlre", "N_m3u8DL-RE"),
+            ("deno", "deno"),
+        ] {
+            let candidates: &[&str] = if dep_id == "deno" {
+                &["deno", "bun", "node"]
+            } else {
+                &[binary]
+            };
+            for name in candidates {
+                let Some(path) = venv_manager::find_managed_or_path(name) else {
+                    continue;
+                };
+                if let Some(v) = binary_version_at(&path) {
+                    versions.insert(dep_id.to_string(), v);
+                    break;
                 }
             }
         }
@@ -2714,20 +2792,303 @@ impl BackendState {
     }
 }
 
+/// Wraps install-progress emission so repeated `(percent, message)` pairs are dropped.
+///
+/// `download_to_file` invokes its progress callback once per streamed chunk, which is
+/// thousands of times for a single installer download, and each call becomes an IPC event
+/// and a re-render of the dependency row. Every installer derives its message from the
+/// percent, so dropping repeats collapses that to roughly one event per percent without
+/// losing any step the user can actually see.
+fn install_progress_emitter(
+    emitter: Arc<dyn EventEmitter>,
+    dependency: String,
+) -> impl Fn(u8, &str) + Send {
+    let last_sent: std::sync::Mutex<Option<(u8, String)>> = std::sync::Mutex::new(None);
+
+    move |pct: u8, msg: &str| {
+        {
+            let mut last = last_sent.lock().unwrap_or_else(|e| e.into_inner());
+            // The terminal event always goes out; a stalled percent must not swallow it.
+            if pct < 100 && last.as_ref().is_some_and(|(p, m)| *p == pct && m == msg) {
+                return;
+            }
+            *last = Some((pct, msg.to_string()));
+        }
+        emitter.emit_install_progress(&ipc_contract::InstallationProgressEvent {
+            dependency: dependency.clone(),
+            percent: pct,
+            status: msg.to_string(),
+        });
+    }
+}
+
+fn extract_version_token(text: &str) -> Option<String> {
+    static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+    let re = RE
+        .get_or_init(|| regex::Regex::new(r"\d+(?:\.\d+)+(?:-[0-9A-Za-z.]{1,12})?").ok())
+        .as_ref()?;
+    let line = text.lines().find(|l| !l.trim().is_empty())?;
+    re.find(line).map(|m| m.as_str().to_string())
+}
+
+fn system_binary_version(name: &str) -> Option<String> {
+    binary_version_at(std::path::Path::new(name))
+}
+
+/// A Python dependency installed into the managed venv with pip. One row drives
+/// both `install_dep` (which packages, which label) and `check_deps` (which
+/// status key, how presence is detected).
+struct PipDep {
+    /// Dependency ids `install_dep` accepts for this row.
+    aliases: &'static [&'static str],
+    /// Key `check_deps` reports this dependency under.
+    status_key: &'static str,
+    label: &'static str,
+    packages: &'static [&'static str],
+    /// Every one of these must appear in `pip list` to count as installed.
+    installed_when: &'static [&'static str],
+    /// A binary of this name on PATH also satisfies the dependency.
+    path_binary: &'static str,
+    /// Whether `install_dep` short-circuits when `path_binary` is already on PATH.
+    skip_install_if_on_path: bool,
+}
+
+const PIP_DEPS: &[PipDep] = &[
+    PipDep {
+        aliases: &["yt_dlp", "ytdlp"],
+        status_key: "ytdlp",
+        label: "yt-dlp",
+        packages: &["yt-dlp", "isodate", "certifi"],
+        installed_when: &["yt-dlp"],
+        path_binary: "yt-dlp",
+        skip_install_if_on_path: true,
+    },
+    PipDep {
+        aliases: &["apple", "gamdl"],
+        status_key: "apple",
+        label: "gamdl",
+        packages: &["gamdl", "certifi"],
+        installed_when: &["gamdl"],
+        path_binary: "gamdl",
+        skip_install_if_on_path: false,
+    },
+    PipDep {
+        aliases: &["spotify", "votify"],
+        status_key: "spotify",
+        label: "votify",
+        packages: &["votify[librespot]", "pywidevine", "certifi"],
+        installed_when: &["votify", "librespot"],
+        path_binary: "votify",
+        skip_install_if_on_path: false,
+    },
+];
+
+/// `pip list` for the managed venv, or an empty string when there is no venv or
+/// pip fails. Shared by `check_deps` and `install_dep` so "is it in the venv?" is
+/// asked exactly one way.
+async fn venv_pip_list() -> String {
+    if !venv_manager::is_venv_ready() {
+        return String::new();
+    }
+    let mut cmd = tokio::process::Command::new(venv_manager::get_venv_python());
+    cmd.args(["-m", "pip", "list"]);
+    cmd.envs(venv_manager::python_env());
+    subprocess::apply_no_window(&mut cmd);
+    cmd.output()
+        .await
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .unwrap_or_default()
+}
+
+/// PEP 503 name normalisation, so `yt_dlp`, `YT-DLP` and `yt-dlp` compare equal —
+/// a distribution's metadata and pip's own output do not agree on the separator.
+fn normalize_pkg(name: &str) -> String {
+    name.trim()
+        .chars()
+        .map(|c| match c {
+            '_' | '.' => '-',
+            c => c.to_ascii_lowercase(),
+        })
+        .collect()
+}
+
+/// Whether `pip list` — a two-column table, package then version — lists `pkg`.
+///
+/// Matching the first column exactly rather than searching the blob: `yt-dlp` is a
+/// substring of the entirely real `yt-dlp-get-pot`, so a machine with only the
+/// plugin installed reported yt-dlp itself as present. (`pip list` also prints a
+/// `Package`/`------` header; no distribution is named either, so it costs nothing
+/// to leave in.)
+fn pip_list_has(pip_list: &str, pkg: &str) -> bool {
+    let want = normalize_pkg(pkg);
+    pip_list
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .any(|name| normalize_pkg(name) == want)
+}
+
+/// Whether every distribution `dep` needs is in the managed venv. The pure half of
+/// the presence test — unit-testable without a venv, and the only half the
+/// installer may use.
+fn pip_list_satisfies(dep: &PipDep, pip_list: &str) -> bool {
+    dep.installed_when.iter().all(|p| pip_list_has(pip_list, p))
+}
+
+/// What `check_deps` reports: in the venv, or a working copy on `$PATH`.
+fn pip_dep_present(dep: &PipDep, pip_list: &str) -> bool {
+    pip_list_satisfies(dep, pip_list) || which_binary(dep.path_binary)
+}
+
+/// The venv half of the presence test, for callers with no `pip list` in hand.
+async fn venv_has_pip_dep(dep: &PipDep) -> bool {
+    pip_list_satisfies(dep, &venv_pip_list().await)
+}
+
+/// Whether a *working* `name` is on `$PATH`. The exit status matters: `status()`
+/// alone only proves the file spawned, so a broken install that cannot answer
+/// `--version` counted as present and suppressed the install that would fix it.
 fn which_binary(name: &str) -> bool {
     let mut cmd = std::process::Command::new(name);
     cmd.arg("--version")
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     subprocess::apply_no_window_std(&mut cmd);
-    cmd.status().is_ok()
+    cmd.status().map(|s| s.success()).unwrap_or(false)
 }
 
-fn binary_version(name: &str) -> Option<String> {
-    let mut cmd = std::process::Command::new(name);
-    cmd.arg("--version");
-    subprocess::apply_no_window_std(&mut cmd);
-    let output = cmd.output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.lines().next().map(|l| l.trim().to_string())
+fn binary_version_at(path: &std::path::Path) -> Option<String> {
+    for flag in ["--version", "-version"] {
+        let mut cmd = std::process::Command::new(path);
+        cmd.arg(flag);
+        subprocess::apply_no_window_std(&mut cmd);
+        let Ok(output) = cmd.output() else {
+            return None;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for text in [stdout.as_ref(), stderr.as_ref()] {
+            if let Some(v) = extract_version_token(text) {
+                return Some(v);
+            }
+        }
+        if let Some(line) = stdout.lines().find(|l| !l.trim().is_empty()) {
+            return Some(line.trim().to_string());
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod version_probe_tests {
+    use super::extract_version_token;
+
+    #[test]
+    fn extracts_the_version_from_real_banners() {
+        let cases = [
+            (
+                "deno 2.9.5 (stable, release, x86_64-unknown-linux-gnu)",
+                "2.9.5",
+            ),
+            (
+                "aria2 version 1.37.0\nCopyright (C) 2006 Tatsuhiro Tsujikawa",
+                "1.37.0",
+            ),
+            (
+                "ffmpeg version n9.0 Copyright (c) 2000-2026 the FFmpeg developers",
+                "9.0",
+            ),
+            ("votify, version 1.9.9", "1.9.9"),
+            ("2026.07.04", "2026.07.04"),
+            ("N_m3u8DL-RE 0.6.0-beta", "0.6.0-beta"),
+        ];
+        for (banner, want) in cases {
+            assert_eq!(
+                extract_version_token(banner).as_deref(),
+                Some(want),
+                "banner: {banner}"
+            );
+        }
+    }
+
+    #[test]
+    fn drops_the_build_hash_so_the_ui_chip_stays_short() {
+        assert_eq!(
+            extract_version_token("0.2.1+e9b6c9f3c31d648cb259c700e5c519102a5bb9cc").as_deref(),
+            Some("0.2.1"),
+        );
+    }
+
+    #[test]
+    fn no_version_like_token_yields_none() {
+        assert_eq!(extract_version_token("command not found"), None);
+        assert_eq!(extract_version_token(""), None);
+    }
+}
+
+#[cfg(test)]
+mod dep_probe_tests {
+    use super::{pip_list_has, pip_list_satisfies, PIP_DEPS};
+
+    const PIP_LIST: &str = "\
+Package            Version
+------------------ -----------
+certifi            2026.7.22
+librespot          0.0.1
+votify             1.9.9
+yt-dlp             2026.8.19
+";
+
+    #[test]
+    fn matches_a_package_by_exact_name() {
+        assert!(pip_list_has(PIP_LIST, "yt-dlp"));
+        assert!(pip_list_has(PIP_LIST, "votify"));
+        assert!(!pip_list_has(PIP_LIST, "gamdl"));
+    }
+
+    /// The loose `contains` this replaced reported yt-dlp as installed here.
+    #[test]
+    fn a_plugin_does_not_pass_for_the_package_it_extends() {
+        let list = "Package        Version\n-------------- -------\nyt-dlp-get-pot 0.3.0\n";
+        assert!(!pip_list_has(list, "yt-dlp"));
+    }
+
+    #[test]
+    fn names_compare_pep503_normalised() {
+        let list = "Package Version\n------- -------\nyt_dlp  2026.8.19\n";
+        assert!(pip_list_has(list, "yt-dlp"));
+    }
+
+    /// Drift guard between `installed_when` and the matcher: every row must be
+    /// satisfied by exactly its own names, and by nothing less.
+    #[test]
+    fn every_pip_dep_needs_all_of_its_names_and_no_more() {
+        for dep in PIP_DEPS {
+            let full: String = dep
+                .installed_when
+                .iter()
+                .map(|n| format!("{n} 1.0.0\n"))
+                .collect();
+            assert!(pip_list_satisfies(dep, &full), "{}", dep.status_key);
+
+            for missing in dep.installed_when {
+                let partial: String = dep
+                    .installed_when
+                    .iter()
+                    .filter(|n| n != &missing)
+                    .map(|n| format!("{n} 1.0.0\n"))
+                    .collect();
+                assert!(
+                    !pip_list_satisfies(dep, &partial),
+                    "{} passed without {}",
+                    dep.status_key,
+                    missing
+                );
+            }
+        }
+    }
 }

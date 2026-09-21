@@ -1,9 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CircleCheckBig, CircleX, Loader2, ExternalLink, ArrowRight, SkipForward } from 'lucide-react';
+import {
+  CircleCheckBig,
+  CircleX,
+  Loader2,
+  ExternalLink,
+  ArrowRight,
+  SkipForward,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/utils/cn';
 import { useInstallProgress } from '../hooks/useInstallProgress';
+import { tauriAPI } from '@/tauri-bridge';
 
 interface DepDef {
   id: string;
@@ -65,7 +73,7 @@ export function StepInstallSequence({ onInstallingChange, onAllDone }: StepInsta
   const current = queue[activeIndex];
 
   useEffect(() => {
-    window.electron?.updates.checkDeps().then((r) => {
+    tauriAPI.updates.checkDeps().then((r) => {
       setInstalled({
         python: r.python ?? false,
         ffmpeg: r.ffmpeg ?? false,
@@ -106,7 +114,7 @@ export function StepInstallSequence({ onInstallingChange, onAllDone }: StepInsta
   }, [checkedDeps, installed, current, installing, statusMap, advance]);
 
   const verifyInstalled = async (id: string): Promise<boolean> => {
-    const r = await window.electron?.updates.checkDeps().catch(() => null);
+    const r = await tauriAPI.updates.checkDeps().catch(() => null);
     if (!r) return false;
     const map: Record<string, boolean> = {
       python: r.python ?? false,
@@ -123,7 +131,7 @@ export function StepInstallSequence({ onInstallingChange, onAllDone }: StepInsta
     setInstalling(id);
     setStatusMap((s) => ({ ...s, [id]: 'installing' }));
     try {
-      const result = await window.electron?.updates.installDep(id);
+      const result = await tauriAPI.updates.installDep(id);
       const present = await verifyInstalled(id);
       if (result?.success || present) {
         setStatusMap((s) => ({ ...s, [id]: 'done' }));
@@ -238,7 +246,7 @@ export function StepInstallSequence({ onInstallingChange, onAllDone }: StepInsta
                 <button
                   onClick={(e) => {
                     e.preventDefault();
-                    window.electron?.updates.openRelease(current.manualUrl!);
+                    tauriAPI.updates.openRelease(current.manualUrl!);
                   }}
                   className="text-[11px] text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
                 >
@@ -291,10 +299,13 @@ export function StepInstallSequence({ onInstallingChange, onAllDone }: StepInsta
 }
 
 function StatusIcon({ status, isInstalled }: { status: CardStatus; isInstalled: boolean }) {
-  if (status === 'installing') return <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />;
-  if (status === 'done' || isInstalled) return <CircleCheckBig className="w-4 h-4 text-green-500 shrink-0" />;
+  if (status === 'installing')
+    return <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />;
+  if (status === 'done' || isInstalled)
+    return <CircleCheckBig className="w-4 h-4 text-green-500 shrink-0" />;
   if (status === 'error') return <CircleX className="w-4 h-4 text-destructive shrink-0" />;
-  if (status === 'skipped') return <SkipForward className="w-4 h-4 text-muted-foreground shrink-0" />;
+  if (status === 'skipped')
+    return <SkipForward className="w-4 h-4 text-muted-foreground shrink-0" />;
   return <CircleX className="w-4 h-4 text-muted-foreground/60 shrink-0" />;
 }
 

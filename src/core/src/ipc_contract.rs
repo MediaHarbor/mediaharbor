@@ -676,18 +676,6 @@ pub struct RadioMetadataEvent {
     pub title: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CheckDepsResponse {
-    pub ffmpeg: bool,
-    pub python: bool,
-    pub yt_dlp: bool,
-    pub votify: bool,
-    pub gamdl: bool,
-    pub bento4: bool,
-    pub is_sandboxed: bool,
-}
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryScanProgressEvent {
     pub directory: String,
@@ -813,13 +801,11 @@ pub struct CheckUpdatesResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InstallDepRequest {
     pub dependency: String,
+    #[serde(default)]
+    pub force: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InstallDepResponse {
-    pub success: bool,
-    pub error: Option<String>,
-}
+pub type InstallDepResponse = OpResponse;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GetDependencyVersionsResponse {
@@ -1058,11 +1044,7 @@ pub struct InstallOrpheusModuleRequest {
     pub label: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InstallOrpheusModuleResponse {
-    pub success: bool,
-    pub error: Option<String>,
-}
+pub type InstallOrpheusModuleResponse = OpResponse;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

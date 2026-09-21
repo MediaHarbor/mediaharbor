@@ -40,6 +40,14 @@ export const TOUR_STEPS: TourStep[] = [
     placement: 'right',
   },
   {
+    id: 'radio',
+    selector: '[data-tour-id="nav-radio"]',
+    route: '/radio',
+    title: 'Radio',
+    body: 'Thousands of live internet stations. Browse by genre or country, save favourites, or paste a stream of your own.',
+    placement: 'right',
+  },
+  {
     id: 'updates',
     selector: '[data-tour-id="nav-updates"]',
     route: '/updates',

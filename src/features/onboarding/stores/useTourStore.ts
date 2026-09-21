@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { TOUR_STEPS } from '../tour/steps';
+import { tauriAPI } from '@/tauri-bridge';
 
 interface TourState {
   isOpen: boolean;
@@ -26,8 +27,7 @@ export const useTourStore = create<TourState>((set, get) => ({
     set({ currentStep: currentStep + 1 });
   },
 
-  prev: () =>
-    set((s) => ({ currentStep: Math.max(0, s.currentStep - 1) })),
+  prev: () => set((s) => ({ currentStep: Math.max(0, s.currentStep - 1) })),
 
   end: async () => {
     set({ isOpen: false, currentStep: 0 });
@@ -35,10 +35,8 @@ export const useTourStore = create<TourState>((set, get) => ({
   },
 
   persistCompleted: async () => {
-    const data = await window.electron?.settings.get().catch(() => null);
+    const data = await tauriAPI.settings.get().catch(() => null);
     if (!data) return;
-    await window.electron?.settings
-      .set({ ...data, onboarding_completed: true })
-      .catch(() => null);
+    await tauriAPI.settings.set({ ...data, onboarding_completed: true }).catch(() => null);
   },
 }));
