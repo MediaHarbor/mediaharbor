@@ -487,6 +487,29 @@ jobs:
           [ -n "$(ls -A release/)" ] || {
             echo "::error::no installer artifacts found in dist/"; exit 1; }
 
+      # Release notes come from this version's CHANGELOG entry; commit subjects are the fallback.
+      - name: Collect release notes
+        shell: bash
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${GITHUB_REF_NAME}"
+          else
+            RANGE="${GITHUB_REF_NAME}"
+          fi
+          echo "PREV_TAG=$PREV_TAG" >> "$GITHUB_ENV"
+
+          # latest.json gets the plain-text form: the Updates page renders it unformatted.
+          if python3 .github/scripts/release_notes.py "${{ steps.ver.outputs.v }}" \
+               --out changelog_section.md --plain-out update_notes.txt; then
+            echo "release notes taken from CHANGELOG.md"
+          else
+            echo "::warning::no CHANGELOG.md entry for ${{ steps.ver.outputs.v }} — using commit subjects"
+            git log --no-merges --pretty='- %s (%h)' "$RANGE" > changelog_section.md
+            git log --no-merges --pretty='- %s' "$RANGE" > update_notes.txt
+          fi
+          echo "=== release notes ==="; cat changelog_section.md
+
       # Updater manifest. Only per-installer keys, so Flatpak, Snap and AUR (which report
       # no installer) never pull an update meant for another format.
       - name: Generate updater manifest (latest.json)
@@ -524,13 +547,6 @@ jobs:
 
           [ -s platforms.jsonl ] || {
             echo "::error::no signed updater artifacts — is TAURI_SIGNING_PRIVATE_KEY set?"; exit 1; }
-
-          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            git log --no-merges --pretty='- %s' "${PREV_TAG}..${GITHUB_REF_NAME}" > update_notes.txt
-          else
-            git log --no-merges --pretty='- %s' "${GITHUB_REF_NAME}" > update_notes.txt
-          fi
 
           jq -s --arg v "${{ steps.ver.outputs.v }}" --rawfile n update_notes.txt \
              '{version:$v, notes:$n, pub_date:(now|todate), platforms:from_entries}' \
@@ -578,15 +594,10 @@ jobs:
       - name: Build release body (changelog + install table + checksums)
         shell: bash
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || echo "")
           {
             echo "## What's Changed"
             echo ""
-            if [ -n "$PREV_TAG" ]; then
-              git log --no-merges --pretty='- %s (%h)' "${PREV_TAG}..${GITHUB_REF_NAME}"
-            else
-              git log --no-merges --pretty='- %s (%h)' "${GITHUB_REF_NAME}"
-            fi
+            cat changelog_section.md
             echo ""
           } > release_body.md
 
@@ -674,13 +685,19 @@ jobs:
             done
           } >> release_body.md
 
+          if [ -n "${PREV_TAG:-}" ]; then
+            printf '\n**Full changelog**: %s/%s/compare/%s...%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$PREV_TAG" "$GITHUB_REF_NAME" >> release_body.md
+          fi
+
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: MediaHarbor v${{ steps.ver.outputs.v }}
           fail_on_unmatched_files: false
-          generate_release_notes: true
+          # The body is the CHANGELOG entry; GitHub's generated notes would repeat it.
+          generate_release_notes: false
           body_path: release_body.md
           files: release/**
 
