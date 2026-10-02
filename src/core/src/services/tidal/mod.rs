@@ -1,0 +1,10 @@
+pub mod api;
+pub mod client;
+pub mod crypto;
+pub mod downloader;
+pub mod http_stream;
+pub mod library;
+pub mod lyrics;
+pub mod playback_provider;
+pub mod search;
+pub mod telemetry;

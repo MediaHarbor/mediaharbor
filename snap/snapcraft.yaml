@@ -49,6 +49,9 @@ apps:
     environment:
       WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
       GDK_BACKEND: wayland,x11
+      # cpal's native PulseAudio client needs the auth cookie; strict confinement
+      # remaps $HOME, so point it at the real one. Falls back to ALSA if absent.
+      PULSE_COOKIE: $SNAP_REAL_HOME/.config/pulse/cookie
 
 parts:
   mediaharbor:
@@ -58,4 +61,10 @@ parts:
     organize:
       usr/bin/mediaharbor: bin/mediaharbor
     stage-packages:
+      # Runtime library for cpal's pipewire host.
+      - libpipewire-0.3-0
       - libayatana-appindicator3-1
+      - ffmpeg
+      - python3
+      - python3-venv
+      - python3-pip

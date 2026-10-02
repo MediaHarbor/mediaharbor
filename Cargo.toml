@@ -1,3 +1,42 @@
 [workspace]
 members = ["src/core", "src/app"]
+exclude = ["vendor/oxideav-aac", "vendor/oxideav-core"]
 resolver = "2"
+
+[workspace.package]
+version = "3.0.0"
+
+# Vendored so the AAC filterbanks can use FFT-based transforms; upstream
+# evaluates them as O(N^2) sums, which decodes HE-AAC at ~1.25x realtime.
+[patch.crates-io]
+oxideav-aac = { path = "vendor/oxideav-aac" }
+oxideav-core = { path = "vendor/oxideav-core" }
+
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
+# A wrapped length in the AAC decoder is an out-of-bounds slice, not a panic.
+overflow-checks = true
+
+# The audio decoders are slower than realtime at -O0.
+[profile.dev.package.oxideav-aac]
+opt-level = 3
+[profile.dev.package.oxideav-core]
+opt-level = 3
+[profile.dev.package.rusty-opus]
+opt-level = 3
+[profile.dev.package.realfft]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-mp3]
+opt-level = 3
+[profile.dev.package.symphonia-codec-aac]
+opt-level = 3
+[profile.dev.package.symphonia-codec-alac]
+opt-level = 3
+[profile.dev.package.symphonia-codec-vorbis]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-flac]
+opt-level = 3
+[profile.dev.package.symphonia-core]
+opt-level = 3

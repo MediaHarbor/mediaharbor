@@ -1,32 +1,17 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use serde::Deserialize;
 use tempfile::TempDir;
 
 use crate::errors::{MhError, MhResult};
-use crate::http_client::{build_mozilla_client, download_to_file};
+use crate::http_client::{build_download_client, build_mozilla_client, download_to_file};
+#[cfg(target_os = "macos")]
+use crate::update_checker::compare_versions;
 
 #[derive(Debug, Deserialize)]
 struct PythonRelease {
     name: String,
     release_date: Option<String>,
-}
-
-#[cfg(target_os = "macos")]
-fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
-    let p1: Vec<u64> = v1.split('.').map(|p| p.parse().unwrap_or(0)).collect();
-    let p2: Vec<u64> = v2.split('.').map(|p| p.parse().unwrap_or(0)).collect();
-    let len = p1.len().max(p2.len());
-    for i in 0..len {
-        let a = p1.get(i).copied().unwrap_or(0);
-        let b = p2.get(i).copied().unwrap_or(0);
-        match a.cmp(&b) {
-            std::cmp::Ordering::Equal => continue,
-            other => return other,
-        }
-    }
-    std::cmp::Ordering::Equal
 }
 
 fn get_download_details(full_version: &str) -> MhResult<(String, String)> {
@@ -57,11 +42,11 @@ fn get_download_details(full_version: &str) -> MhResult<(String, String)> {
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        return Err(MhError::Unsupported(format!(
+        Err(MhError::Unsupported(format!(
             "Automatic Python installation is not supported on this platform. \
              Please install Python {} using your package manager.",
             full_version
-        )));
+        )))
     }
 }
 
@@ -74,7 +59,7 @@ pub async fn fetch_python_versions() -> MhResult<HashMap<String, String>> {
         .await?
         .json()
         .await
-        .map_err(|e| MhError::Network(e))?;
+        .map_err(MhError::Network)?;
 
     let mut version_map: HashMap<String, (String, String)> = HashMap::new();
 
@@ -119,10 +104,7 @@ pub async fn fetch_python_versions() -> MhResult<HashMap<String, String>> {
         }
     }
 
-    Ok(version_map
-        .into_iter()
-        .map(|(k, (v, _))| (k, v))
-        .collect())
+    Ok(version_map.into_iter().map(|(k, (v, _))| (k, v)).collect())
 }
 
 pub async fn download_and_install_python<F>(version: &str, on_progress: F) -> MhResult<()>
@@ -135,13 +117,16 @@ where
     let tmp = TempDir::new()?;
     let installer_path = tmp.path().join(&filename);
 
-    let client = build_mozilla_client()?;
+    let client = build_download_client()?;
 
     download_to_file(&client, &download_url, &installer_path, |dl, total| {
         let pct = total
             .map(|t| (dl as u128 * 40 / t as u128) as u8)
             .unwrap_or(0);
-        on_progress(pct, &format!("Downloading Python… {}%", pct * 100 / 40));
+        on_progress(
+            pct,
+            &format!("Downloading Python… {}%", (pct as u32) * 100 / 40),
+        );
     })
     .await?;
 
@@ -196,72 +181,36 @@ async fn run_installer<F: Fn(u8, &str)>(
             command.replace('"', "\\\"")
         );
 
-        let status = tokio::process::Command::new("osascript")
+        let output = tokio::process::Command::new("osascript")
             .args(["-e", &script])
-            .status()
+            .output()
             .await
             .map_err(|e| MhError::Subprocess(format!("osascript failed: {}", e)))?;
 
-        if !status.success() {
-            return Err(MhError::Subprocess(
-                "Python installer failed (osascript)".to_string(),
-            ));
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // osascript reports a dismissed authorisation dialog as -128, which is a
+            // user choice rather than a fault worth reporting as an installer failure.
+            if stderr.contains("-128") || stderr.contains("User canceled") {
+                return Err(MhError::Subprocess(
+                    "Python installation was cancelled at the administrator password prompt."
+                        .to_string(),
+                ));
+            }
+            return Err(MhError::Subprocess(format!(
+                "Python installer failed: {}",
+                stderr.trim()
+            )));
         }
 
-        on_progress(80, "Installation completed, configuring system…");
-
-        update_macos_path(version, on_progress)?;
+        on_progress(100, "Installation completed.");
         return Ok(());
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        return Err(MhError::Unsupported(
+        Err(MhError::Unsupported(
             "Unsupported platform for Python installer execution".to_string(),
-        ));
+        ))
     }
-}
-
-#[cfg(target_os = "macos")]
-fn update_macos_path<F: Fn(u8, &str)>(version: &str, on_progress: &F) -> MhResult<()> {
-    if crate::sandbox::is_sandboxed() {
-        return Ok(());
-    }
-
-    let parts: Vec<&str> = version.split('.').collect();
-    let version_key = if parts.len() >= 2 {
-        format!("{}.{}", parts[0], parts[1])
-    } else {
-        version.to_string()
-    };
-
-    let python_path = format!(
-        "/Library/Frameworks/Python.framework/Versions/{}/bin",
-        version_key
-    );
-
-    on_progress(90, "Updating system PATH…");
-
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
-    let shell = std::env::var("SHELL").unwrap_or_default();
-
-    let rc_path = if shell.contains("zsh") {
-        home.join(".zshrc")
-    } else {
-        let bp = home.join(".bash_profile");
-        if bp.exists() { bp } else { home.join(".profile") }
-    };
-
-    let existing = std::fs::read_to_string(&rc_path).unwrap_or_default();
-    if !existing.contains(&python_path) {
-        let line = format!("\nexport PATH=\"{}:$PATH\"\n", python_path);
-        use std::io::Write;
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&rc_path)?;
-        f.write_all(line.as_bytes())?;
-    }
-
-    Ok(())
 }

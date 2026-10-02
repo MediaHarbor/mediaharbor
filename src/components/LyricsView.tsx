@@ -1,123 +1,140 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import { usePlayerStore, type SyncedLine, type WordSyncedLine } from '@/stores/usePlayerStore';
 import { Loader2 } from 'lucide-react';
 import { useMediaSyncLoop } from '@/hooks/useMediaSyncLoop';
+import { useShallow } from 'zustand/react/shallow';
+
+const seekTo = (time: number) => usePlayerStore.getState().seekTo(time);
+
+/// The last line that has already started at `time`, or -1 before the first one.
+function activeIndexAt<T>(lines: T[], time: number, startOf: (line: T) => number): number {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (startOf(lines[i]) <= time) return i;
+  }
+  return -1;
+}
+
+/// Scrolls the line at `idx` to the middle of its container.
+function scrollLineToCenter(container: HTMLElement, idx: number) {
+  const el = container.children[idx] as HTMLElement | undefined;
+  if (!el) return;
+  const top = el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2;
+  container.scrollTo({ top, behavior: 'smooth' });
+}
+
+/// Whether the track is far enough from its end to be worth scrolling for.
+function farFromEnd(): boolean {
+  const { duration, position } = usePlayerStore.getState();
+  return (duration || 0) - position > 1.5;
+}
+
+function NoLyrics() {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground/40">
+      <p className="text-sm">No lyrics available</p>
+    </div>
+  );
+}
 
 function WordSyncedDisplay({
   lines,
   platformColor,
-  mediaElement,
 }: {
   lines: WordSyncedLine[];
   platformColor: string;
-  mediaElement: HTMLMediaElement | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeLineRef = useRef(-1);
+  const litRef = useRef(-1);
+  const paintedRef = useRef<{ idx: number; color: string; lines: WordSyncedLine[] } | null>(null);
 
-  const tick = useCallback((time: number) => {
-    if (!containerRef.current) return;
-    const remaining = mediaElement ? (mediaElement.duration || 0) - time : 0;
-    const container = containerRef.current;
+  const tick = useCallback(
+    (time: number) => {
+      if (!containerRef.current) return;
+      const container = containerRef.current;
 
-    let currentLineIdx = -1;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].startTime <= time) {
-        currentLineIdx = i;
-        break;
+      let currentLineIdx = activeIndexAt(lines, time, (l) => l.startTime);
+      if (currentLineIdx >= 0) {
+        const cur = lines[currentLineIdx];
+        const next = lines[currentLineIdx + 1];
+        const isGapMarker = cur.words.length === 0;
+        const inGap =
+          !isGapMarker && cur.endTime > 0 && time > cur.endTime && (!next || time < next.startTime);
+        if (inGap) currentLineIdx = -1;
       }
-    }
 
-    const lineEls = container.children;
-    for (let li = 0; li < lineEls.length; li++) {
-      const lineEl = lineEls[li] as HTMLElement;
-      const line = lines[li];
-      const isActiveLine = li === currentLineIdx;
-      const isPastLine = li < currentLineIdx;
+      const lineEls = container.children;
+      const painted = paintedRef.current;
+      const repaintAll =
+        painted === null ||
+        painted.idx !== currentLineIdx ||
+        painted.color !== platformColor ||
+        painted.lines !== lines;
 
-      if (isActiveLine) {
-        lineEl.style.opacity = '1';
+      const activeLine = currentLineIdx >= 0 ? lines[currentLineIdx] : undefined;
+      const lit = activeLine ? activeLine.words.filter((w) => time >= w.start).length : -1;
+      if (!repaintAll && lit === litRef.current) return;
+      litRef.current = lit;
+
+      for (let li = 0; li < lineEls.length; li++) {
+        const lineEl = lineEls[li] as HTMLElement;
+        const line = lines[li];
+        const isActiveLine = li === currentLineIdx;
+        if (!repaintAll && !isActiveLine) continue;
+        if (line.words.length === 0) {
+          lineEl.style.opacity = '0.4';
+          continue;
+        }
+        const isPastLine = li < currentLineIdx;
+        lineEl.style.opacity = isActiveLine ? '1' : isPastLine ? '0.3' : '0.2';
+
+        const litThrough = isActiveLine ? lit : isPastLine ? line.words.length : 0;
         const wordEls = lineEl.children;
         for (let wi = 0; wi < wordEls.length; wi++) {
-          const wordEl = wordEls[wi] as HTMLElement;
-          const word = line.words[wi];
-          if (!word) continue;
-          if (time >= word.end) {
-            wordEl.style.backgroundImage = '';
-            wordEl.style.webkitBackgroundClip = '';
-            wordEl.style.webkitTextFillColor = '';
-            wordEl.style.color = platformColor;
-          } else if (time >= word.start) {
-            const progress = (time - word.start) / (word.end - word.start);
-            const pct = Math.min(100, Math.max(0, progress * 100));
-            wordEl.style.backgroundImage = `linear-gradient(90deg, ${platformColor} ${pct}%, currentColor ${pct}%)`;
-            wordEl.style.webkitBackgroundClip = 'text';
-            wordEl.style.webkitTextFillColor = 'transparent';
-            wordEl.style.color = '';
-          } else {
-            wordEl.style.backgroundImage = '';
-            wordEl.style.webkitBackgroundClip = '';
-            wordEl.style.webkitTextFillColor = '';
-            wordEl.style.color = '';
-          }
-        }
-      } else if (isPastLine) {
-        lineEl.style.opacity = '0.3';
-        const wordEls = lineEl.children;
-        for (let wi = 0; wi < wordEls.length; wi++) {
-          const wordEl = wordEls[wi] as HTMLElement;
-          wordEl.style.backgroundImage = '';
-          wordEl.style.webkitBackgroundClip = '';
-          wordEl.style.webkitTextFillColor = '';
-          wordEl.style.color = platformColor;
-        }
-      } else {
-        lineEl.style.opacity = '0.2';
-        const wordEls = lineEl.children;
-        for (let wi = 0; wi < wordEls.length; wi++) {
-          const wordEl = wordEls[wi] as HTMLElement;
-          wordEl.style.backgroundImage = '';
-          wordEl.style.webkitBackgroundClip = '';
-          wordEl.style.webkitTextFillColor = '';
-          wordEl.style.color = '';
+          if (!line.words[wi]) continue;
+          (wordEls[wi] as HTMLElement).style.color = wi < litThrough ? platformColor : '';
         }
       }
-    }
+      paintedRef.current = { idx: currentLineIdx, color: platformColor, lines };
 
-    if (currentLineIdx !== activeLineRef.current && currentLineIdx >= 0 && remaining > 1.5) {
-      activeLineRef.current = currentLineIdx;
-      if (currentLineIdx < lineEls.length) {
-        const el = lineEls[currentLineIdx] as HTMLElement;
-        const top = el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2;
-        container.scrollTo({ top, behavior: 'smooth' });
+      if (currentLineIdx !== activeLineRef.current && currentLineIdx >= 0 && farFromEnd()) {
+        activeLineRef.current = currentLineIdx;
+        scrollLineToCenter(container, currentLineIdx);
       }
-    }
-  }, [lines, platformColor, mediaElement]);
+    },
+    [lines, platformColor]
+  );
 
-  useMediaSyncLoop(tick, mediaElement);
-
-  const handleLineClick = (time: number) => {
-    if (mediaElement) {
-      mediaElement.currentTime = time;
-    }
-  };
+  useMediaSyncLoop(tick);
 
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto scrollbar-none px-6 py-12 space-y-3">
-      {lines.map((line, i) => (
-        <p
-          key={i}
-          onClick={() => handleLineClick(line.startTime)}
-          className="text-[1.7rem] font-bold leading-snug cursor-pointer"
-          style={{ opacity: 0.2 }}
-        >
-          {line.words.map((word, wi) => (
-            <span key={wi}>
-              {word.text}{wi < line.words.length - 1 ? ' ' : ''}
-            </span>
-          ))}
-        </p>
-      ))}
+      {lines.map((line, i) => {
+        const isGap = line.words.length === 0;
+        return (
+          <p
+            key={i}
+            onClick={() => seekTo(line.startTime)}
+            className={
+              isGap
+                ? 'text-base leading-none cursor-pointer text-muted-foreground'
+                : 'text-[1.7rem] font-bold leading-snug cursor-pointer'
+            }
+            style={{ opacity: isGap ? 0.4 : 0.2 }}
+          >
+            {line.words.length > 0 ? (
+              line.words.map((word, wi) => (
+                <span key={wi}>
+                  {word.text}
+                  {wi < line.words.length - 1 ? ' ' : ''}
+                </span>
+              ))
+            ) : (
+              <span>♪</span>
+            )}
+          </p>
+        );
+      })}
     </div>
   );
 }
@@ -125,67 +142,57 @@ function WordSyncedDisplay({
 function SyncedLyricsDisplay({
   lines,
   platformColor,
-  mediaElement,
 }: {
   lines: SyncedLine[];
   platformColor: string;
-  mediaElement: HTMLMediaElement | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const activeIndexRef = useRef(-1);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const lastScrolledRef = useRef(-1);
 
-  const tick = useCallback((time: number) => {
-    if (!containerRef.current) return;
-    const remaining = mediaElement ? (mediaElement.duration || 0) - time : 0;
-    let idx = -1;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].time <= time) {
-        idx = i;
-        break;
-      }
-    }
+  const tick = useCallback(
+    (time: number) => setActiveIdx(activeIndexAt(lines, time, (l) => l.time)),
+    [lines]
+  );
 
-    if (idx !== activeIndexRef.current) {
-      activeIndexRef.current = idx;
-      const container = containerRef.current;
-      const children = container.children;
-      for (let i = 0; i < children.length; i++) {
-        const el = children[i] as HTMLElement;
-        if (i === idx) {
-          el.style.opacity = '1';
-          el.style.color = platformColor;
-          if (remaining > 1.5) {
-            const top = el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2;
-            container.scrollTo({ top, behavior: 'smooth' });
-          }
-        } else {
-          el.style.opacity = '0.2';
-          el.style.color = '';
-        }
-      }
-    }
-  }, [lines, platformColor, mediaElement]);
+  useMediaSyncLoop(tick);
 
-  useMediaSyncLoop(tick, mediaElement);
+  useEffect(() => {
+    if (activeIdx < 0 || !containerRef.current) return;
+    if (lastScrolledRef.current === activeIdx) return;
+    if (!farFromEnd()) return;
+    scrollLineToCenter(containerRef.current, activeIdx);
+    lastScrolledRef.current = activeIdx;
+  }, [activeIdx]);
 
-  const handleLineClick = (time: number) => {
-    if (mediaElement) {
-      mediaElement.currentTime = time;
-    }
-  };
+  useEffect(() => {
+    lastScrolledRef.current = -1;
+  }, [lines]);
 
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto scrollbar-none px-6 py-12 space-y-3">
-      {lines.map((line, i) => (
-        <p
-          key={i}
-          onClick={() => handleLineClick(line.time)}
-          className="text-[1.7rem] font-bold leading-snug cursor-pointer"
-          style={{ opacity: 0.2 }}
-        >
-          {line.text || '\u00A0'}
-        </p>
-      ))}
+      {lines.map((line, i) => {
+        const isActive = i === activeIdx;
+        const isPast = i < activeIdx;
+        const isGap = line.text === '\u266A';
+        return (
+          <p
+            key={i}
+            onClick={() => seekTo(line.time)}
+            className={
+              isGap
+                ? 'text-base leading-none cursor-pointer transition-opacity text-muted-foreground'
+                : 'text-[1.7rem] font-bold leading-snug cursor-pointer transition-opacity'
+            }
+            style={{
+              opacity: isGap ? 0.4 : isActive ? 1 : isPast ? 0.35 : 0.2,
+              color: !isGap && isActive ? platformColor : undefined,
+            }}
+          >
+            {line.text || '\u00A0'}
+          </p>
+        );
+      })}
     </div>
   );
 }
@@ -202,8 +209,21 @@ function PlainLyricsDisplay({ text }: { text: string }) {
   );
 }
 
-export function LyricsView({ platformColor, syncedMode = true }: { platformColor: string; syncedMode?: boolean }) {
-  const { syncedLyrics, plainLyrics, wordSyncedLyrics, lyricsLoading, mediaElement } = usePlayerStore();
+export function LyricsView({
+  platformColor,
+  syncedMode = true,
+}: {
+  platformColor: string;
+  syncedMode?: boolean;
+}) {
+  const { syncedLyrics, plainLyrics, wordSyncedLyrics, lyricsLoading } = usePlayerStore(
+    useShallow((s) => ({
+      syncedLyrics: s.syncedLyrics,
+      plainLyrics: s.plainLyrics,
+      wordSyncedLyrics: s.wordSyncedLyrics,
+      lyricsLoading: s.lyricsLoading,
+    }))
+  );
 
   if (lyricsLoading) {
     return (
@@ -213,48 +233,31 @@ export function LyricsView({ platformColor, syncedMode = true }: { platformColor
     );
   }
 
-  const allPlainText = plainLyrics
-    || (syncedLyrics ? syncedLyrics.map(l => l.text).join('\n') : null)
-    || (wordSyncedLyrics ? wordSyncedLyrics.map(l => l.words.map(w => w.text).join(' ')).join('\n') : null);
+  const allPlainText =
+    plainLyrics ||
+    (syncedLyrics ? syncedLyrics.map((l) => l.text).join('\n') : null) ||
+    (wordSyncedLyrics
+      ? wordSyncedLyrics.map((l) => l.words.map((w) => w.text).join(' ')).join('\n')
+      : null);
 
   if (!syncedMode) {
     if (allPlainText) {
       return <PlainLyricsDisplay text={allPlainText} />;
     }
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground/40">
-        <p className="text-sm">No lyrics available</p>
-      </div>
-    );
+    return <NoLyrics />;
   }
 
   if (wordSyncedLyrics && wordSyncedLyrics.length > 0) {
-    return (
-      <WordSyncedDisplay
-        lines={wordSyncedLyrics}
-        platformColor={platformColor}
-        mediaElement={mediaElement}
-      />
-    );
+    return <WordSyncedDisplay lines={wordSyncedLyrics} platformColor={platformColor} />;
   }
 
   if (syncedLyrics && syncedLyrics.length > 0) {
-    return (
-      <SyncedLyricsDisplay
-        lines={syncedLyrics}
-        platformColor={platformColor}
-        mediaElement={mediaElement}
-      />
-    );
+    return <SyncedLyricsDisplay lines={syncedLyrics} platformColor={platformColor} />;
   }
 
   if (plainLyrics) {
     return <PlainLyricsDisplay text={plainLyrics} />;
   }
 
-  return (
-    <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground/40">
-      <p className="text-sm">No lyrics available</p>
-    </div>
-  );
+  return <NoLyrics />;
 }

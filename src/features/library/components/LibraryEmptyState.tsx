@@ -1,12 +1,32 @@
-import { Music2, Search, FolderOpen } from 'lucide-react';
+import { Music2, Search, FolderOpen, KeyRound, BadgeX } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface LibraryEmptyStateProps {
-  variant: 'no-folder' | 'empty' | 'no-results';
+  variant: 'no-folder' | 'empty' | 'no-results' | 'auth' | 'subscription';
+  /** Optional detail message (e.g. the auth error text from the backend). */
+  detail?: string;
 }
 
-export function LibraryEmptyState({ variant }: LibraryEmptyStateProps) {
+export function LibraryEmptyState({ variant, detail }: LibraryEmptyStateProps) {
   const config = {
+    subscription: {
+      icon: BadgeX,
+      title: 'No active subscription',
+      description:
+        detail ??
+        'This account has no active subscription, so its cloud library is unavailable. You can still search and download from this service.',
+      color: 'text-amber-500/40',
+      bg: 'from-amber-500/5 to-transparent',
+    },
+    auth: {
+      icon: KeyRound,
+      title: 'Session expired',
+      description:
+        detail ??
+        'Your session has expired or the subscription is inactive. Reconnect the service in Settings → Credentials.',
+      color: 'text-amber-500/40',
+      bg: 'from-amber-500/5 to-transparent',
+    },
     'no-folder': {
       icon: FolderOpen,
       title: 'No download folder set',
@@ -17,7 +37,7 @@ export function LibraryEmptyState({ variant }: LibraryEmptyStateProps) {
     empty: {
       icon: Music2,
       title: 'Your library is empty',
-      description: 'Download some music or videos first — they\'ll appear here automatically.',
+      description: "Download some music or videos first — they'll appear here automatically.",
       color: 'text-primary/30',
       bg: 'from-primary/5 to-transparent',
     },

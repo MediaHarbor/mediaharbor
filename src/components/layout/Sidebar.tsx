@@ -1,8 +1,19 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Download, Library, Settings, CircleHelp, SwatchBook, ScrollText, PanelLeftClose, PanelLeft } from 'lucide-react';
-import { SiDiscord } from 'react-icons/si';
+import {
+  Search,
+  Download,
+  Library,
+  Radio,
+  Settings,
+  CircleHelp,
+  SwatchBook,
+  ScrollText,
+  PanelLeftClose,
+  PanelLeft,
+} from 'lucide-react';
 import { motion } from 'framer-motion';
+import { DiscordIcon } from '@/components/icons/DiscordIcon';
 import { cn } from '@/utils/cn';
 import logoUrl from '@/assets/MediaHarbor_Logo.svg';
 
@@ -15,20 +26,29 @@ type NavItemConfig = {
 };
 
 const TOP_NAV: NavItemConfig[] = [
-  { path: '/search',    icon: Search,   label: 'Search',    tourId: 'nav-search' },
+  { path: '/search', icon: Search, label: 'Search', tourId: 'nav-search' },
   { path: '/downloads', icon: Download, label: 'Downloads', tourId: 'nav-downloads' },
-  { path: '/library',   icon: Library,  label: 'Library',   tourId: 'nav-library' },
+  { path: '/library', icon: Library, label: 'Library', tourId: 'nav-library' },
+  { path: '/radio', icon: Radio, label: 'Radio', tourId: 'nav-radio' },
 ];
 
 const BOTTOM_NAV: NavItemConfig[] = [
-  { href: 'http://discord.gg/Kc97D86TeZ', icon: SiDiscord, label: 'Discord' },
-  { path: '/updates',  icon: SwatchBook,  label: 'Dependencies', tourId: 'nav-updates' },
-  { path: '/logs',     icon: ScrollText, label: 'Logs',          tourId: 'nav-logs' },
-  { path: '/help',     icon: CircleHelp, label: 'Help' },
-  { path: '/settings', icon: Settings,   label: 'Settings',      tourId: 'nav-settings' },
+  { href: 'http://discord.gg/Kc97D86TeZ', icon: DiscordIcon, label: 'Discord' },
+  { path: '/updates', icon: SwatchBook, label: 'Dependencies', tourId: 'nav-updates' },
+  { path: '/logs', icon: ScrollText, label: 'Logs', tourId: 'nav-logs' },
+  { path: '/help', icon: CircleHelp, label: 'Help' },
+  { path: '/settings', icon: Settings, label: 'Settings', tourId: 'nav-settings' },
 ];
 
-function NavItem({ path, href, icon: Icon, label, isActive, collapsed, tourId }: {
+function NavItem({
+  path,
+  href,
+  icon: Icon,
+  label,
+  isActive,
+  collapsed,
+  tourId,
+}: {
   path?: string;
   href?: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -95,11 +115,12 @@ export function Sidebar() {
         collapsed ? 'w-14' : 'w-56'
       )}
     >
-      {/* Header */}
-      <div className={cn(
-        'flex items-center shrink-0 border-b border-border/40',
-        collapsed ? 'justify-center py-3 px-1.5' : 'h-14 px-3 gap-2.5'
-      )}>
+      <div
+        className={cn(
+          'flex items-center shrink-0 border-b border-border/40',
+          collapsed ? 'justify-center py-3 px-1.5' : 'h-14 px-3 gap-2.5'
+        )}
+      >
         {!collapsed && (
           <>
             <img src={logoUrl} alt="MediaHarbor" className="h-7 w-7 rounded-lg shrink-0" />
@@ -107,7 +128,7 @@ export function Sidebar() {
           </>
         )}
         <button
-          onClick={() => setCollapsed(c => !c)}
+          onClick={() => setCollapsed((c) => !c)}
           className={cn(
             'rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors shrink-0',
             collapsed ? 'p-2' : 'p-1'
@@ -118,20 +139,29 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* Top nav */}
       <nav className={cn('py-3 space-y-0.5', collapsed ? 'px-1.5' : 'px-2')}>
-        {TOP_NAV.map(item => (
-          <NavItem key={item.path} {...item} isActive={item.path ? isActive(item.path) : false} collapsed={collapsed} />
+        {TOP_NAV.map((item) => (
+          <NavItem
+            key={item.path}
+            {...item}
+            isActive={item.path ? isActive(item.path) : false}
+            collapsed={collapsed}
+          />
         ))}
       </nav>
 
-      {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Bottom nav */}
-      <nav className={cn('border-t border-border/40 py-3 space-y-0.5', collapsed ? 'px-1.5' : 'px-2')}>
-        {BOTTOM_NAV.map(item => (
-          <NavItem key={item.path ?? item.href} {...item} isActive={item.path ? isActive(item.path) : false} collapsed={collapsed} />
+      <nav
+        className={cn('border-t border-border/40 py-3 space-y-0.5', collapsed ? 'px-1.5' : 'px-2')}
+      >
+        {BOTTOM_NAV.map((item) => (
+          <NavItem
+            key={item.path ?? item.href}
+            {...item}
+            isActive={item.path ? isActive(item.path) : false}
+            collapsed={collapsed}
+          />
         ))}
       </nav>
     </aside>

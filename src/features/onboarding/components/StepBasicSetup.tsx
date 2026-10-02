@@ -4,7 +4,8 @@ import { FolderOpen, Moon, Sun, Monitor, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/utils/cn';
 import { useOnboardingStore } from '../stores/useOnboardingStore';
-import { useThemeStore } from '@/stores/useThemeStore';
+import { applyThemePreference } from '@/stores/useThemeStore';
+import { tauriAPI } from '@/tauri-bridge';
 
 const THEME_OPTIONS = [
   { value: 'dark' as const, label: 'Dark', icon: Moon },
@@ -17,30 +18,24 @@ export function StepBasicSetup() {
   const [isSandboxed, setIsSandboxed] = useState(false);
 
   useEffect(() => {
-    window.electron?.settings.get().then((data) => {
+    tauriAPI.settings.get().then((data) => {
       if (data?.downloadLocation) {
         setDownloadLocation(data.downloadLocation);
       }
     });
-    window.electron?.updates.checkDeps().then((r) => {
+    tauriAPI.updates.checkDeps().then((r) => {
       setIsSandboxed(r.is_sandboxed ?? false);
     });
   }, [setDownloadLocation]);
 
   const handleBrowse = async () => {
-    const path = await window.electron?.settings.openFolder();
+    const path = await tauriAPI.settings.openFolder();
     if (path) setDownloadLocation(path);
   };
 
   const handleTheme = (t: 'auto' | 'dark' | 'light') => {
     setTheme(t);
-    const resolved =
-      t === 'auto'
-        ? window.matchMedia('(prefers-color-scheme: dark)').matches
-          ? 'dark'
-          : 'light'
-        : t;
-    useThemeStore.getState().setTheme(resolved);
+    applyThemePreference(t);
   };
 
   return (
@@ -71,7 +66,8 @@ export function StepBasicSetup() {
           <div className="flex items-start gap-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-600 dark:text-yellow-400">
             <TriangleAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span>
-              Running in a sandboxed environment. Please choose a download folder — the default location may not be accessible if it is a symlink to an external drive.
+              Running in a sandboxed environment. Please choose a download folder — the default
+              location may not be accessible if it is a symlink to an external drive.
             </span>
           </div>
         )}

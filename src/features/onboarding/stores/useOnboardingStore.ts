@@ -1,6 +1,8 @@
 import { create } from 'zustand';
-import { useThemeStore } from '@/stores/useThemeStore';
+import { invalidateSettingsDerived } from '@/lib/queryClient';
+import { applyThemePreference } from '@/stores/useThemeStore';
 import { useTourStore } from './useTourStore';
+import { tauriAPI } from '@/tauri-bridge';
 
 interface OnboardingState {
   isOpen: boolean;
@@ -8,16 +10,18 @@ interface OnboardingState {
   direction: number;
   downloadLocation: string;
   theme: 'auto' | 'dark' | 'light';
+  enabledServices: string[];
   open(): void;
   close(): void;
   nextStep(): void;
   prevStep(): void;
   setDownloadLocation(path: string): void;
   setTheme(t: 'auto' | 'dark' | 'light'): void;
+  toggleService(platform: string): void;
   finishWizard(opts?: { startTour?: boolean }): Promise<void>;
 }
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 
 export const useOnboardingStore = create<OnboardingState>((set, get) => ({
   isOpen: false,
@@ -25,6 +29,7 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
   direction: 1,
   downloadLocation: '',
   theme: 'auto',
+  enabledServices: [],
 
   open: () => set({ isOpen: true, currentStep: 0, direction: 1 }),
   close: () => set({ isOpen: false }),
@@ -45,26 +50,29 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
 
   setTheme: (t) => set({ theme: t }),
 
+  toggleService: (platform) =>
+    set((s) => ({
+      enabledServices: s.enabledServices.includes(platform)
+        ? s.enabledServices.filter((p) => p !== platform)
+        : [...s.enabledServices, platform],
+    })),
+
   finishWizard: async ({ startTour = true } = {}) => {
-    const { downloadLocation, theme } = get();
+    const { downloadLocation, theme, enabledServices } = get();
     set({ isOpen: false });
-    const data = await window.electron?.settings.get().catch(() => null);
+    const data = await tauriAPI.settings.get().catch(() => null);
     if (data) {
-      await window.electron?.settings
+      await tauriAPI.settings
         .set({
           ...data,
           downloadLocation: downloadLocation || data.downloadLocation,
           theme,
+          enabledServices,
         })
         .catch(() => null);
+      invalidateSettingsDerived();
     }
-    const resolvedTheme =
-      theme === 'auto'
-        ? window.matchMedia('(prefers-color-scheme: dark)').matches
-          ? 'dark'
-          : 'light'
-        : theme;
-    useThemeStore.getState().setTheme(resolvedTheme);
+    applyThemePreference(theme);
 
     if (startTour) {
       setTimeout(() => useTourStore.getState().start(), 250);

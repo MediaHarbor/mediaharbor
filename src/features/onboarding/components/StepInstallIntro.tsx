@@ -16,7 +16,8 @@ export function StepInstallIntro() {
         <h2 className="text-lg font-semibold">Install the tools we need</h2>
         <p className="text-sm text-muted-foreground">
           MediaHarbor relies on a handful of small command-line tools to download and convert music.
-          We&apos;ll go through them one by one — I&apos;ll explain what each does before installing it.
+          We&apos;ll go through them one by one — I&apos;ll explain what each does before installing
+          it.
         </p>
       </div>
       <p className="text-xs text-muted-foreground">

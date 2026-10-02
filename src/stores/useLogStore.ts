@@ -1,10 +1,19 @@
 import { create } from 'zustand';
 
 export type LogSource =
-  | 'download' | 'playback' | 'search' | 'settings'
-  | 'system' | 'install' | 'app'
-  | 'mediascanner' | 'filewatcher'
-  | 'qobuz' | 'deezer' | 'tidal' | 'gam';
+  | 'download'
+  | 'playback'
+  | 'search'
+  | 'settings'
+  | 'system'
+  | 'install'
+  | 'app'
+  | 'mediascanner'
+  | 'filewatcher'
+  | 'qobuz'
+  | 'deezer'
+  | 'tidal'
+  | 'gam';
 
 export interface LogEntry {
   id: string;

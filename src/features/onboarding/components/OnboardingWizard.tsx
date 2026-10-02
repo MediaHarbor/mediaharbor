@@ -1,10 +1,6 @@
 import { useState, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, Compass } from 'lucide-react';
 import { useOnboardingStore } from '../stores/useOnboardingStore';
@@ -13,6 +9,7 @@ import { StepWelcome } from './StepWelcome';
 import { StepInstallIntro } from './StepInstallIntro';
 import { StepInstallSequence } from './StepInstallSequence';
 import { StepBasicSetup } from './StepBasicSetup';
+import { StepChooseServices } from './StepChooseServices';
 import { StepReadyForTour } from './StepReadyForTour';
 
 const slideVariants = {
@@ -21,7 +18,7 @@ const slideVariants = {
   exit: (dir: number) => ({ x: dir > 0 ? -60 : 60, opacity: 0 }),
 };
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 
 export function OnboardingWizard() {
   const { isOpen, currentStep, direction, nextStep, prevStep, finishWizard, downloadLocation } =
@@ -50,6 +47,7 @@ export function OnboardingWizard() {
       onAllDone={() => setInstallAllDone(true)}
     />,
     <StepBasicSetup key="setup" />,
+    <StepChooseServices key="services" />,
     <StepReadyForTour key="ready" />,
   ];
 

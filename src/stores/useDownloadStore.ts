@@ -1,6 +1,7 @@
 import { create } from 'zustand';
+import { tauriAPI } from '@/tauri-bridge';
 
-type DownloadStatus = 'downloading' | 'complete' | 'error' | 'cancelled';
+type DownloadStatus = 'downloading' | 'complete' | 'partial' | 'error' | 'cancelled';
 
 interface DownloadItem {
   order: number;
@@ -13,7 +14,13 @@ interface DownloadItem {
   platform?: string;
   quality?: string;
   error?: string;
+  failures?: string[];
   location?: string;
+  speed?: string;
+  eta?: string;
+  itemIndex?: number;
+  itemTotal?: number;
+  currentTrack?: string;
 }
 
 interface DownloadState {
@@ -36,9 +43,7 @@ export const useDownloadStore = create<DownloadState>((set) => ({
       const existing = state.items.find((i) => i.order === incoming.order);
       if (existing) {
         return {
-          items: state.items.map((i) =>
-            i.order === incoming.order ? { ...i, ...patch } : i
-          ),
+          items: state.items.map((i) => (i.order === incoming.order ? { ...i, ...patch } : i)),
         };
       }
       return {
@@ -57,11 +62,10 @@ export const useDownloadStore = create<DownloadState>((set) => ({
       };
     }),
 
-  remove: (order) =>
-    set((state) => ({ items: state.items.filter((i) => i.order !== order) })),
+  remove: (order) => set((state) => ({ items: state.items.filter((i) => i.order !== order) })),
 
   cancel: (order) => {
-    window.electron?.downloads.cancel(order);
+    tauriAPI.downloads.cancel(order);
     set((state) => ({
       items: state.items.map((i) =>
         i.order === order ? { ...i, status: 'cancelled' as DownloadStatus } : i

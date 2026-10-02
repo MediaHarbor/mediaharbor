@@ -1,6 +1,6 @@
 [package]
 name = "mediaharbor-core"
-version = "2.0.4"
+version.workspace = true
 edition = "2021"
 description = "MediaHarbor backend library – async Rust port of the Electron backend"
 
@@ -11,55 +11,61 @@ path = "src/lib.rs"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 
-reqwest = { version = "0.12", features = ["json", "stream", "cookies", "gzip", "deflate", "native-tls", "rustls-tls"], default-features = false }
+reqwest = { version = "0.13", features = ["json", "stream", "cookies", "gzip", "deflate", "native-tls", "http2", "system-proxy", "query", "form"], default-features = false }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-aes = "0.8"
-cbc = { version = "0.1", features = ["alloc"] }
-ctr = "0.9"
-ecb = "0.1"
-blowfish = "0.9"
-md-5 = "0.10"
-sha1 = "0.10"
-sha2 = "0.10"
-hmac = "0.12"
-pbkdf2 = "0.12"
-base64 = "0.22"
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc"] }
+ctr = "0.10"
+ecb = "0.2"
+blowfish = "0.10"
+md-5 = "0.11"
+sha1 = "0.11"
+sha2 = "0.11"
+hmac = "0.13"
+cmac = "0.8"
+rsa = { version = "0.10.0-rc.18", features = ["sha1", "sha2"] }
+base64 = "0.23"
 
-notify = { version = "6", features = ["serde"] }
+notify = "8"
+notify-debouncer-full = "0.7"
 
-lofty = "0.22"
+lofty = "0.25"
 
-image = { version = "0.25", features = ["jpeg", "png", "webp"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+jwalk = "0.9"
+blake3 = "1"
 
-scraper = "0.20"
+# No default formats: they add AVIF/EXR decoders (~2 MB) that cover art never needs.
+image = { version = "0.25", default-features = false, features = [
+    "jpeg",
+    "png",
+    "webp",
+    "bmp",
+    "gif",
+] }
 
-quick-xml = { version = "0.36", features = ["serialize"] }
+quick-xml = "0.42"
 
-axum = { version = "0.7", features = ["tokio"] }
-tower = "0.4"
-tower-http = { version = "0.5", features = ["cors"] }
+axum = { version = "0.8", features = ["tokio"] }
+tower-http = { version = "0.7", features = ["cors"] }
 
 rayon = "1"
+thread-priority = "3"
 
-dirs = "5"
+dirs = "6"
 
-zip = "2"
+# `lzma` for third-party ffmpeg archives; no `zstd`, which needs a C build dep.
+zip = { version = "8", default-features = false, features = ["deflate", "lzma"] }
 tar = "0.4"
 flate2 = "1"
-xz2 = "0.1"
-
-semver = "1"
+lzma-rust2 = { version = "0.16", default-features = false, features = ["std", "xz"] }
 
 tempfile = "3"
 
-git2 = { version = "0.20", features = ["vendored-libgit2"] }
-
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tracing-appender = "0.2"
+git2 = { version = "0.21", features = ["vendored-libgit2"] }
 
 regex = "1"
 
@@ -69,13 +75,12 @@ dashmap = "6"
 
 bytes = "1"
 
-futures = "0.3"
 futures-util = "0.3"
-tokio-util = { version = "0.7", features = ["io", "codec"] }
+tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
+native-tls = "0.2"
 async-trait = "0.1"
 
-thiserror = "1"
-anyhow = "1"
+thiserror = "2"
 
 chrono = { version = "0.4", features = ["serde"] }
 
@@ -83,15 +88,26 @@ uuid = { version = "1", features = ["v4"] }
 
 hex = "0.4"
 
-once_cell = "1"
+opener = "0.8"
 
-opener = "0.7"
+getrandom = { version = "0.4", features = ["sys_rng"] }
 
-getrandom = "0.3"
-
-[build-dependencies]
-cc = { version = "1", features = ["parallel"] }
+symphonia = { version = "0.6", features = ["aac", "alac", "isomp4", "mp3", "aiff", "caf"] }
+# `pipewire` names the app in the volume mixer (needs clang for bindgen);
+# `pulseaudio` is the fallback the Flatpak and Snap sandboxes allow.
+cpal = { version = "0.18", features = ["pipewire", "pulseaudio", "realtime"] }
+rusty-opus = "0.9"
+oxideav-aac = "0.1"
+oxideav-core = "0.1"
+realfft = "3"
+oxideav-ape = "0.0.4"
+oxideav-musepack = "0.0.4"
+oxideav-speex = "0.0.10"
+oxideav-wma = "0.0.4"
+oxideav-tta = "0.0.4"
+oxideav-ogg = "0.1.8"
 
 [dev-dependencies]
 tokio-test = "0.4"
 wiremock = "0.6"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

@@ -5,7 +5,7 @@
   <project_license>GPL-3.0-or-later</project_license>
 
   <name>MediaHarbor</name>
-  <summary>Stream music and manage your local media library</summary>
+  <summary>Download and play lossless music</summary>
 
   <description>
     <p>
@@ -31,16 +31,12 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_downloads.png</image>
-      <caption>Downloads page with active and completed tracks</caption>
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_library.png</image>
+      <caption>Local music library with albums and cover art</caption>
     </screenshot>
     <screenshot>
       <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_nowplaying.png</image>
-      <caption>Now-playing full-screen with visualizer and synced lyrics</caption>    
-    </screenshot>
-    <screenshot>
-      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_library.png</image>
-      <caption>Local music library browser</caption>
+      <caption>Now-playing full screen with visualizer and queue</caption>
     </screenshot>
     <screenshot>
       <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_search.png</image>
@@ -51,12 +47,17 @@
       <caption>Artist page with full discography</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/dark_downloads.png</image>
-      <caption>Downloads in dark mode</caption>
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_radio.png</image>
+      <caption>Internet radio from Radio Browser, SomaFM and the Icecast directory</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_downloads.png</image>
+      <caption>Download queue with completed and queued tracks</caption>
     </screenshot>
   </screenshots>
 
   <releases>
+    <release version="3.0.0" date="2026-10-02"/>
     <release version="2.2.0" date="2026-05-08"/>
     <release version="2.1.0" date="2026-05-07"/>
     <release version="2.0.5" date="2026-05-07"/>
@@ -143,8 +144,8 @@
     <name>MediaHarbor Team</name>
   </developer>
   <branding>
-    <color type="primary" scheme_preference="light">#fef3d8</color>
-    <color type="primary" scheme_preference="dark">#1e0f38</color>
+    <color type="primary" scheme_preference="light">#f5c77e</color>
+    <color type="primary" scheme_preference="dark">#2b1d0a</color>
   </branding>
 
   <launchable type="desktop-id">org.mediaharbor.MediaHarbor.desktop</launchable>

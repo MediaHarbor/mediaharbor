@@ -3,53 +3,78 @@ use tempfile::TempDir;
 use tokio::fs;
 
 use crate::errors::{MhError, MhResult};
-use crate::http_client::{build_mozilla_client, download_to_file};
+use crate::http_client::{build_download_client, download_to_file};
 
 const BENTO4_VERSION: &str = "1-6-0-641";
 const BENTO4_BASE_URL: &str = "https://www.bok.net/Bento4/binaries";
 
-fn get_download_url() -> MhResult<String> {
-    let versioned = format!("Bento4-SDK-{}", BENTO4_VERSION);
-
+fn get_download_source() -> MhResult<(String, &'static str)> {
     #[cfg(target_os = "windows")]
     {
-        #[cfg(target_arch = "x86_64")]
-        let arch_suffix = "x86_64-microsoft-win32";
-        #[cfg(not(target_arch = "x86_64"))]
-        let arch_suffix = "x86-microsoft-win32";
-
-        return Ok(format!(
-            "{}/{}.{}.zip",
-            BENTO4_BASE_URL, versioned, arch_suffix
-        ));
+        let url = format!(
+            "{}/Bento4-SDK-{}.x86_64-microsoft-win32.zip",
+            BENTO4_BASE_URL, BENTO4_VERSION
+        );
+        Ok((
+            url,
+            "6916a390f75878872594be74554b8b54ab220bb29812424441a8e1ecc9a6ac5e",
+        ))
     }
 
     #[cfg(target_os = "macos")]
     {
-        return Ok(format!(
-            "{}/{}.universal-apple-macosx.zip",
-            BENTO4_BASE_URL, versioned
-        ));
+        let url = format!(
+            "{}/Bento4-SDK-{}.universal-apple-macosx.zip",
+            BENTO4_BASE_URL, BENTO4_VERSION
+        );
+        Ok((
+            url,
+            "0570cf0dd59f362904d6f1cb472cbf4cdd37928fb0fe28e4c7f98c460e8e0ced",
+        ))
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
-        #[cfg(target_arch = "x86_64")]
-        let arch_suffix = "x86_64-unknown-linux";
-        #[cfg(not(target_arch = "x86_64"))]
-        let arch_suffix = "x86_64-unknown-linux"; // default; real port would map aarch64
+        let url = format!(
+            "{}/Bento4-SDK-{}.x86_64-unknown-linux.zip",
+            BENTO4_BASE_URL, BENTO4_VERSION
+        );
+        Ok((
+            url,
+            "d48dc6b164941212e5614237b4d9aeff81d4d111ee8b1508892764078a0870e8",
+        ))
+    }
 
-        return Ok(format!(
-            "{}/{}.{}.zip",
-            BENTO4_BASE_URL, versioned, arch_suffix
-        ));
+    #[cfg(all(target_os = "linux", not(target_arch = "x86_64")))]
+    {
+        Err(MhError::Unsupported(
+            "Bento4 (mp4decrypt) has no prebuilt binary for this Linux CPU architecture. \
+             Use MediaHarbor's native Spotify/Apple Music backend, which decrypts without Bento4."
+                .to_string(),
+        ))
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
-        return Err(MhError::Unsupported(
+        Err(MhError::Unsupported(
             "Bento4 installation is not supported on this platform".to_string(),
-        ));
+        ))
+    }
+}
+
+fn verify_sha256(path: &Path, expected: &str) -> MhResult<()> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path)?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let actual = hex::encode(hasher.finalize());
+    if actual.eq_ignore_ascii_case(expected) {
+        Ok(())
+    } else {
+        Err(MhError::Other(format!(
+            "Bento4 download failed its integrity check (expected {}, got {}). Please try again later.",
+            expected, actual
+        )))
     }
 }
 
@@ -79,7 +104,7 @@ fn find_bin_dir_in(root: &Path) -> Option<PathBuf> {
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name();
-        if name.to_ascii_lowercase() == "bin" && path.is_dir() {
+        if name.eq_ignore_ascii_case("bin") && path.is_dir() {
             return Some(path);
         }
         if path.is_dir() {
@@ -115,12 +140,17 @@ fn extract_zip_to(zip_path: &Path, dest: &Path) -> MhResult<()> {
             }
             let mut out = std::fs::File::create(&out_path)?;
             std::io::copy(&mut entry, &mut out)?;
+            #[cfg(unix)]
+            if let Some(mode) = entry.unix_mode() {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&out_path, std::fs::Permissions::from_mode(mode));
+            }
         }
     }
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn chmod_dir(dir: &Path) -> MhResult<()> {
     use std::os::unix::fs::PermissionsExt;
     for entry in std::fs::read_dir(dir)?.flatten() {
@@ -150,115 +180,85 @@ fn symlink_to_usr_local_bin(bin_dir: &Path) -> MhResult<()> {
     Ok(())
 }
 
-fn update_shell_path(bin_dir: &Path) -> MhResult<()> {
-    if crate::sandbox::is_sandboxed() {
-        return Ok(());
-    }
-    let bin_dir_str = bin_dir.to_string_lossy().to_string();
-
-    #[cfg(target_os = "macos")]
-    {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
-        for rc_name in &[".zshrc", ".bash_profile"] {
-            let rc_path = home.join(rc_name);
-            let existing = std::fs::read_to_string(&rc_path).unwrap_or_default();
-            if !existing.contains(&bin_dir_str) {
-                let line = format!(
-                    "\n# Added by Bento4 installer\nexport PATH=\"{}:$PATH\"\n",
-                    bin_dir_str
-                );
-                use std::io::Write;
-                let mut f = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&rc_path)?;
-                f.write_all(line.as_bytes())?;
-            }
-        }
-        return Ok(());
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        let ps_cmd = format!(
-            r#"
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-$binDir = '{dir}'
-if ($userPath -split ';' -notcontains $binDir) {{
-    $newPath = $userPath + ';' + $binDir
-    [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-    Write-Output "Added Bento4 to PATH"
-}} else {{
-    Write-Output "Bento4 already in PATH"
-}}
-"#,
-            dir = bin_dir_str.replace('\'', "''")
-        );
-
-        let mut cmd = std::process::Command::new("powershell.exe");
-        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd]);
-        crate::subprocess::apply_no_window_std(&mut cmd);
-        cmd.status()?;
-        return Ok(());
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
-        let shell = std::env::var("SHELL").unwrap_or_default();
-        let rc_path = if shell.contains("zsh") {
-            home.join(".zshrc")
-        } else if shell.contains("bash") {
-            home.join(".bashrc")
-        } else {
-            home.join(".profile")
-        };
-
-        let existing = std::fs::read_to_string(&rc_path).unwrap_or_default();
-        if !existing.contains(&bin_dir_str) {
-            let line = format!(
-                "\n# Added by Bento4 installer\nexport PATH=\"{}:$PATH\"\n",
-                bin_dir_str
-            );
-            use std::io::Write;
-            let mut f = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&rc_path)?;
-            f.write_all(line.as_bytes())?;
-        }
-        Ok(())
-    }
-}
-
 pub fn get_bento4_bin_dir() -> PathBuf {
     default_install_dir().join("bin")
 }
 
-pub fn get_bento4_tool_path(tool_name: &str) -> PathBuf {
-    let bin_dir = get_bento4_bin_dir();
-
-    #[cfg(target_os = "windows")]
-    let binary = format!("{}.exe", tool_name);
-    #[cfg(not(target_os = "windows"))]
-    let binary = tool_name.to_string();
-
-    let full = bin_dir.join(&binary);
-    if full.exists() { full } else { PathBuf::from(tool_name) }
+/// Whether a usable mp4decrypt is already reachable. One detector shared by
+/// `check_deps` (what the UI badge shows) and the installer (whether to
+/// download), so the badge and the guard cannot disagree.
+pub fn detect() -> Option<&'static str> {
+    crate::venv_manager::find_managed_or_path("mp4decrypt").map(|_| "mp4decrypt")
 }
 
-pub async fn download_and_install_bento4<F>(on_progress: F) -> MhResult<()>
+fn binary_name(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{}.exe", name)
+    } else {
+        name.to_string()
+    }
+}
+
+/// mp4decrypt has no `--version`: it prints usage and exits non-zero, so
+/// `venv_manager::verify_binary` would reject a perfectly good build and delete
+/// it. What is worth checking is that it `exec`s at all — a wrong-architecture or
+/// truncated binary fails before it ever has an exit code to report.
+async fn mp4decrypt_runs(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let mut cmd = tokio::process::Command::new(path);
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    crate::subprocess::apply_no_window(&mut cmd);
+    cmd.status().await.is_ok()
+}
+
+/// Replace `dest` with `staged`, keeping the previous copy until the swap lands.
+/// Both live under the same parent, so each rename is a same-filesystem move —
+/// staging in a `TempDir` instead would risk `EXDEV` between `/var/folders` and
+/// `/Applications`.
+async fn swap_in(staged: &Path, dest: &Path) -> MhResult<()> {
+    let previous = dest.with_extension("previous");
+    fs::remove_dir_all(&previous).await.ok();
+
+    let had_previous = dest.exists();
+    if had_previous {
+        fs::rename(dest, &previous).await?;
+    }
+
+    match fs::rename(staged, dest).await {
+        Ok(()) => {
+            fs::remove_dir_all(&previous).await.ok();
+            Ok(())
+        }
+        Err(e) => {
+            if had_previous {
+                fs::rename(&previous, dest).await.ok();
+            }
+            Err(e.into())
+        }
+    }
+}
+
+pub async fn download_and_install_bento4<F>(on_progress: F, force: bool) -> MhResult<()>
 where
     F: Fn(u8, &str),
 {
-    on_progress(0, "Starting Bento4 installation…");
+    on_progress(0, "Checking for an existing mp4decrypt…");
 
-    let download_url = get_download_url()?;
+    if !force && detect().is_some() {
+        on_progress(100, "mp4decrypt is already available — no download needed.");
+        return Ok(());
+    }
+
+    let (download_url, expected_sha) = get_download_source()?;
     let install_dir = default_install_dir();
 
     std::fs::create_dir_all(&install_dir)?;
 
-    let client = build_mozilla_client()?;
+    let client = build_download_client()?;
     let tmp = TempDir::new()?;
     let zip_path = tmp.path().join("Bento4-SDK.zip");
 
@@ -266,44 +266,119 @@ where
         let pct = total
             .map(|t| (dl as u128 * 40 / t as u128) as u8)
             .unwrap_or(0);
-        on_progress(pct, &format!("Downloading Bento4… {}%", (pct as u32) * 100 / 40));
+        on_progress(
+            pct,
+            &format!("Downloading Bento4… {}%", (pct as u32) * 100 / 40),
+        );
     })
     .await?;
+
+    verify_sha256(&zip_path, expected_sha)?;
 
     on_progress(40, "Extracting Bento4…");
     extract_zip_to(&zip_path, tmp.path())?;
     on_progress(75, "Extraction completed");
 
-    let bin_dir_src = find_bin_dir_in(tmp.path())
-        .ok_or_else(|| MhError::Other("Bento4 bin directory not found after extraction".to_string()))?;
+    let bin_dir_src = find_bin_dir_in(tmp.path()).ok_or_else(|| {
+        MhError::Other("Bento4 bin directory not found after extraction".to_string())
+    })?;
 
+    // Stage beside the live directory and swap only once the payload is known
+    // good. Deleting `bin/` up front meant a mirror outage, a truncated download
+    // or a wrong-architecture build left the user with no mp4decrypt at all —
+    // worse off than before they pressed Install.
     let final_bin_dir = install_dir.join("bin");
-    if final_bin_dir.exists() {
-        fs::remove_dir_all(&final_bin_dir).await?;
-    }
-    fs::create_dir_all(&final_bin_dir).await?;
+    let staged = install_dir.join("bin.incoming");
+    fs::remove_dir_all(&staged).await.ok();
+    fs::create_dir_all(&staged).await?;
 
     let mut rd = fs::read_dir(&bin_dir_src).await?;
     while let Some(entry) = rd.next_entry().await? {
-        let dest = final_bin_dir.join(entry.file_name());
-        fs::copy(entry.path(), &dest).await?;
+        fs::copy(entry.path(), staged.join(entry.file_name())).await?;
     }
+
+    #[cfg(unix)]
+    chmod_dir(&staged)?;
+
+    on_progress(85, "Verifying Bento4…");
+    if !mp4decrypt_runs(&staged.join(binary_name("mp4decrypt"))).await {
+        fs::remove_dir_all(&staged).await.ok();
+        return Err(MhError::Other(
+            "The downloaded mp4decrypt does not run on this machine (wrong CPU architecture \
+             or corrupt download). Please install Bento4 manually from \
+             https://www.bok.net/Bento4/ instead."
+                .to_string(),
+        ));
+    }
+
+    swap_in(&staged, &final_bin_dir).await?;
 
     #[cfg(target_os = "macos")]
-    {
-        chmod_dir(&final_bin_dir)?;
-        if !crate::sandbox::is_sandboxed() {
-            let _ = symlink_to_usr_local_bin(&final_bin_dir);
-        }
+    if !crate::sandbox::is_sandboxed() {
+        let _ = symlink_to_usr_local_bin(&final_bin_dir);
     }
 
-    on_progress(80, "Configuring system PATH…");
-    update_shell_path(&final_bin_dir)?;
+    // Bento4's prefix outranks `$PATH` in `ffmpeg_search_dirs`, so a copy cached
+    // from further down the search order has to be dropped for this one to win.
+    crate::venv_manager::invalidate_binary_cache();
 
-    on_progress(
-        100,
-        "Bento4 installed successfully! Please restart your terminal to use Bento4.",
-    );
+    on_progress(100, "Bento4 installed successfully!");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_bin_dir_in_finds_the_sdks_nested_bin() {
+        let tmp = TempDir::new().unwrap();
+        let bin = tmp
+            .path()
+            .join("Bento4-SDK-1-6-0-641.universal-apple-macosx");
+        std::fs::create_dir_all(bin.join("bin")).unwrap();
+        std::fs::create_dir_all(bin.join("docs")).unwrap();
+
+        assert_eq!(find_bin_dir_in(tmp.path()), Some(bin.join("bin")));
+    }
+
+    #[test]
+    fn find_bin_dir_in_returns_none_without_one() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("Bento4-SDK/docs")).unwrap();
+
+        assert_eq!(find_bin_dir_in(tmp.path()), None);
+    }
+
+    /// A failed swap must leave the mp4decrypt the user already had.
+    #[tokio::test]
+    async fn swap_in_keeps_the_live_dir_when_there_is_nothing_to_swap() {
+        let tmp = TempDir::new().unwrap();
+        let dest = tmp.path().join("bin");
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("mp4decrypt"), b"old").unwrap();
+
+        assert!(swap_in(&tmp.path().join("bin.incoming"), &dest)
+            .await
+            .is_err());
+        assert_eq!(std::fs::read(dest.join("mp4decrypt")).unwrap(), b"old");
+    }
+
+    #[tokio::test]
+    async fn swap_in_replaces_the_live_dir_and_cleans_up() {
+        let tmp = TempDir::new().unwrap();
+        let dest = tmp.path().join("bin");
+        let staged = tmp.path().join("bin.incoming");
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(dest.join("mp4decrypt"), b"old").unwrap();
+        std::fs::write(staged.join("mp4decrypt"), b"new").unwrap();
+
+        swap_in(&staged, &dest).await.unwrap();
+
+        assert_eq!(std::fs::read(dest.join("mp4decrypt")).unwrap(), b"new");
+        assert!(!staged.exists());
+        assert!(!tmp.path().join("bin.previous").exists());
+    }
 }

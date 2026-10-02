@@ -5,10 +5,12 @@ sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
   - org.freedesktop.Sdk.Extension.node24
+  # libclang for bindgen (cpal's pipewire host); the SDK ships none.
+  - org.freedesktop.Sdk.Extension.llvm22
 command: mediaharbor
 
 build-options:
-  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node24/bin
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node24/bin:/usr/lib/sdk/llvm22/bin
 
 finish-args:
   - --share=ipc
@@ -16,8 +18,10 @@ finish-args:
   - --socket=fallback-x11
   - --device=dri
   - --socket=pulseaudio
+  # Without the Pulse cookie and the PipeWire socket, cpal falls back to ALSA and there is no audio.
+  - --filesystem=xdg-config/pulse:ro
+  - --filesystem=xdg-run/pipewire-0
   - --share=network
-
 
 modules:
   - name: mediaharbor
@@ -30,6 +34,7 @@ modules:
         RUSTUP_TOOLCHAIN: stable
         CARGO_INCREMENTAL: '0'
         npm_config_cache: /run/build/mediaharbor/flatpak-node/npm-cache
+        LIBCLANG_PATH: /usr/lib/sdk/llvm22/lib
 
     sources:
       - type: git
@@ -47,10 +52,6 @@ modules:
         printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source."vendored-sources"]\ndirectory = "cargo/vendor"\n' > .cargo/config.toml
 
       - npm ci --ignore-scripts
-
-      - node node_modules/.bin/patch-package
-
-      - node scripts/patch-librespot.js
 
       - npm run build:react
 

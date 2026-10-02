@@ -5,9 +5,6 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 permissions:
   contents: write
 
@@ -16,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ── 1. Build the React frontend once, shared across all platform jobs ─────
+  # 1. Build the React frontend once, shared across all platform jobs
   frontend:
     name: Build React Frontend
     runs-on: ubuntu-latest
@@ -38,7 +35,7 @@ jobs:
           path: dist-react/
           retention-days: 1
 
-  # ── 2. Tauri binary for every platform ───────────────────────────────────
+  # 2. Tauri binary for every platform
   #
   # Linux DEB + AppImage only — RPM is built natively in the linux-rpm job
   # below (Fedora container) to avoid broken symlinks when installed on Fedora.
@@ -49,7 +46,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ── Linux (DEB + AppImage) ─────────────────────────────────────────
+          # Linux (DEB + AppImage)
           # Ubuntu 22.04 = glibc 2.35 for maximum distro compatibility.
           # RPM is produced separately by the linux-rpm job (Fedora container).
           - name: Linux x64
@@ -57,20 +54,20 @@ jobs:
             rust_target: ''
             artifact: linux-x64
 
-          # ── Windows x64 ───────────────────────────────────────────────────
-          # Produces: .msi  .exe (NSIS)  + .msix (Microsoft Store, needs secret)
+          # Windows x64
+          # Produces: .msi  .exe (NSIS)
           - name: Windows x64
             os: windows-2022
             rust_target: ''
             artifact: windows-x64
 
-          # ── macOS Intel (x86_64) ──────────────────────────────────────────
+          # macOS Intel (x86_64)
           - name: macOS Intel
             os: macos-15-intel
             rust_target: x86_64-apple-darwin
             artifact: macos-x64
 
-          # ── macOS Apple Silicon (ARM64) ────────────────────────────────────
+          # macOS Apple Silicon (ARM64)
           - name: macOS Apple Silicon
             os: macos-15
             rust_target: aarch64-apple-darwin
@@ -80,20 +77,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # ── Node (needed for npm ci) ──────────────────────────────────────────
+      # Node (needed for npm ci)
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
 
-      # ── Pre-built frontend (skip rebuilding on every platform) ────────────
+      # Pre-built frontend (skip rebuilding on every platform)
       - name: Download pre-built frontend
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: dist-react
           path: dist-react/
 
-      # ── Rust toolchain ────────────────────────────────────────────────────
+      # Rust toolchain
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -103,13 +100,13 @@ jobs:
         with:
           workspaces: . -> target
 
-      # ── cargo-tauri CLI (binstall = downloads pre-compiled, ~30 s) ────────
+      # cargo-tauri CLI (binstall = downloads pre-compiled, ~30 s)
       - uses: cargo-bins/cargo-binstall@main
 
       - name: Install tauri-cli
         run: cargo binstall --no-confirm tauri-cli@^2
 
-      # ── Linux system deps ─────────────────────────────────────────────────
+      # Linux system deps
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -119,29 +116,55 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libgtk-3-dev
+            libgtk-3-dev \
+            libasound2-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
+            clang \
+            libclang-dev
 
-      # ── npm ci (tauri build.rs / plugin macros need node at times) ────────
+      # npm ci (tauri build.rs / plugin macros need node at times)
       - run: npm ci
 
-      # ── Platform builds ───────────────────────────────────────────────────
+      # Platform builds
 
       # Linux: DEB + AppImage only (RPM handled by linux-rpm job via Fedora)
       - name: Build (Linux)
         if: runner.os == 'Linux'
         working-directory: src/app
-        run: cargo tauri build --bundles deb,appimage
+        # Fail on a stale updater bundle marker instead of shipping it with a warning.
+        run: |
+          set -o pipefail
+          cargo tauri build --bundles deb,appimage 2>&1 | tee build.log
+          if grep -q "Failed to add bundler type to the binary" build.log; then
+            echo "::error::bundle-type marker not patched — the package would self-update as the wrong format. Usually a stale pre-patched binary; do a clean build."
+            exit 1
+          fi
+          # appimagetool writes the .zsync to the working directory, not beside the AppImage.
+          mv ./*.AppImage.zsync ../../target/release/bundle/appimage/ || {
+            echo "::error::no .zsync generated — the AppImage would ship without delta-update data."
+            exit 1
+          }
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # linuxdeploy ships as an AppImage; Ubuntu runners lack FUSE2
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          # Embedded AppImage update information; the last field must match the release asset name.
+          LDAI_UPDATE_INFORMATION: "gh-releases-zsync|MediaHarbor|mediaharbor|latest|MediaHarbor_*_amd64.AppImage.zsync"
 
       # Windows x64 (native — no --target flag needed)
       - name: Build (Windows x64)
         if: runner.os == 'Windows' && matrix.rust_target == ''
         working-directory: src/app
-        run: cargo tauri build
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo tauri build 2>&1 | tee build.log
+          if grep -q "Failed to add bundler type to the binary" build.log; then
+            echo "::error::bundle-type marker not patched — the package would self-update as the wrong format. Usually a stale pre-patched binary; do a clean build."
+            exit 1
+          fi
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -164,53 +187,7 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      # ── Windows x64: create MSIX for Microsoft Store ──────────────────────
-      # ARM64 MSIX requires a separate AppxManifest with ProcessorArchitecture=arm64;
-      # skipped here for now — x64 MSIX covers the majority of Store users.
-      - name: Create MSIX (Microsoft Store, x64 only)
-        if: runner.os == 'Windows' && matrix.rust_target == ''
-        shell: pwsh
-        continue-on-error: true   # skip gracefully if secret not set
-        env:
-          MS_STORE_PUBLISHER: ${{ secrets.MS_STORE_PUBLISHER }}
-        run: |
-          if (-not $env:MS_STORE_PUBLISHER) {
-            Write-Host "MS_STORE_PUBLISHER secret not set — skipping MSIX"; exit 0
-          }
-          $version = (Get-Content package.json | ConvertFrom-Json).version
-
-          # Build the MSIX layout directory
-          New-Item -ItemType Directory -Path msix\Assets -Force | Out-Null
-          Copy-Item src\app\target\release\mediaharbor.exe  msix\
-
-          # Icons — resize properly with ImageMagick if available, else copy as-is
-          $magick = Get-Command magick -ErrorAction SilentlyContinue
-          function Copy-Icon($src, $dst, $size) {
-            if ($magick) { & magick $src -resize "${size}x${size}" $dst }
-            else          { Copy-Item $src $dst }
-          }
-          Copy-Icon src\app\icons\icon.png       msix\Assets\StoreLogo.png          50
-          Copy-Icon src\app\icons\128x128.png    msix\Assets\Square150x150Logo.png  150
-          Copy-Icon src\app\icons\32x32.png      msix\Assets\Square44x44Logo.png    44
-          Copy-Icon src\app\icons\128x128@2x.png msix\Assets\Wide310x150Logo.png    310
-
-          # Stamp the manifest template
-          (Get-Content packaging\windows\AppxManifest.xml -Raw) `
-            -replace '__VERSION__',   "$version.0" `
-            -replace '__PUBLISHER__', $env:MS_STORE_PUBLISHER |
-            Set-Content msix\AppxManifest.xml
-
-          # Find makeappx.exe from the Windows SDK
-          $makeappx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" `
-                        -Recurse -Filter makeappx.exe |
-                      Where-Object { $_.FullName -match 'x64' } |
-                      Sort-Object FullName -Descending |
-                      Select-Object -First 1 -ExpandProperty FullName
-
-          & $makeappx pack /d msix /p "MediaHarbor_${version}_x64.msix" /nv
-          Write-Host "MSIX created: MediaHarbor_${version}_x64.msix"
-
-      # ── Collect everything into one directory ─────────────────────────────
+      # Collect everything into one directory
       - name: Collect artifacts
         shell: bash
         run: |
@@ -218,12 +195,23 @@ jobs:
           # Linux
           find target -path '*/bundle/deb/*.deb'            -exec cp {} out/ \; 2>/dev/null || true
           find target -path '*/bundle/appimage/*.AppImage'  -exec cp {} out/ \; 2>/dev/null || true
+          find target -path '*/bundle/appimage/*.zsync'     -exec cp {} out/ \; 2>/dev/null || true
           # Windows (x64 and ARM64)
           find target -path '*/bundle/msi/*.msi'            -exec cp {} out/ \; 2>/dev/null || true
           find target -path '*/bundle/nsis/*.exe'           -exec cp {} out/ \; 2>/dev/null || true
-          cp *.msix out/ 2>/dev/null || true
           # macOS
           find target -path '*/bundle/dmg/*.dmg'            -exec cp {} out/ \; 2>/dev/null || true
+
+          # Updater payload for macOS: both arches are named MediaHarbor.app.tar.gz, so rename.
+          find target -path '*/bundle/macos/*.app.tar.gz*' | while read -r f; do
+            cp "$f" "out/MediaHarbor_${{ matrix.rust_target }}.app.tar.${f##*.app.tar.}"
+          done
+
+          # Updater signatures (deb, AppImage, msi, nsis; the macOS ones came
+          # across renamed above)
+          find target -path '*/bundle/*' -name '*.sig' -not -name '*.app.tar.gz.sig' \
+            -exec cp {} out/ \; 2>/dev/null || true
+
           echo "=== artifacts ==="
           ls -lh out/
 
@@ -233,7 +221,7 @@ jobs:
           path: out/
           retention-days: 7
 
-  # ── 3. Linux RPM (native Fedora build — avoids broken symlinks on Fedora) ─
+  # 3. Linux RPM (native Fedora build — avoids broken symlinks on Fedora)
   #
   # Fedora and Ubuntu differ in library paths and .so symlink layouts.
   # Building the RPM inside a Fedora container ensures rpmbuild sees the
@@ -261,11 +249,14 @@ jobs:
             librsvg2-devel \
             patchelf \
             openssl-devel \
+            alsa-lib-devel \
+            pipewire-devel \
             nodejs npm \
-            gcc gcc-c++ make
+            gcc gcc-c++ make \
+            clang clang-devel pkgconf-pkg-config
 
       - name: Download pre-built frontend
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: dist-react
           path: dist-react/
@@ -288,7 +279,13 @@ jobs:
 
       - name: Build RPM
         working-directory: src/app
-        run: cargo tauri build --bundles rpm
+        run: |
+          set -o pipefail
+          cargo tauri build --bundles rpm 2>&1 | tee build.log
+          if grep -q "Failed to add bundler type to the binary" build.log; then
+            echo "::error::bundle-type marker not patched — the package would self-update as the wrong format. Usually a stale pre-patched binary; do a clean build."
+            exit 1
+          fi
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -297,7 +294,59 @@ jobs:
         run: |
           mkdir -p out
           find target -path '*/bundle/rpm/*.rpm' -exec cp {} out/ \;
+          find target -path '*/bundle/rpm/*.rpm.sig' -exec cp {} out/ \; 2>/dev/null || true
           echo "=== RPM artifacts ==="
+          ls -lh out/
+
+      # GPG-sign the RPM, then re-sign its updater .sig, since rpmsign rewrites the header.
+      # RSA rather than ed25519: rpm 4.14 (RHEL/Rocky/Alma 8) rejects EdDSA.
+      - name: Sign RPM (GPG) and refresh updater signature
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+            echo "::warning::GPG_PRIVATE_KEY not set — RPM will ship unsigned"
+            exit 0
+          fi
+          dnf install -y rpm-sign gnupg2
+
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          KEY=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')
+          printf '%s' "$GPG_PASSPHRASE" > /tmp/gpg-pass
+
+          for rpm in out/*.rpm; do
+            rpmsign --addsign \
+              --define "_gpg_name $KEY" \
+              --define "_gpg_sign_cmd_extra_args --pinentry-mode loopback --batch --passphrase-file /tmp/gpg-pass" \
+              "$rpm"
+          done
+          shred -u /tmp/gpg-pass
+
+          # Check the RSAHEADER tag; `rpm --checksig` wording differs between rpm versions.
+          gpg --export --armor "$KEY" > /tmp/pubkey.asc
+          rpm --import /tmp/pubkey.asc
+          for rpm in out/*.rpm; do
+            rpm --checksig -v "$rpm"
+            sig=$(rpm -q --qf '%{RSAHEADER:pgpsig}' -p "$rpm")
+            echo "$rpm header signature: $sig"
+            case "$sig" in
+              ''|'(none)') echo "::error::$rpm has no signature after rpmsign"; exit 1 ;;
+            esac
+          done
+
+          # The RPM bytes changed — reissue the updater signature over the signed file.
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            for rpm in out/*.rpm; do
+              rm -f "$rpm.sig"
+              cargo tauri signer sign "$rpm"
+              [ -s "$rpm.sig" ] || { echo "::error::failed to reissue $rpm.sig"; exit 1; }
+            done
+            echo "updater signatures reissued over the GPG-signed RPMs"
+          fi
           ls -lh out/
 
       - uses: actions/upload-artifact@v7
@@ -306,7 +355,7 @@ jobs:
           path: out/
           retention-days: 7
 
-  # ── 4. Flatpak ────────────────────────────────────────────────────────────
+  # 4. Flatpak
 
   # Builds from source using the Rust and Node SDK extensions.
   # Runs independently — does not depend on the tauri binary job.
@@ -314,6 +363,7 @@ jobs:
   flatpak:
     name: Flatpak (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    if: github.repository == 'MediaHarbor/mediaharbor'
     strategy:
       fail-fast: false
       matrix:
@@ -337,7 +387,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.local/share/flatpak
-          key: flatpak-runtimes-gnome-50-sdk-25.08-${{ matrix.arch }}
+          key: flatpak-runtimes-gnome-50-sdk-25.08-llvm22-${{ matrix.arch }}
 
       - name: Install GNOME 50 runtime and SDK extensions
         if: steps.cache-runtimes.outputs.cache-hit != 'true'
@@ -349,7 +399,17 @@ jobs:
             org.gnome.Platform//50 \
             org.gnome.Sdk//50 \
             org.freedesktop.Sdk.Extension.rust-stable//25.08 \
-            org.freedesktop.Sdk.Extension.node24//25.08
+            org.freedesktop.Sdk.Extension.node24//25.08 \
+            org.freedesktop.Sdk.Extension.llvm22//25.08
+
+      # Regenerate so the offline crate list always matches Cargo.lock.
+      - name: Regenerate cargo sources from Cargo.lock
+        run: |
+          sudo apt-get install -y --no-install-recommends python3-aiohttp python3-toml
+          curl -sSLo flatpak-cargo-generator.py \
+            https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
+          python3 flatpak-cargo-generator.py Cargo.lock \
+            -o packaging/flatpak/cargo-sources.json
 
       - name: Cache flatpak-builder state
         uses: actions/cache@v5
@@ -385,82 +445,276 @@ jobs:
           path: MediaHarbor-${{ matrix.arch }}.flatpak
           retention-days: 7
 
-  # ── 5. GitHub Release ─────────────────────────────────────────────────────
+  # 5. GitHub Release
   release:
     name: GitHub Release
     needs: [tauri, flatpak, linux-rpm]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'MediaHarbor/mediaharbor'
+    # id-token/attestations are required by actions/attest-build-provenance; the
+    # workflow-level `contents: write` alone is not enough for it.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Read version
         id: ver
         run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Download all Tauri artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: tauri-*
-          path: assets/
+          path: dist/
           merge-multiple: true
 
       - name: Download Flatpak bundles
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: flatpak-*
-          path: assets/
+          path: dist/
           merge-multiple: true
 
-      - name: Build release body with SHA256 checksums
+      - name: Stage release files
         shell: bash
         run: |
-          cat > release_body.md << 'BODYEOF'
-          ## Installation
+          mkdir -p release
+          shopt -s nullglob
+          for f in dist/*.deb dist/*.rpm dist/*.AppImage dist/*.AppImage.zsync dist/*.flatpak \
+                   dist/*.dmg dist/*.exe dist/*.msi dist/*.app.tar.gz; do
+            cp "$f" release/
+          done
+          echo "=== staged release files ==="
+          ls -lh release/
+          [ -n "$(ls -A release/)" ] || {
+            echo "::error::no installer artifacts found in dist/"; exit 1; }
 
-          | Platform | File | How to install |
-          |---|---|---|
-          | **Linux (Debian/Ubuntu)** | `*.deb` | `sudo dpkg -i MediaHarbor_*.deb` |
-          | **Linux (Fedora/RHEL)** | `*.rpm` | `sudo rpm -i MediaHarbor_*.rpm` |
-          | **Linux (universal)** | `*.AppImage` | `chmod +x *.AppImage && ./MediaHarbor_*.AppImage` |
-          | **Linux (Flatpak)** | `MediaHarbor.flatpak` | `flatpak install MediaHarbor.flatpak` |
-          | **Linux (Snap)** | — | `sudo snap install mediaharbor` |
-          | **Arch Linux / AUR** | — | `paru -S mediaharbor` |
-          | **Windows x64 (installer)** | `*_x64-setup.exe` | Run the setup wizard |
-          | **Windows x64 (MSI)** | `*_x64.msi` | `msiexec /i MediaHarbor_*_x64.msi` |
-          | **Windows x64 (Microsoft Store)** | `*_x64.msix` | Double-click or `Add-AppxPackage` |
-          | **macOS Intel** | `*_x64.dmg` | Open DMG and drag to Applications |
-          | **macOS Apple Silicon** | `*_aarch64.dmg` | Open DMG and drag to Applications |
-          BODYEOF
+      # Release notes come from this version's CHANGELOG entry; commit subjects are the fallback.
+      - name: Collect release notes
+        shell: bash
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${GITHUB_REF_NAME}"
+          else
+            RANGE="${GITHUB_REF_NAME}"
+          fi
+          echo "PREV_TAG=$PREV_TAG" >> "$GITHUB_ENV"
 
+          # latest.json gets the plain-text form: the Updates page renders it unformatted.
+          if python3 .github/scripts/release_notes.py "${{ steps.ver.outputs.v }}" \
+               --out changelog_section.md --plain-out update_notes.txt; then
+            echo "release notes taken from CHANGELOG.md"
+          else
+            echo "::warning::no CHANGELOG.md entry for ${{ steps.ver.outputs.v }} — using commit subjects"
+            git log --no-merges --pretty='- %s (%h)' "$RANGE" > changelog_section.md
+            git log --no-merges --pretty='- %s' "$RANGE" > update_notes.txt
+          fi
+          echo "=== release notes ==="; cat changelog_section.md
+
+      # Updater manifest. Only per-installer keys, so Flatpak, Snap and AUR (which report
+      # no installer) never pull an update meant for another format.
+      - name: Generate updater manifest (latest.json)
+        shell: bash
+        run: |
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+
+          key_for() {
+            case "$1" in
+              *.AppImage)                        echo linux-x86_64-appimage ;;
+              *_amd64.deb)                       echo linux-x86_64-deb ;;
+              *.x86_64.rpm)                      echo linux-x86_64-rpm ;;
+              *-setup.exe)                       echo windows-x86_64-nsis ;;
+              *.msi)                             echo windows-x86_64-msi ;;
+              *_x86_64-apple-darwin.app.tar.gz)  echo darwin-x86_64 ;;
+              *_aarch64-apple-darwin.app.tar.gz) echo darwin-aarch64 ;;
+            esac
+          }
+
+          : > platforms.jsonl
+          for sig in dist/*.sig; do
+            [ -e "$sig" ] || continue
+            name="$(basename "${sig%.sig}")"
+            key="$(key_for "$name")"
+            if [ -z "$key" ]; then
+              echo "::warning::no updater platform key for $name — it will not be offered as an update"
+              continue
+            fi
+            if [ ! -e "release/$name" ]; then
+              echo "::error::signed $name is missing from the release payload"; exit 1
+            fi
+            jq -n --arg k "$key" --arg u "$BASE/$name" --arg s "$(cat "$sig")" \
+               '{key:$k, value:{url:$u, signature:$s}}' >> platforms.jsonl
+          done
+
+          [ -s platforms.jsonl ] || {
+            echo "::error::no signed updater artifacts — is TAURI_SIGNING_PRIVATE_KEY set?"; exit 1; }
+
+          jq -s --arg v "${{ steps.ver.outputs.v }}" --rawfile n update_notes.txt \
+             '{version:$v, notes:$n, pub_date:(now|todate), platforms:from_entries}' \
+             platforms.jsonl > release/latest.json
+
+          echo "=== latest.json ==="
+          jq '{version, pub_date, platforms: (.platforms | keys)}' release/latest.json
+
+      # Checksums + one GPG signature over SHA256SUMS.txt, which covers every artifact.
+      - name: Write checksums
+        shell: bash
+        run: |
+          cd release
+          rm -f SHA256SUMS.txt SHA256SUMS.txt.asc
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt*' -printf '%P\n' \
+            | sort | xargs -r sha256sum > SHA256SUMS.txt
+          echo "=== SHA256SUMS.txt ==="; cat SHA256SUMS.txt
+
+      - name: Sign checksums (GPG)
+        shell: bash
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "::warning::GPG_PRIVATE_KEY not set — release will be unsigned"
+            exit 0
+          fi
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          KEY=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')
+          printf '%s' "$GPG_PASSPHRASE" > /tmp/gpg-pass
+          gpg --batch --yes --pinentry-mode loopback --passphrase-file /tmp/gpg-pass \
+              --local-user "$KEY" --armor --detach-sign \
+              -o release/SHA256SUMS.txt.asc release/SHA256SUMS.txt
+          shred -u /tmp/gpg-pass
+          gpg --verify release/SHA256SUMS.txt.asc release/SHA256SUMS.txt
+          echo "signed by $KEY"
+
+      # Sigstore build provenance; must run after the files are final.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: 'release/*'
+
+      - name: Build release body (changelog + install table + checksums)
+        shell: bash
+        run: |
+          {
+            echo "## What's Changed"
+            echo ""
+            cat changelog_section.md
+            echo ""
+          } > release_body.md
+
+          {
+            echo "## Installation"
+            echo ""
+            echo "| Platform | File | How to install |"
+            echo "|---|---|---|"
+          } >> release_body.md
+
+          add_row() { # $1 glob  $2 platform label  $3 install cmd
+            compgen -G "release/$1" >/dev/null && \
+              printf '| %s | `%s` | %s |\n' "$2" "$1" "$3" >> release_body.md
+          }
+          add_row '*.deb'         '**Linux (Debian/Ubuntu)**'  '`sudo dpkg -i MediaHarbor_*.deb`'
+          add_row '*.rpm'         '**Linux (Fedora/RHEL)**'    '`sudo rpm -i MediaHarbor_*.rpm`'
+          add_row '*.AppImage'    '**Linux (universal)**'      '`chmod +x *.AppImage && ./MediaHarbor_*.AppImage`'
+          add_row '*.flatpak'     '**Linux (Flatpak)**'        '`flatpak install MediaHarbor-*.flatpak`'
+          add_row '*x64-setup.exe' '**Windows (installer)**'   'Run the setup wizard'
+          add_row '*.msi'         '**Windows (MSI)**'          '`msiexec /i MediaHarbor_*.msi`'
+          add_row '*x64.dmg'      '**macOS Intel**'            'Open DMG, drag to Applications, then see the macOS note below'
+          add_row '*aarch64.dmg'  '**macOS Apple Silicon**'    'Open DMG, drag to Applications, then see the macOS note below'
+
+          {
+            echo ""
+            echo "_Also available via **Snap** (\`sudo snap install mediaharbor\`) and **AUR** (\`paru -S mediaharbor\`)._"
+          } >> release_body.md
+
+          # macOS note: the app is not notarized, so users clear the quarantine flag once.
+          if compgen -G 'release/*.dmg' >/dev/null; then
+            {
+              echo ''
+              echo '### macOS: first launch'
+              echo ''
+              echo 'MediaHarbor is not notarized, so macOS blocks it the first time. After dragging it to Applications, run:'
+              echo ''
+              echo '```sh'
+              echo 'xattr -dr com.apple.quarantine /Applications/MediaHarbor.app'
+              echo '```'
+              echo ''
+              echo 'Only needed once — updates installed from inside the app are unaffected.'
+            } >> release_body.md
+          fi
+
+          # Verifying this release
+          {
+            echo ''
+            echo '## Verify this release'
+            echo ''
+            echo 'Every artifact below is hashed in `SHA256SUMS.txt`, which is GPG-signed as `SHA256SUMS.txt.asc`.'
+            echo ''
+            echo '```sh'
+            echo '# one-time: import the release key'
+            echo 'curl -fsSL https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/packaging/keys/mediaharbor-release.asc | gpg --import'
+            echo ''
+            echo '# verify the manifest, then the files against it'
+            echo 'gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt'
+            echo 'sha256sum --ignore-missing -c SHA256SUMS.txt'
+            echo '```'
+            echo ''
+            echo 'Key fingerprint: `4E7E D764 DFB4 F1B6 59C1  C570 DD7A E5F9 C20A 4047`'
+            echo ''
+            echo 'The RPM additionally carries an embedded signature (`rpm --checksig`), and every'
+            echo 'artifact has a Sigstore build-provenance attestation proving it was produced by'
+            echo 'this repository'"'"'s release workflow:'
+            echo ''
+            echo '```sh'
+            echo 'gh attestation verify <file> --repo MediaHarbor/mediaharbor'
+            echo '```'
+          } >> release_body.md
+
+          # SHA256 checksum table (signatures, latest.json and the .zsync are not listed).
           {
             echo ''
             echo '## SHA256 Checksums'
             echo ''
             echo '| File | SHA256 |'
             echo '|---|---|'
-            for f in $(ls assets/ | sort); do
-              [ -f "assets/$f" ] || continue
-              sha=$(sha256sum "assets/$f" | awk '{print $1}')
+            for f in $(ls release/ | sort); do
+              case "$f" in
+                SHA256SUMS.txt|latest.json|*.asc|*.sig|*.zsync) continue ;;
+              esac
+              sha=$(sha256sum "release/$f" | awk '{print $1}')
               printf '| `%s` | `%s` |\n' "$f" "$sha"
             done
           } >> release_body.md
 
+          if [ -n "${PREV_TAG:-}" ]; then
+            printf '\n**Full changelog**: %s/%s/compare/%s...%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$PREV_TAG" "$GITHUB_REF_NAME" >> release_body.md
+          fi
+
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: MediaHarbor v${{ steps.ver.outputs.v }}
           fail_on_unmatched_files: false
+          # The body is the CHANGELOG entry; GitHub's generated notes would repeat it.
+          generate_release_notes: false
           body_path: release_body.md
-          files: assets/**
+          files: release/**
 
-  # ── 6. Update snapcraft.yaml → triggers Snapcraft build service ───────────
+  # 6. Update snapcraft.yaml → triggers Snapcraft build service
   snap-update:
     name: Update snapcraft.yaml
     needs: [release]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'MediaHarbor/mediaharbor'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -484,12 +738,12 @@ jobs:
           git diff --cached --quiet || git commit -m "chore: bump snap to v${{ steps.ver.outputs.v }} [skip ci]"
           git push origin HEAD:main
 
-  # ── 7. Publish to AUR ─────────────────────────────────────────────────────
+  # 7. Publish to AUR
   aur:
     name: Publish to AUR
     needs: [release]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'MediaHarbor/mediaharbor'
     steps:
       - uses: actions/checkout@v6
 
@@ -538,6 +792,7 @@ jobs:
             chown -R builder /pkg &&
             su builder -s /bin/bash -c 'cd /pkg && makepkg --printsrcinfo > .SRCINFO'
           "
+          sudo chown -R $USER:$USER .
 
       - name: Commit and push to AUR
         run: |

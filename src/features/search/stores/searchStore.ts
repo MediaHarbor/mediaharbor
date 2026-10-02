@@ -8,9 +8,19 @@ interface SearchStore {
   searchType: SearchType;
   setSearchType: (type: SearchType) => void;
   getAvailableTypes: () => SearchType[];
+  pendingQuery: string | null;
+  setPendingQuery: (query: string) => void;
+  consumePendingQuery: () => string | null;
 }
 
 export const useSearchStore = create<SearchStore>((set, get) => ({
+  pendingQuery: null,
+  setPendingQuery: (query) => set({ pendingQuery: query }),
+  consumePendingQuery: () => {
+    const q = get().pendingQuery;
+    if (q !== null) set({ pendingQuery: null });
+    return q;
+  },
   selectedPlatform: 'spotify',
   setSelectedPlatform: (platform) => {
     const available = PLATFORM_SEARCH_TYPES[platform] ?? ['track'];
