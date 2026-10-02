@@ -319,6 +319,8 @@ jobs:
           printf '%s' "$GPG_PASSPHRASE" > /tmp/gpg-pass
 
           for rpm in out/*.rpm; do
+            # rpmsign writes its scratch signature to <rpm>.sig, where the updater signature sits.
+            rm -f "$rpm.sig"
             rpmsign --addsign \
               --define "_gpg_name $KEY" \
               --define "_gpg_sign_cmd_extra_args --pinentry-mode loopback --batch --passphrase-file /tmp/gpg-pass" \
