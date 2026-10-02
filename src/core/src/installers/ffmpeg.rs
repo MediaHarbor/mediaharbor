@@ -79,13 +79,10 @@ pub(crate) const SPEC: BinarySpec = BinarySpec {
         },
     ],
     min_bytes: MIN_ARCHIVE_BYTES,
-    sandbox: SandboxPolicy::RefuseEach {
-        snap: "FFmpeg should be bundled in the Snap but was not found on PATH. \
-               Reinstall the Snap, or report this as a packaging bug.",
-        flatpak: "FFmpeg was not found inside the Flatpak sandbox. The GNOME runtime does \
-                  not ship the ffmpeg binary, so it must be bundled with MediaHarbor — \
-                  this build is missing it. Please report this as a packaging bug.",
-    },
+    sandbox: SandboxPolicy::RefuseInSnap(
+        "FFmpeg should be bundled in the Snap but was not found on PATH. \
+         Reinstall the Snap, or report this as a packaging bug.",
+    ),
     detect,
     install_hint: "Please install ffmpeg via your system package manager instead.",
     unsupported_hint: "Install ffmpeg via your system package manager.",

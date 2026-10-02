@@ -18,35 +18,12 @@ finish-args:
   - --socket=fallback-x11
   - --device=dri
   - --socket=pulseaudio
-  # cpal's native PulseAudio client needs the auth cookie, or it falls back to ALSA.
+  # Without the Pulse cookie and the PipeWire socket, cpal falls back to ALSA and there is no audio.
   - --filesystem=xdg-config/pulse:ro
-  # Flatpak has no --socket=pipewire; expose the socket from the runtime dir.
   - --filesystem=xdg-run/pipewire-0
   - --share=network
 
-add-extensions:
-  org.freedesktop.Platform.ffmpeg-full:
-    version: '24.08'
-    directory: lib/ffmpeg
-    add-ld-path: .
-
-cleanup-commands:
-  - mkdir -p /app/lib/ffmpeg
-
 modules:
-  # N_m3u8DL-RE for gamdl's HLS downloads, bundled because the sandbox blocks
-  # downloading it at runtime. x86_64-only asset.
-  - name: nm3u8dlre
-    buildsystem: simple
-    sources:
-      - type: archive
-        only-arches: [x86_64]
-        url: https://github.com/nilaoda/N_m3u8DL-RE/releases/download/v0.6.0-beta/N_m3u8DL-RE_v0.6.0-beta_linux-x64_20260629.tar.gz
-        sha256: 2ebcd450594a08c0de0bcd502a80c5d3f89a702a0fa6604199527bb8d6eee4db
-        strip-components: 0
-    build-commands:
-      - install -Dm755 N_m3u8DL-RE /app/bin/N_m3u8DL-RE
-
   - name: mediaharbor
     buildsystem: simple
 

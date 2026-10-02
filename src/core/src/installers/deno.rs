@@ -47,10 +47,7 @@ pub(crate) const SPEC: BinarySpec = BinarySpec {
         },
     ],
     min_bytes: 1_000_000,
-    sandbox: SandboxPolicy::Refuse(
-        "Deno cannot be installed inside the Flatpak/Snap sandbox. Install a JavaScript \
-         runtime (deno, node, or bun) on the host, or rely on one provided by the runtime.",
-    ),
+    sandbox: SandboxPolicy::Attempt,
     detect,
     install_hint: "Please install Deno from https://deno.com instead.",
     unsupported_hint: "Install a JavaScript runtime (deno, node, or bun) from https://deno.com.",

@@ -165,15 +165,11 @@ impl ArchiveKind {
     }
 }
 
-/// What a managed-binary installer does inside a Flatpak/Snap sandbox.
+/// What a managed-binary installer does inside a Flatpak/Snap sandbox. Flatpak
+/// always installs into the app's data dir, as v2 did.
 pub(crate) enum SandboxPolicy {
-    /// Refuse with the given message (host install required).
-    Refuse(&'static str),
-    /// Refuse, with a different message per runtime.
-    RefuseEach {
-        snap: &'static str,
-        flatpak: &'static str,
-    },
+    /// Refuse inside the Snap with the given message.
+    RefuseInSnap(&'static str),
     /// Attempt anyway — the runtime may stage the binary onto PATH.
     Attempt,
 }
@@ -182,11 +178,7 @@ impl SandboxPolicy {
     /// The message to refuse with in the current runtime, or `None` to go ahead.
     fn refusal(&self) -> Option<&'static str> {
         match self {
-            SandboxPolicy::Refuse(msg) if crate::sandbox::is_sandboxed() => Some(msg),
-            SandboxPolicy::RefuseEach { snap, .. } if crate::sandbox::is_snap() => Some(snap),
-            SandboxPolicy::RefuseEach { flatpak, .. } if crate::sandbox::is_flatpak() => {
-                Some(flatpak)
-            }
+            SandboxPolicy::RefuseInSnap(msg) if crate::sandbox::is_snap() => Some(msg),
             _ => None,
         }
     }

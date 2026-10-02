@@ -282,7 +282,6 @@ const OPTIONAL_DEPS = [
     pipName: null,
     parent: null,
     installable: true,
-    sandboxBlocked: true,
   },
   {
     id: 'aria2c',
@@ -291,7 +290,6 @@ const OPTIONAL_DEPS = [
     pipName: null,
     parent: null,
     installable: true,
-    sandboxBlocked: true,
   },
   {
     id: 'nm3u8dlre',
@@ -416,19 +414,15 @@ function SystemDepsSection() {
     }
   };
 
-  const sandboxed = depStatus['is_sandboxed'] === true;
-
   const renderDep = (dep: (typeof ALL_DEPS)[number]) => {
     const installed = depStatus[dep.id];
     const inst = installStatus[dep.id] ?? 'idle';
     const progress = installProgress[dep.id] ?? 0;
     const statusTxt = installStatusText[dep.id] ?? '';
     const ver = versions[dep.id];
-    const blockedInSandbox = sandboxed && 'sandboxBlocked' in dep && dep.sandboxBlocked === true;
 
     let btnLabel: React.ReactNode;
-    if (blockedInSandbox) btnLabel = 'Unavailable';
-    else if (!dep.installable) btnLabel = 'Built-in';
+    if (!dep.installable) btnLabel = 'Built-in';
     else if (installing === dep.id)
       btnLabel = (
         <>
@@ -461,18 +455,13 @@ function SystemDepsSection() {
             {ver && <span className="text-[11px] font-mono text-muted-foreground">{ver}</span>}
           </div>
           <p className="text-xs text-muted-foreground">{dep.desc}</p>
-          {blockedInSandbox && (
-            <p className="text-[11px] text-amber-500/80">
-              Not installable inside Flatpak/Snap — install it on the host system.
-            </p>
-          )}
           {inst === 'installing' && <InstallProgress percent={progress} text={statusTxt} />}
         </div>
         <Button
           size="sm"
           variant={installed && inst !== 'error' ? 'outline' : 'default'}
           onClick={() => handleInstall(dep.id, !!installed)}
-          disabled={!!installing || !dep.installable || blockedInSandbox}
+          disabled={!!installing || !dep.installable}
           className="shrink-0"
         >
           {btnLabel}

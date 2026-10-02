@@ -55,10 +55,7 @@ pub(crate) const SPEC: BinarySpec = BinarySpec {
         },
     ],
     min_bytes: 500_000,
-    sandbox: SandboxPolicy::Refuse(
-        "aria2c cannot be installed inside the Flatpak/Snap sandbox. Install aria2 on the \
-         host via your package manager.",
-    ),
+    sandbox: SandboxPolicy::Attempt,
     detect,
     install_hint: "Please install aria2 via your system package manager instead.",
     unsupported_hint: UNSUPPORTED_HINT,
