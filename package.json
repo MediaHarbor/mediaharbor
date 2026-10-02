@@ -23,7 +23,7 @@
   "description": "MediaHarbor",
   "homepage": "https://mediaharbor.org",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
