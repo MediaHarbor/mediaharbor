@@ -140,11 +140,18 @@ jobs:
             echo "::error::bundle-type marker not patched — the package would self-update as the wrong format. Usually a stale pre-patched binary; do a clean build."
             exit 1
           fi
+          # appimagetool writes the .zsync to the working directory, not beside the AppImage.
+          mv ./*.AppImage.zsync ../../target/release/bundle/appimage/ || {
+            echo "::error::no .zsync generated — the AppImage would ship without delta-update data."
+            exit 1
+          }
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # linuxdeploy ships as an AppImage; Ubuntu runners lack FUSE2
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          # Embedded AppImage update information; the last field must match the release asset name.
+          LDAI_UPDATE_INFORMATION: "gh-releases-zsync|MediaHarbor|mediaharbor|latest|MediaHarbor_*_amd64.AppImage.zsync"
 
       # Windows x64 (native — no --target flag needed)
       - name: Build (Windows x64)
@@ -188,6 +195,7 @@ jobs:
           # Linux
           find target -path '*/bundle/deb/*.deb'            -exec cp {} out/ \; 2>/dev/null || true
           find target -path '*/bundle/appimage/*.AppImage'  -exec cp {} out/ \; 2>/dev/null || true
+          find target -path '*/bundle/appimage/*.zsync'     -exec cp {} out/ \; 2>/dev/null || true
           # Windows (x64 and ARM64)
           find target -path '*/bundle/msi/*.msi'            -exec cp {} out/ \; 2>/dev/null || true
           find target -path '*/bundle/nsis/*.exe'           -exec cp {} out/ \; 2>/dev/null || true
@@ -478,7 +486,7 @@ jobs:
         run: |
           mkdir -p release
           shopt -s nullglob
-          for f in dist/*.deb dist/*.rpm dist/*.AppImage dist/*.flatpak \
+          for f in dist/*.deb dist/*.rpm dist/*.AppImage dist/*.AppImage.zsync dist/*.flatpak \
                    dist/*.dmg dist/*.exe dist/*.msi dist/*.app.tar.gz; do
             cp "$f" release/
           done
@@ -669,7 +677,7 @@ jobs:
             echo '```'
           } >> release_body.md
 
-          # SHA256 checksum table (signatures and latest.json are not listed).
+          # SHA256 checksum table (signatures, latest.json and the .zsync are not listed).
           {
             echo ''
             echo '## SHA256 Checksums'
@@ -678,7 +686,7 @@ jobs:
             echo '|---|---|'
             for f in $(ls release/ | sort); do
               case "$f" in
-                SHA256SUMS.txt|latest.json|*.asc|*.sig) continue ;;
+                SHA256SUMS.txt|latest.json|*.asc|*.sig|*.zsync) continue ;;
               esac
               sha=$(sha256sum "release/$f" | awk '{print $1}')
               printf '| `%s` | `%s` |\n' "$f" "$sha"
