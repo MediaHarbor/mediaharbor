@@ -47,10 +47,10 @@ jobs:
       matrix:
         include:
           # Linux (DEB + AppImage)
-          # Ubuntu 22.04 = glibc 2.35 for maximum distro compatibility.
+          # Ubuntu 24.04 = glibc 2.39; 22.04's PipeWire headers are too old for libspa.
           # RPM is produced separately by the linux-rpm job (Fedora container).
           - name: Linux x64
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             rust_target: ''
             artifact: linux-x64
 
@@ -405,7 +405,7 @@ jobs:
       # Regenerate so the offline crate list always matches Cargo.lock.
       - name: Regenerate cargo sources from Cargo.lock
         run: |
-          sudo apt-get install -y --no-install-recommends python3-aiohttp python3-toml
+          sudo apt-get install -y --no-install-recommends python3-aiohttp python3-tomlkit
           curl -sSLo flatpak-cargo-generator.py \
             https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
           python3 flatpak-cargo-generator.py Cargo.lock \
