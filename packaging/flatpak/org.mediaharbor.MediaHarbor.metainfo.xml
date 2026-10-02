@@ -31,16 +31,12 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_downloads.png</image>
-      <caption>Downloads page with active and completed tracks</caption>
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_library.png</image>
+      <caption>Local music library with albums and cover art</caption>
     </screenshot>
     <screenshot>
       <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_nowplaying.png</image>
-      <caption>Now-playing full-screen with visualizer and synced lyrics</caption>
-    </screenshot>
-    <screenshot>
-      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_library.png</image>
-      <caption>Local music library browser</caption>
+      <caption>Now-playing full screen with visualizer and queue</caption>
     </screenshot>
     <screenshot>
       <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_search.png</image>
@@ -49,6 +45,14 @@
     <screenshot>
       <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_artistpage.png</image>
       <caption>Artist page with full discography</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_radio.png</image>
+      <caption>Internet radio from Radio Browser, SomaFM and the Icecast directory</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/MediaHarbor/mediaharbor/main/assets/screenshots/light_downloads.png</image>
+      <caption>Download queue with completed and queued tracks</caption>
     </screenshot>
   </screenshots>
 
