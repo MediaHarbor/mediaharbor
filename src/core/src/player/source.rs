@@ -162,6 +162,18 @@ impl MhMediaSource {
             )));
         }
 
+        // Reading a track to its end asks for one more block at `pos == total`.
+        // Qobuz's CDN answers that unsatisfiable range with `200` and the whole
+        // file instead of a 416, which RFC 7233 permits; it still means EOF.
+        if status == StatusCode::OK
+            && pos > 0
+            && self.caps.and_then(|c| c.total).is_some_and(|total| pos >= total)
+        {
+            self.eof = true;
+            self.buf = Bytes::new();
+            return Ok(());
+        }
+
         let caps = self.learn(read_capabilities(&headers, status));
 
         let assumed = if status == StatusCode::PARTIAL_CONTENT {
@@ -629,6 +641,77 @@ mod tests {
             Some(1024)
         );
         assert_eq!(content_range_start(&headers(&[])), None);
+    }
+
+    /// A CDN that, like Qobuz's, answers a range starting at the file's length
+    /// with `200` and the whole body instead of a `416`. RFC 7233 allows it.
+    fn spawn_cdn_ignoring_unsatisfiable_ranges(
+        rt: &tokio::runtime::Runtime,
+        data: Bytes,
+    ) -> String {
+        use axum::http::{header, HeaderMap as AxHeaders, StatusCode as AxStatus};
+        use axum::response::IntoResponse;
+
+        let app = axum::Router::new().route(
+            "/track",
+            axum::routing::get(move |req: AxHeaders| {
+                let data = data.clone();
+                async move {
+                    let total = data.len() as u64;
+                    let range = req
+                        .get(header::RANGE)
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.strip_prefix("bytes="))
+                        .and_then(|v| v.split_once('-'))
+                        .and_then(|(s, e)| {
+                            Some((s.parse::<u64>().ok()?, e.parse::<u64>().ok()?))
+                        });
+                    match range {
+                        Some((start, end)) if start < total => {
+                            let end = end.min(total - 1);
+                            (
+                                AxStatus::PARTIAL_CONTENT,
+                                [
+                                    (header::ACCEPT_RANGES, "bytes".to_string()),
+                                    (
+                                        header::CONTENT_RANGE,
+                                        format!("bytes {start}-{end}/{total}"),
+                                    ),
+                                ],
+                                data.slice(start as usize..=end as usize),
+                            )
+                                .into_response()
+                        }
+                        _ => (AxStatus::OK, data).into_response(),
+                    }
+                }
+            }),
+        );
+        let listener = rt
+            .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        rt.spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}/track")
+    }
+
+    /// The bug this guards: reading to the end of a Qobuz track issued one more
+    /// request at `pos == total`, the CDN answered `200` with the whole file, and
+    /// playback failed with "stream ignored the requested range: asked for byte
+    /// <total>, got byte 0" just before the next track.
+    #[test]
+    fn a_cdn_answering_the_end_of_file_with_200_is_treated_as_eof() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let payload: Vec<u8> = (0..(CHUNK as usize + 1234))
+            .map(|i| (i % 251) as u8)
+            .collect();
+        let url = spawn_cdn_ignoring_unsatisfiable_ranges(&rt, Bytes::from(payload.clone()));
+
+        let mut src = MhMediaSource::open(Client::new(), rt.handle().clone(), url).unwrap();
+        let mut got = Vec::new();
+        src.read_to_end(&mut got)
+            .expect("reaching the end of the track must not be an error");
+        assert_eq!(got, payload);
     }
 
     #[test]
